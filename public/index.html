@@ -264,7 +264,7 @@ tr.sel-row td{background:var(--accent-l)}
 </style>
 </head>
 <body>
-<div id="app"><div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;color:#64748B">Loading Fute Global LMS...</div></div>
+<div id="app"></div>
 
 <script>
 // ════════════════════════════════════════════════
@@ -1971,19 +1971,19 @@ window.sendReminderEmail=function(rid){
 window.sendAllDue=function(){
   var today=todayIST();
   STATE.reminders.filter(function(r){return r.uid===STATE.user.id&&r.status==="pending"&&r.returnDate<=today}).forEach(function(r){sendReminderEmail(r.id);});
-}
+};
 
 // ════════════════════════════════════════════════
 // BOOT — always start at login screen
 // ════════════════════════════════════════════════
-(function(){
+document.addEventListener('DOMContentLoaded', function(){
   localStorage.removeItem("fute_token");
   localStorage.removeItem("fute_user");
   STATE.loading=false;
   STATE.user=null;
   STATE.token=null;
   render();
-})();
+});
 
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
