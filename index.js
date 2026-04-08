@@ -514,6 +514,25 @@ app.post('/ai/generate-email', auth, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════
+// SERVE FRONTEND
+// ══════════════════════════════════════════════════════════════
+const path = require('path');
+const fs = require('fs');
+
+// Serve the frontend HTML at root URL
+app.get('/', (req, res) => {
+  const frontendPath = path.join(__dirname, 'public', 'index.html');
+  if (fs.existsSync(frontendPath)) {
+    res.sendFile(frontendPath);
+  } else {
+    res.json({ status: 'ok', app: 'Fute Global LMS API', version: '1.0.0', message: 'Frontend not found in /public/index.html' });
+  }
+});
+
+// Serve any static files from /public
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ══════════════════════════════════════════════════════════════
 // START SERVER
 // ══════════════════════════════════════════════════════════════
 app.listen(PORT, () => console.log(`Fute Global LMS API running on port ${PORT}`));
