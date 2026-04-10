@@ -202,7 +202,7 @@ tr.sel-row td{background:var(--accent-l)}
 .fsel:focus{border-color:var(--accent)}
 
 /* WELCOME BANNER */
-.banner{background:linear-gradient(130deg,#2563EB 0%,#0D9488 100%);border-radius:var(--r3);padding:22px 26px;color:#fff;margin-bottom:18px;position:relative;overflow:hidden}
+.banner{background:linear-gradient(130deg,#2563EB 0%,#0D9488 100%);border-radius:var(--r3);padding:22px 26px;color:#fff;margin-bottom:18px;position:relative}
 .banner::after{content:'';position:absolute;right:-30px;top:-30px;width:180px;height:180px;background:rgba(255,255,255,.06);border-radius:50%}
 .banner-name{font-family:var(--display);font-size:19px;font-weight:700}
 .banner-sub{font-size:12.5px;opacity:.82;margin-top:3px}
@@ -264,7 +264,7 @@ tr.sel-row td{background:var(--accent-l)}
 </style>
 </head>
 <body>
-<div id="app"></div>
+<div id="app"><div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;color:#64748B">Loading Fute Global LMS...</div></div>
 
 <script>
 // ════════════════════════════════════════════════
@@ -355,12 +355,10 @@ function genActs(leads){
 // ════════════════════════════════════════════════
 var STATE = {
   user: null,
-  token: null,
-  loading: false,
   page: "dashboard",
-  users: [],
-  leads: [],
-  companies: [],
+  users: JSON.parse(JSON.stringify(USERS)),
+  leads: genLeads(),
+  companies: JSON.parse(JSON.stringify(COMPANIES)),
   activities: [],
   emails: [],
   toasts: [],
@@ -371,6 +369,11 @@ var STATE = {
   period: "monthly",
   emailTab: "compose",
   mergeLeadId: null,
+  emailSearch: null,
+  manualEmail: null,
+  manualEmailName: null,
+  aiPrompt: null,
+  aiPromptDefault: "Write a concise, professional cold outreach email (3-4 short paragraphs). Open with a personalised hook referencing their company or role. Briefly introduce Fute Global as a specialist staffing firm. Include a soft CTA asking for a 15-min call. Be warm but direct — no fluff.",
   emailSubj: "Opportunity regarding {{pos}} at {{company}}",
   emailBody: "Hi {{fn}},\n\nI came across {{company}} and was really impressed by what you're building in the {{ind}} space.\n\nAt Fute Global, we specialize in connecting organizations with top-tier talent. Given your role as {{desig}}, I believe we could be genuinely helpful with your {{pos}} search.\n\nWould you be open to a quick 15-minute call this week?\n\nWarm regards,\n{{sender}}\nFute Global LLC",
   genEmail: null,
@@ -379,10 +382,19 @@ var STATE = {
   addUserForm: null,
   reminders: [],
   reminderTab: "ooo",
+  reminderSearch: null,
   viewingUser: null,
+  importPreview: null,
+  importWB: null,
+  importSheet: null,
 };
 
-// No pre-seeded data — everything comes from the real API
+// No pre-seeded reminders — users set them manually from the OOO list
+STATE.activities = genActs(STATE.leads);
+STATE.emails = STATE.leads.filter(function(l){return l.sent}).slice(0,6).map(function(l,i){
+  var co=STATE.companies.find(function(c){return c.id===l.coid});
+  return{id:"e"+i,lid:l.id,by:l.aid,to:l.email,subj:"Connecting re: "+l.pos+" at "+(co?co.name:""),body:"Hi "+l.fn+",\n\nFollowing up regarding the "+l.pos+" role...",plt:l.plt||"Gmail",dt:l.sent,status:"sent"};
+});
 
 // ════════════════════════════════════════════════
 // RENDER ENGINE
@@ -401,23 +413,7 @@ function showToast(msg,type){
 
 function render(){
   var root=document.getElementById("app");
-  if(!root)return;
-  // Show login if no user — always, regardless of loading state
-  if(!STATE.user){
-    STATE.loading=false;
-    root.innerHTML=renderLogin();
-    bindLogin();
-    return;
-  }
-  // Show loading spinner only after login while fetching data
-  if(STATE.loading){
-    root.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:14px;background:var(--bg)">'+
-      '<div style="width:36px;height:36px;border:3px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite"></div>'+
-      '<div style="font-size:13.5px;color:var(--text3)">Loading your data...</div>'+
-      '<style>@keyframes spin{to{transform:rotate(360deg)}}</style>'+
-    '</div>';
-    return;
-  }
+  if(!STATE.user){root.innerHTML=renderLogin();bindLogin();return}
   root.innerHTML=renderApp();
   bindApp();
 }
@@ -516,13 +512,10 @@ function renderLogin(){
   var picks=USERS.map(function(u){
     return '<button class="fc" onclick="quickLogin(\''+u.email+'\')" style="font-size:11.5px">'+u.name+'</button>';
   }).join("");
-
-  var fileWarning=IS_FILE_PROTOCOL?
-    '<div style="background:#FEF3C7;border:1px solid #D97706;border-radius:var(--r);padding:12px 14px;margin-bottom:16px;font-size:12.5px;color:#92400E">'+
-      '<strong>⚠ Opened as a local file</strong><br>'+
-      'This connected version must be accessed via a web URL to work.<br>'+
-      'Go to <a href="https://fute-lms-backend.onrender.com" style="color:#1D4ED8;font-weight:500" target="_blank">fute-lms-backend.onrender.com</a> instead, '+
-      'or use the <strong>Standalone version</strong> for offline use.'+
+  var fileWarning=IS_FILE?
+    '<div style="background:#FEF3C7;border:1px solid #D97706;border-radius:var(--r);padding:10px 12px;margin-bottom:14px;font-size:12px;color:#92400E">'+
+      '<strong>⚠ Opened as a local file.</strong> '+
+      'Go to <a href="https://fute-lms-backend.onrender.com" style="color:#1D4ED8;font-weight:500" target="_blank">fute-lms-backend.onrender.com</a> to sign in with the live version.'+
     '</div>':"";
   return '<div class="login-wrap">'+
     '<div class="login-card">'+
@@ -537,7 +530,7 @@ function renderLogin(){
         fileWarning+
         '<div style="font-family:var(--display);font-weight:600;font-size:17px;margin-bottom:5px">Welcome back</div>'+
         '<div style="font-size:13px;color:var(--text3);margin-bottom:20px">Sign in with your Fute Global account</div>'+
-        '<button class="google-btn" onclick="loginAs(\'u1\')">'+
+        '<button class="google-btn" onclick="showToast(\'Google Workspace login coming soon\',\'info\')">'+
           '<span style="width:20px;height:20px;display:inline-flex">'+icon("google")+'</span>'+
           'Continue with Google Workspace'+
         '</button>'+
@@ -599,7 +592,7 @@ function renderApp(){
         '<div class="tb-title">'+pageTitles[STATE.page]+viewingName+'</div>'+
       '</div>'+
       '<div class="tb-right">'+
-        '<div class="tb-date">'+new Date().toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short",year:"numeric"})+'</div>'+
+        '<div class="tb-date" id="live-clock"></div>'+
         (STATE.viewingUser&&STATE.viewingUser.id!==u.id?
           '<button class="btn btn-outline btn-sm" onclick="stopViewing()" style="font-size:12px">← Back to my dashboard</button>'
         :"")+
@@ -607,7 +600,21 @@ function renderApp(){
     '</div>'+
     '<div id="content">'+renderPage()+'</div>'+
   '</div>'+
-  renderToasts()+renderModal();
+  renderToasts()+renderModal()+
+  '<script>'+
+  '(function tick(){'+
+  '  var n=new Date();'+
+  '  var d=n.toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short",year:"numeric"});'+
+  '  var t=n.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:true});'+
+  '  var el=document.getElementById("live-clock");'+
+  '  if(el)el.textContent=d+" · "+t;'+
+  '  var dt=document.getElementById("dash-clock-time");'+
+  '  var dd=document.getElementById("dash-clock-date");'+
+  '  if(dt)dt.textContent=n.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:true});'+
+  '  if(dd)dd.textContent=n.toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"});'+
+  '  setTimeout(tick,1000);'+
+  '})();'+
+  '<\/script>';
 }
 
 function roleLabel(r){return{ra:"Research Analyst",bd:"BD Manager",admin:"Admin / BD Manager"}[r]||r;}
@@ -734,6 +741,10 @@ function renderDashboard(){
       '</div>'
     :"")+
     '<div class="banner">'+
+      '<div style="position:absolute;top:16px;right:20px;background:rgba(255,255,255,.18);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.3);border-radius:var(--r2);padding:10px 16px;text-align:right">'+
+        '<div id="dash-clock-time" style="font-family:var(--display);font-size:22px;font-weight:700;letter-spacing:.01em;line-height:1;color:#fff">'+new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:true})+'</div>'+
+        '<div id="dash-clock-date" style="font-size:11.5px;margin-top:4px;color:rgba(255,255,255,.85)">'+new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"})+'</div>'+
+      '</div>'+
       '<div class="banner-name">'+(isViewingOther?u.name+"'s Dashboard":greet+', '+u.name.split(" ")[0]+' 👋')+'</div>'+
       '<div class="banner-sub">'+roleLabel(u.role)+' · '+new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long"})+'</div>'+
       '<div class="banner-stats">'+
@@ -775,6 +786,64 @@ function renderDashboard(){
     '</div>'+
 
     '<div class="card cp"><div class="flex jb aic mb3"><div class="fw6">Pipeline overview</div><div class="f12 text3">'+STATE.period+'</div></div><div class="flex gap2 flex-wrap">'+stagePills+'</div></div>'+
+
+    // ── REMINDERS WIDGET ─────────────────────────
+    (function(){
+      var today=todayIST();
+      var myR=STATE.reminders.filter(function(r){return r.uid===STATE.user.id&&r.status==="pending";});
+      var due=myR.filter(function(r){return r.returnDate<=today;});
+      var upcoming=myR.filter(function(r){return r.returnDate>today;}).slice(0,4);
+      if(!myR.length)return '<div class="card cp mt4">'+
+        '<div class="flex jb aic mb3">'+
+          '<div><div class="fw6">Reminders</div><div class="f12 text3">No reminders set</div></div>'+
+          '<button class="btn btn-outline btn-sm" onclick="goPage(\'reminders\')">Go to Reminders</button>'+
+        '</div>'+
+        '<div style="padding:16px 0;text-align:center;font-size:13px;color:var(--text3)">Set reminders to follow up with contacts at the right time.</div>'+
+      '</div>';
+
+      var dueRows=due.map(function(r){
+        return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">'+
+          '<div style="width:7px;height:7px;border-radius:50%;background:var(--amber);flex-shrink:0"></div>'+
+          '<div style="flex:1;min-width:0">'+
+            '<div style="font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(r.name)+'</div>'+
+            '<div class="f12 text3">'+htmlEsc(r.company||r.email||"")+'</div>'+
+          '</div>'+
+          '<span style="font-size:11px;padding:2px 7px;background:var(--amber);color:#fff;border-radius:10px;white-space:nowrap">Due today</span>'+
+          '<button class="btn btn-sm" style="background:var(--amber);color:#fff;white-space:nowrap" onclick="sendReminderEmail(\''+r.id+'\')">'+ico("send",12)+' Send</button>'+
+        '</div>';
+      }).join("");
+
+      var upcomingRows=upcoming.map(function(r){
+        var days=Math.ceil((new Date(r.returnDate)-new Date(today))/86400000);
+        return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">'+
+          '<div style="width:7px;height:7px;border-radius:50%;background:var(--accent);flex-shrink:0"></div>'+
+          '<div style="flex:1;min-width:0">'+
+            '<div style="font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(r.name)+'</div>'+
+            '<div class="f12 text3">'+fmtDate(r.returnDate)+(r.reminderTime?' · '+r.reminderTime+' IST':'')+(r.note?' · '+htmlEsc(r.note):'')+'</div>'+
+          '</div>'+
+          '<span style="font-size:11px;padding:2px 8px;background:'+(days<=3?"var(--red-l)":"var(--accent-l)")+';color:'+(days<=3?"var(--red)":"var(--accent)")+';border-radius:10px;white-space:nowrap">'+days+' day'+(days!==1?"s":"")+'</span>'+
+        '</div>';
+      }).join("");
+
+      return '<div class="card cp mt4">'+
+        '<div class="flex jb aic mb3">'+
+          '<div>'+
+            '<div class="fw6">Reminders</div>'+
+            '<div class="f12 text3">'+due.length+' due · '+upcoming.length+' upcoming</div>'+
+          '</div>'+
+          '<div class="flex gap2">'+
+            (due.length?'<button class="btn btn-sm" style="background:var(--amber);color:#fff" onclick="sendAllDue()">Send all due ('+due.length+')</button>':"")+
+            '<button class="btn btn-outline btn-sm" onclick="goPage(\'reminders\')">View all</button>'+
+          '</div>'+
+        '</div>'+
+        (due.length?'<div style="margin-bottom:8px;font-size:12px;font-weight:600;color:var(--amber);text-transform:uppercase;letter-spacing:.05em">⏰ Due now</div>':"")+
+        dueRows+
+        (upcoming.length?'<div style="margin:'+(due.length?"12px":"0")+'px 0 8px;font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">Upcoming</div>':"")+
+        upcomingRows+
+        (myR.length>5?'<div style="padding-top:10px;text-align:center"><button class="btn btn-outline btn-sm" onclick="goPage(\'reminders\')">View all '+myR.length+' reminders</button></div>':"")+
+      '</div>';
+    })()+
+
   '</div>';
 }
 
@@ -814,25 +883,26 @@ function renderLeads(){
     var anName=uname(l.aid,STATE.users);
     return '<tr class="'+sel+'">'+
       '<td style="width:34px"><input type="checkbox" '+(STATE.leadsSelected[l.id]?"checked":"")+' onchange="toggleSel(\''+l.id+'\',this.checked)"/></td>'+
-      '<td><div class="td1">'+co.name+'</div><div class="td2">'+co.ind+' · '+co.loc+'</div></td>'+
-      '<td><div class="td1">'+l.fn+' '+l.ln+'</div><div class="td2">'+l.desig+'</div></td>'+
-      '<td class="td-trunc" title="'+l.pos+'">'+l.pos+'</td>'+
+      '<td><div class="td1">'+l.pos+'</div><div class="td2">'+(l.fn?l.fn+' '+l.ln:'')+(l.desig?' · '+l.desig:'')+'</div></td>'+
+      '<td><div class="td1">'+co.name+'</div><div class="td2">'+co.ind+(co.loc?' · '+co.loc:'')+'</div></td>'+
       '<td><select class="bdg '+stageClass(l.stage)+'" style="border:none;cursor:pointer;background:transparent;-webkit-appearance:none;font-weight:500;padding:2px 6px" onchange="changeStage(\''+l.id+'\',this.value)">'+stOpts+'</select></td>'+
       '<td class="f12 text3">'+l.src+'</td>'+
       (u.role!=="ra"?'<td class="f12">'+anName+'</td>':'')+
       '<td class="f12 text3" style="font-family:var(--mono)">'+fmtDate(l.date)+'</td>'+
       '<td><div class="flex gap1">'+
         '<button class="btn-icon" title="View" onclick="viewLead(\''+l.id+'\')">'+ico("eye",13)+'</button>'+
+        '<button class="btn-icon" title="Send email" onclick="quickSendEmail(\''+l.id+'\')" style="color:var(--accent)">'+ico("email",13)+'</button>'+
         '<button class="btn-icon" style="color:var(--red)" title="Delete" onclick="deleteLead(\''+l.id+'\')">'+ico("trash",13)+'</button>'+
       '</div></td>'+
     '</tr>';
   }).join("");
 
   var bulkBar=selCount>0?
-    '<div style="display:flex;align-items:center;gap:10px;padding:9px 13px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:11px;border:1px solid rgba(37,99,235,.18)">'+
+    '<div style="display:flex;align-items:center;gap:10px;padding:9px 13px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:11px;border:1px solid rgba(37,99,235,.18);flex-wrap:wrap">'+
       '<span style="font-size:13px;font-weight:500;color:var(--accent)">'+selCount+' selected</span>'+
       '<select class="sel" id="bulk-stage" style="width:160px;border-radius:20px;font-size:12.5px"><option value="">Change stage...</option>'+STAGES.map(function(s){return'<option>'+s+'</option>'}).join("")+'</select>'+
-      '<button class="btn btn-primary btn-sm" onclick="applyBulk()">Apply</button>'+
+      '<button class="btn btn-primary btn-sm" onclick="applyBulk()">Apply stage</button>'+
+      '<button class="btn btn-outline btn-sm" style="color:var(--accent);border-color:var(--accent)" onclick="bulkSendEmail()">'+ico("send",13)+' Send email to selected</button>'+
       '<button class="btn btn-outline btn-sm" onclick="clearSel()">Clear</button>'+
     '</div>':"";
 
@@ -846,6 +916,8 @@ function renderLeads(){
       '<div><div class="ptitle">Leads</div><div class="psub">'+filtered.length+' leads · default: today</div></div>'+
       '<div class="flex gap2">'+
         (u.role!=="ra"?'<button class="btn btn-outline btn-sm" onclick="exportXL()">'+ico("dl",13)+'Export</button>':'')+
+        '<button class="btn btn-outline btn-sm" onclick="triggerImport()">'+ico("plus",13)+'Import Excel</button>'+
+        '<input type="file" id="xl-import" accept=".xlsx,.xls,.csv" style="display:none" onchange="importXL(this)"/>'+
         '<button class="btn btn-primary btn-sm" onclick="openAddLead()">'+ico("plus",13)+'Add lead</button>'+
       '</div>'+
     '</div></div>'+
@@ -867,7 +939,7 @@ function renderLeads(){
       '<div class="tbl-wrap"><table>'+
         '<thead><tr>'+
           '<th style="width:34px"><input type="checkbox" '+(allSel?"checked":"")+' onchange="toggleAll(this.checked)"/></th>'+
-          '<th>Company</th><th>Contact</th><th>Position</th><th>Stage</th>'+
+          '<th>Job title / Contact</th><th>Company</th><th>Stage</th>'+
           '<th>Source</th>'+(u.role!=="ra"?'<th>Analyst</th>':'')+
           '<th>Date</th><th></th>'+
         '</tr></thead>'+
@@ -947,19 +1019,68 @@ function renderEmail(){
     return '<div class="tab'+(STATE.emailTab===t?" active":"")+'" onclick="setEmailTab(\''+t+'\')" style="text-transform:capitalize">'+t+'</div>';
   }).join("");
 
-  var selOpts='<option value="">— Choose a lead —</option>'+myLeads.map(function(l){
-    var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
-    return'<option value="'+l.id+'"'+(STATE.mergeLeadId===l.id?" selected":"")+'>'+l.fn+' '+l.ln+' · '+co.name+'</option>';
-  }).join("");
+  // Build recipient info — either from selected lead or manual email
+  var recipientInfo="";
+  var hasRecipient=false;
 
-  var mergeInfo="";
   if(STATE.mergeLeadId){
     var ml=myLeads.find(function(l){return l.id===STATE.mergeLeadId});
-    var mlco=ml?STATE.companies.find(function(c){return c.id===ml.coid})||{}:{};
-    if(ml)mergeInfo='<div style="margin-top:9px;padding:8px 10px;background:var(--bg);border-radius:var(--r);font-size:12.5px">'+
-      '<div><strong>'+ml.fn+' '+ml.ln+'</strong> · '+ml.desig+'</div>'+
-      '<div class="text3">'+mlco.name+' · '+ml.email+'</div>'+
+    if(ml){
+      var mlco=STATE.companies.find(function(c){return c.id===ml.coid})||{};
+      hasRecipient=true;
+      recipientInfo='<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--accent-l);border-radius:var(--r);margin-top:8px;border:1px solid rgba(37,99,235,.15)">'+
+        '<div style="flex:1">'+
+          '<div style="font-weight:500;font-size:13.5px">'+ml.fn+' '+ml.ln+(ml.desig?' · <span style="font-weight:400;color:var(--text2)">'+ml.desig+'</span>':'')+' </div>'+
+          '<div class="f12 text3">'+mlco.name+' · '+ml.email+'</div>'+
+        '</div>'+
+        '<button class="btn-icon" onclick="STATE.mergeLeadId=null;STATE.genEmail=null;render()">'+ico("x",13)+'</button>'+
+      '</div>';
+    }
+  } else if(STATE.manualEmail){
+    hasRecipient=true;
+    recipientInfo='<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--green-l);border-radius:var(--r);margin-top:8px;border:1px solid rgba(22,163,74,.15)">'+
+      '<div style="flex:1"><div style="font-weight:500;font-size:13.5px">'+htmlEsc(STATE.manualEmailName||STATE.manualEmail)+'</div>'+
+      '<div class="f12 text3">'+htmlEsc(STATE.manualEmail)+'</div></div>'+
+      '<button class="btn-icon" onclick="STATE.manualEmail=null;STATE.manualEmailName=null;STATE.genEmail=null;render()">'+ico("x",13)+'</button>'+
     '</div>';
+  }
+
+  // Search results for email search
+  var searchResults="";
+  if(STATE.emailSearch&&STATE.emailSearch.length>1){
+    var q=STATE.emailSearch.toLowerCase();
+    var matches=myLeads.filter(function(l){
+      return [l.email,l.fn,l.ln,l.pos].some(function(v){return(v||"").toLowerCase().includes(q);});
+    }).slice(0,6);
+    if(matches.length){
+      searchResults='<div style="position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);z-index:50;max-height:220px;overflow-y:auto;margin-top:2px">';
+      searchResults+=matches.map(function(l){
+        var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
+        return '<div onclick="selectEmailRecipient(\''+l.id+'\')" style="display:flex;align-items:center;gap:10px;padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border)" onmouseenter="this.style.background=\'var(--bg)\'" onmouseleave="this.style.background=\'\'">'+
+          '<div style="flex:1">'+
+            '<div style="font-size:13.5px;font-weight:500">'+l.fn+' '+l.ln+' <span style="font-weight:400;color:var(--text3)">· '+l.pos+'</span></div>'+
+            '<div class="f12 text3">'+l.email+' · '+co.name+'</div>'+
+          '</div>'+
+        '</div>';
+      }).join("");
+      // Option to use typed email directly if it looks like an email
+      if(STATE.emailSearch.includes("@")){
+        searchResults+='<div onclick="useManualEmail()" style="display:flex;align-items:center;gap:10px;padding:9px 13px;cursor:pointer;background:var(--bg)" onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'var(--bg)\'">'+
+          '<span style="font-size:12px;padding:2px 8px;background:var(--accent);color:#fff;border-radius:10px">Send to</span>'+
+          '<div class="f13">'+htmlEsc(STATE.emailSearch)+'</div>'+
+        '</div>';
+      }
+      searchResults+='</div>';
+    } else if(STATE.emailSearch.includes("@")){
+      // No lead match but valid email — offer direct send
+      searchResults='<div style="position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);z-index:50;margin-top:2px">'+
+        '<div onclick="useManualEmail()" style="display:flex;align-items:center;gap:10px;padding:10px 13px;cursor:pointer" onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'\'">'+
+          '<span style="font-size:12px;padding:2px 8px;background:var(--accent);color:#fff;border-radius:10px">Send to</span>'+
+          '<div class="f13 fw5">'+htmlEsc(STATE.emailSearch)+'</div>'+
+          '<div class="f12 text3">· manual email (not in leads)</div>'+
+        '</div>'+
+      '</div>';
+    }
   }
 
   var preview="";
@@ -967,13 +1088,15 @@ function renderEmail(){
     var ge=STATE.genEmail;
     preview='<div>'+
       '<div style="padding:10px 13px;background:var(--bg);border-radius:var(--r2) var(--r2) 0 0;border-bottom:1px solid var(--border)">'+
-        '<div class="f12 text3"><strong style="color:var(--text)">To:</strong> '+ge.to+' &lt;'+ge.email+'&gt;</div>'+
+        '<div class="f12 text3"><strong style="color:var(--text)">To:</strong> '+htmlEsc(ge.to)+' &lt;'+htmlEsc(ge.email)+'&gt;</div>'+
         '<div class="f12 text3 mt1"><strong style="color:var(--text)">Subject:</strong> '+htmlEsc(ge.subj)+'</div>'+
       '</div>'+
       '<div style="padding:14px;background:var(--bg);border-radius:0 0 var(--r2) var(--r2);font-size:13px;line-height:1.7;white-space:pre-wrap">'+htmlEsc(ge.body)+'</div>'+
     '</div>';
   } else {
-    preview='<div style="text-align:center;padding:40px 20px;color:var(--text3);font-size:13px">Select a lead and click Generate with AI to preview your personalized email here.</div>';
+    preview='<div style="text-align:center;padding:40px 20px;color:var(--text3);font-size:13px">'+
+      (hasRecipient?'Recipient selected. Click ✨ Generate with AI or edit the template and click Send.':'Search for a lead or type an email address to get started.')+
+    '</div>';
   }
 
   var sentList=myEmails.map(function(e){
@@ -981,7 +1104,7 @@ function renderEmail(){
     var co=lead?STATE.companies.find(function(c){return c.id===lead.coid})||{}:{};
     return '<div class="email-card">'+
       '<div class="flex jb" style="align-items:flex-start">'+
-        '<div><div class="email-subj">'+htmlEsc(e.subj)+'</div><div class="f12 text3 mt1">To: '+e.to+(lead?' · '+lead.fn+' '+lead.ln+' · '+co.name:'')+'</div></div>'+
+        '<div><div class="email-subj">'+htmlEsc(e.subj)+'</div><div class="f12 text3 mt1">To: '+htmlEsc(e.to)+(lead?' · '+lead.fn+' '+lead.ln+' · '+co.name:'')+'</div></div>'+
         '<div style="text-align:right;flex-shrink:0;margin-left:12px"><span class="bdg bdg-green">'+e.status+'</span><div class="f11 text3 mt1">'+fmtDate(e.dt)+' · '+e.plt+'</div></div>'+
       '</div>'+
       '<div class="email-prev mt1">'+(e.body||"").slice(0,120)+'...</div>'+
@@ -999,9 +1122,14 @@ function renderEmail(){
       '<div class="g2">'+
         '<div>'+
           '<div class="card cp mb4">'+
-            '<div class="fw6 mb3">Select lead</div>'+
-            '<select class="sel w100" onchange="setMergeLead(this.value)">'+selOpts+'</select>'+
-            mergeInfo+
+            '<div class="fw6 mb1">Recipient</div>'+
+            '<div class="f12 text3 mb3">Search by name, email or job title — or type any email address directly</div>'+
+            '<div style="position:relative">'+
+              '<span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text3)">'+icon("search")+'</span>'+
+              '<input class="inp" style="padding-left:34px" id="email-search-inp" placeholder="Search leads or type email address..." value="'+htmlEsc(STATE.emailSearch||"")+'" oninput="emailSearchInput(this.value)" autocomplete="off"/>'+
+              searchResults+
+            '</div>'+
+            recipientInfo+
           '</div>'+
           '<div class="card cp mb4">'+
             '<div class="fw6 mb3">Email template</div>'+
@@ -1009,13 +1137,30 @@ function renderEmail(){
             '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:150px" id="email-body" oninput="STATE.emailBody=this.value">'+htmlEsc(STATE.emailBody)+'</textarea></div>'+
             '<div class="flex gap1 flex-wrap mt2">'+varChips+'</div>'+
           '</div>'+
+
+          '<div class="card cp mb4" style="border:1.5px solid rgba(124,58,237,.2);background:var(--purple-l)">'+
+            '<div class="flex jb aic mb2">'+
+              '<div>'+
+                '<div class="fw6" style="color:var(--purple)">✨ AI instructions</div>'+
+                '<div class="f12" style="color:var(--purple);opacity:.7;margin-top:2px">Tell the AI how to write this email — tone, angle, what to focus on</div>'+
+              '</div>'+
+              '<button class="btn btn-xs" style="background:rgba(124,58,237,.1);color:var(--purple);border:1px solid rgba(124,58,237,.2)" onclick="resetAIPrompt()">Reset to default</button>'+
+            '</div>'+
+            '<textarea class="txta w100" style="min-height:90px;font-size:13px;background:rgba(255,255,255,.7)" id="ai-prompt-inp" oninput="STATE.aiPrompt=this.value" placeholder="e.g. Write a very short 3-line email. Be direct and mention we have placed 3 candidates at similar companies. Close with asking for a 10 min call this week.">'+htmlEsc(STATE.aiPrompt||STATE.aiPromptDefault)+'</textarea>'+
+            '<div class="flex gap2 mt2" style="flex-wrap:wrap">'+
+              ['Be very concise (3-4 lines only)','Formal and professional tone','Casual and friendly tone','Mention we specialise in their industry','Focus on urgency — role needs to be filled fast','Ask for referral if they are not the right contact'].map(function(s){
+                return '<span onclick="appendPrompt(\''+s+'\')" style="font-size:11px;padding:3px 8px;background:rgba(124,58,237,.1);color:var(--purple);border-radius:10px;cursor:pointer;border:1px solid rgba(124,58,237,.15)" onmouseenter="this.style.background=\'rgba(124,58,237,.2)\'" onmouseleave="this.style.background=\'rgba(124,58,237,.1)\'">+ '+s+'</span>';
+              }).join("")+
+            '</div>'+
+          '</div>'+
+
           '<div class="flex gap2 aic flex-wrap">'+
-            '<button class="btn btn-outline" onclick="generateAI()" id="gen-btn">✨ Generate with AI</button>'+
+            '<button class="btn btn-outline" onclick="generateAI()" id="gen-btn" '+(hasRecipient?'':' disabled style="opacity:.5"')+' style="background:var(--purple-l);color:var(--purple);border-color:rgba(124,58,237,.3)">✨ Generate with AI</button>'+
             '<div class="flex gap1">'+
               '<button class="fc'+(u.plt==="Gmail"?" on":"")+'" onclick="setPlatform(\'Gmail\')">Gmail</button>'+
               '<button class="fc'+(u.plt==="Outlook"?" on":"")+'" onclick="setPlatform(\'Outlook\')">Outlook</button>'+
             '</div>'+
-            '<button class="btn btn-primary" onclick="sendEmail()" '+(STATE.genEmail?"":'disabled style="opacity:.5;cursor:not-allowed"')+'>'+ico("send",13)+'Send</button>'+
+            '<button class="btn btn-primary" onclick="sendEmail()" '+(hasRecipient?'':' disabled style="opacity:.5;cursor:not-allowed"')+'>'+ico("send",13)+'Send</button>'+
           '</div>'+
         '</div>'+
         '<div><div class="card cp"><div class="fw6 mb3">Preview</div>'+preview+'</div></div>'+
@@ -1150,15 +1295,44 @@ function renderReminders(){
   var today=todayIST();
   var myReminders=STATE.reminders.filter(function(r){return r.uid===u.id});
   var oooLeads=getMyLeads(u).filter(function(l){return l.stage==="Out of Office"});
-
-  // Check which reminders are due today or overdue
   var due=myReminders.filter(function(r){return r.status==="pending"&&r.returnDate<=today});
   var upcoming=myReminders.filter(function(r){return r.status==="pending"&&r.returnDate>today});
   var sent=myReminders.filter(function(r){return r.status==="sent"});
 
-  function daysUntil(d){
-    var diff=new Date(d)-new Date(today);
-    return Math.ceil(diff/86400000);
+  function daysUntil(d){return Math.ceil((new Date(d)-new Date(today))/86400000);}
+
+  // Search results for new reminder
+  var reminderSearchResults="";
+  if(STATE.reminderSearch&&STATE.reminderSearch.length>1){
+    var q=STATE.reminderSearch.toLowerCase();
+    var allLeads=getMyLeads(u);
+    var matches=allLeads.filter(function(l){
+      return [l.email,l.fn,l.ln,l.pos,l.desig].some(function(v){return(v||"").toLowerCase().includes(q);});
+    }).slice(0,6);
+    if(matches.length){
+      reminderSearchResults='<div style="position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);z-index:50;max-height:220px;overflow-y:auto;margin-top:2px">';
+      reminderSearchResults+=matches.map(function(l){
+        var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
+        return '<div onclick="openSetReminderFromSearch(\''+l.id+'\')" style="display:flex;align-items:center;gap:10px;padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border)" onmouseenter="this.style.background=\'var(--bg)\'" onmouseleave="this.style.background=\'\'">'+
+          '<div style="flex:1">'+
+            '<div style="font-size:13.5px;font-weight:500">'+l.fn+' '+l.ln+' <span style="font-weight:400;color:var(--text3)">· '+l.pos+'</span></div>'+
+            '<div class="f12 text3">'+l.email+' · '+co.name+'</div>'+
+          '</div>'+
+          '<span class="bdg '+stageClass(l.stage)+'">'+l.stage+'</span>'+
+        '</div>';
+      }).join("");
+      reminderSearchResults+='</div>';
+    } else {
+      // No lead match — allow manual email reminder
+      reminderSearchResults='<div style="position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);z-index:50;margin-top:2px">'+
+        '<div style="padding:10px 13px;font-size:13px;color:var(--text3)">No leads found for "'+htmlEsc(STATE.reminderSearch)+'"</div>'+
+        (STATE.reminderSearch.includes('@')?
+          '<div onclick="openSetReminderManual(\''+htmlEsc(STATE.reminderSearch)+'\')" style="display:flex;align-items:center;gap:10px;padding:9px 13px;cursor:pointer;border-top:1px solid var(--border)" onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'\'">'+
+            '<span style="font-size:12px;padding:2px 8px;background:var(--accent);color:#fff;border-radius:10px">Set reminder for</span>'+
+            '<div class="f13 fw5">'+htmlEsc(STATE.reminderSearch)+'</div>'+
+          '</div>':"")+
+      '</div>';
+    }
   }
 
   var dueCards=due.map(function(r){
@@ -1168,16 +1342,16 @@ function renderReminders(){
       '<div class="flex jb aic mb2">'+
         '<div class="flex aic gap2">'+
           '<div style="width:8px;height:8px;border-radius:50%;background:var(--amber)"></div>'+
-          '<div style="font-weight:600;font-size:14px">'+r.name+'</div>'+
+          '<div style="font-weight:600;font-size:14px">'+htmlEsc(r.name)+'</div>'+
           '<span style="font-size:11px;padding:2px 7px;background:var(--amber);color:#fff;border-radius:10px">Due today</span>'+
         '</div>'+
         '<div class="flex gap2">'+
-          '<button class="btn btn-sm" style="background:var(--amber);color:#fff" onclick="sendReminderEmail(\''+r.id+'\')">'+ico("send",13)+' Send follow-up email</button>'+
+          '<button class="btn btn-sm" style="background:var(--amber);color:#fff" onclick="sendReminderEmail(\''+r.id+'\')">'+ico("send",13)+' Send follow-up</button>'+
           '<button class="btn btn-outline btn-sm" onclick="dismissReminder(\''+r.id+'\')">Dismiss</button>'+
         '</div>'+
       '</div>'+
-      '<div class="f12 text3">'+co.name+' · '+r.email+'</div>'+
-      '<div class="f12 text3 mt1">'+ico("star",11)+' Return date was: '+fmtDate(r.returnDate)+' · Reminder at '+r.reminderTime+'</div>'+
+      '<div class="f12 text3">'+htmlEsc(r.company||"")+(r.email?' · '+htmlEsc(r.email):'')+'</div>'+
+      '<div class="f12 text3 mt1">Return date: '+fmtDate(r.returnDate)+' · '+r.reminderTime+' IST</div>'+
       (r.note?'<div class="f12" style="margin-top:6px;padding:6px 8px;background:rgba(0,0,0,.04);border-radius:var(--r)">'+htmlEsc(r.note)+'</div>':"")+
     '</div>';
   }).join("");
@@ -1185,12 +1359,12 @@ function renderReminders(){
   var upcomingRows=upcoming.map(function(r){
     var days=daysUntil(r.returnDate);
     return '<tr>'+
-      '<td><div class="td1">'+r.name+'</div><div class="td2">'+r.company+'</div></td>'+
-      '<td class="f12 text3">'+r.email+'</td>'+
-      '<td><span style="font-size:11.5px;padding:2px 8px;background:'+(days<=3?"var(--red-l)":"var(--accent-l)")+';color:'+(days<=3?"var(--red)":"var(--accent)")+';border-radius:10px">in '+days+' day'+(days!==1?"s":"")+'</span></td>'+
+      '<td><div class="td1">'+htmlEsc(r.name)+'</div><div class="td2">'+htmlEsc(r.company||"")+'</div></td>'+
+      '<td class="f12 text3">'+htmlEsc(r.email||"")+'</td>'+
+      '<td><span style="font-size:11.5px;padding:2px 8px;background:'+(days<=3?"var(--red-l)":"var(--accent-l)")+';color:'+(days<=3?"var(--red)":"var(--accent)")+';border-radius:10px">'+days+' day'+(days!==1?"s":"")+'</span></td>'+
       '<td class="f12 text3">'+fmtDate(r.returnDate)+'</td>'+
       '<td class="f12 text3">'+r.reminderTime+'</td>'+
-      '<td class="f12" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(r.note||"")+'</td>'+
+      '<td class="f12" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(r.note||"")+'</td>'+
       '<td><div class="flex gap1">'+
         '<button class="btn btn-outline btn-xs" onclick="editReminder(\''+r.id+'\')">Edit</button>'+
         '<button class="btn btn-danger btn-xs" onclick="dismissReminder(\''+r.id+'\')">Remove</button>'+
@@ -1211,86 +1385,94 @@ function renderReminders(){
   }).join("");
 
   return '<div class="page">'+
-    '<div class="ph">'+
-      '<div class="ptitle">Reminders</div>'+
-      '<div class="psub">Automate follow-up emails for Out of Office contacts</div>'+
+    '<div class="ph flex jb aic">'+
+      '<div><div class="ptitle">Reminders</div><div class="psub">Follow-up reminders for your contacts</div></div>'+
+      '<button class="btn btn-primary btn-sm" onclick="openNewReminder()">'+ico("plus",13)+'New reminder</button>'+
     '</div>'+
 
-    // Due now banner
+    // Search to add reminder
+    '<div class="card cp mb4">'+
+      '<div class="fw6 mb1">Set a reminder</div>'+
+      '<div class="f12 text3 mb3">Search for any lead or POC by name, email or job title — or type an email address directly</div>'+
+      '<div style="position:relative">'+
+        '<span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text3)">'+icon("search")+'</span>'+
+        '<input class="inp" style="padding-left:34px" id="rem-search-inp" placeholder="Search by name, email, job title..." value="'+htmlEsc(STATE.reminderSearch||"")+'" oninput="reminderSearchInput(this.value)" autocomplete="off"/>'+
+        reminderSearchResults+
+      '</div>'+
+    '</div>'+
+
+    // Due banner
     (due.length?
-      '<div style="background:var(--amber-l);border:1.5px solid var(--amber);border-radius:var(--r2);padding:12px 16px;margin-bottom:20px;display:flex;align-items:center;gap:10px">'+
+      '<div style="background:var(--amber-l);border:1.5px solid var(--amber);border-radius:var(--r2);padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px">'+
         '<div style="font-size:20px">⏰</div>'+
-        '<div style="flex:1"><div style="font-weight:600;font-size:14px">'+due.length+' reminder'+(due.length>1?"s":"")+" due today"+'</div><div class="f12 text3">These contacts were OOO and are expected back. Send your follow-up now.</div></div>'+
-        '<button class="btn btn-sm" style="background:var(--amber);color:#fff;white-space:nowrap" onclick="sendAllDue()">'+ico("send",13)+'Send all ('+due.length+')</button>'+
+        '<div style="flex:1"><div style="font-weight:600;font-size:14px">'+due.length+' reminder'+(due.length>1?"s":"")+" due"+'</div><div class="f12 text3">These contacts are expected back. Send your follow-up now.</div></div>'+
+        '<button class="btn btn-sm" style="background:var(--amber);color:#fff" onclick="sendAllDue()">'+ico("send",13)+'Send all</button>'+
       '</div>'
     :"")+
+    dueCards+
 
-    // Due cards
-    (dueCards||"")+
-
-    // Upcoming table
+    // Upcoming
     '<div class="card cp mb4">'+
       '<div class="flex jb aic mb3">'+
         '<div><div class="fw6">Upcoming reminders</div><div class="f12 text3">'+upcoming.length+' pending</div></div>'+
       '</div>'+
       (upcoming.length?
         '<div class="tbl-wrap"><table>'+
-          '<thead><tr><th>Contact</th><th>Email</th><th>Returns in</th><th>Return date</th><th>Reminder time</th><th>Note</th><th></th></tr></thead>'+
-          '<tbody>'+upcomingRows+'</tbody>'+
-        '</table></div>'
-      :'<div class="empty" style="padding:24px 0"><div class="f13 text3">No upcoming reminders. Set them from the OOO list below.</div></div>')+
+          '<thead><tr><th>Contact</th><th>Email</th><th>Returns in</th><th>Return date</th><th>Time (IST)</th><th>Note</th><th></th></tr></thead>'+
+          '<tbody>'+upcomingRows+'</tbody></table></div>'
+      :'<div style="padding:20px 0;font-size:13px;color:var(--text3)">No upcoming reminders. Use the search above to set one.</div>')+
     '</div>'+
 
-    // OOO leads list
-    '<div class="card cp">'+
+    // OOO
+    '<div class="card cp mb4">'+
       '<div class="flex jb aic mb3">'+
-        '<div><div class="fw6">Out of Office leads</div><div class="f12 text3">'+oooLeads.length+' contacts currently marked OOO · set a return date to automate follow-up</div></div>'+
+        '<div><div class="fw6">Out of Office leads</div><div class="f12 text3">'+oooLeads.length+' contacts marked OOO</div></div>'+
       '</div>'+
       (oooLeads.length?
         '<div class="tbl-wrap"><table>'+
           '<thead><tr><th>Contact</th><th>Company</th><th>Email</th><th>Marked OOO on</th><th>Reminder</th></tr></thead>'+
-          '<tbody>'+oooList+'</tbody>'+
-        '</table></div>'
-      :'<div class="empty" style="padding:24px 0"><div class="f13 text3">No leads currently marked Out of Office.</div></div>')+
+          '<tbody>'+oooList+'</tbody></table></div>'
+      :'<div style="padding:20px 0;font-size:13px;color:var(--text3)">No leads currently marked Out of Office.</div>')+
     '</div>'+
 
-    // Sent history
+    // Sent
     (sent.length?
-      '<div class="card cp mt4">'+
+      '<div class="card cp">'+
         '<div class="fw6 mb3">Sent follow-ups</div>'+
-        sent.map(function(r){return'<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">'+
+        sent.map(function(r){return'<div class="flex aic gap2" style="padding:8px 0;border-bottom:1px solid var(--border)">'+
           '<span class="bdg bdg-green">Sent</span>'+
-          '<div style="flex:1;font-size:13px">'+r.name+' · '+r.company+'</div>'+
+          '<div style="flex:1;font-size:13px">'+htmlEsc(r.name)+(r.company?' · '+htmlEsc(r.company):'')+'</div>'+
           '<div class="f12 text3">'+fmtDate(r.returnDate)+'</div>'+
         '</div>';}).join("")+
-      '</div>'
-    :"")+
+      '</div>':"")+
   '</div>';
 }
 
 // ── SET REMINDER MODAL ─────────────────────────
-function renderSetReminderModal(leadId){
-  var lead=STATE.leads.find(function(l){return l.id===leadId});
-  if(!lead)return"";
-  var co=STATE.companies.find(function(c){return c.id===lead.coid})||{};
-  var tomorrow=new Date();tomorrow.setDate(tomorrow.getDate()+7);
-  var tomorrowStr=tomorrow.toISOString().split("T")[0];
+function renderSetReminderModal(leadId, manualEmail){
+  var lead=leadId?STATE.leads.find(function(l){return l.id===leadId}):null;
+  var co=lead?STATE.companies.find(function(c){return c.id===lead.coid})||{}:{};
+  var future=new Date();future.setDate(future.getDate()+7);
+  var futureStr=future.toISOString().split("T")[0];
+  var displayName=lead?(lead.fn+" "+lead.ln):(manualEmail||"");
+  var displaySub=lead?(lead.desig+(co.name?" · "+co.name:"")+" · "+lead.email):(manualEmail||"");
+
   return '<div class="modal modal-w480">'+
-    '<div class="mh"><div class="mt">Set OOO Reminder</div><button class="btn-icon" onclick="closeModal()">'+ico("x",14)+'</button></div>'+
+    '<div class="mh"><div class="mt">Set reminder</div><button class="btn-icon" onclick="closeModal()">'+ico("x",14)+'</button></div>'+
     '<div class="mb_">'+
-      '<div style="padding:10px 12px;background:var(--bg);border-radius:var(--r2);margin-bottom:14px">'+
-        '<div class="fw5 f13">'+lead.fn+' '+lead.ln+'</div>'+
-        '<div class="f12 text3">'+lead.desig+' · '+co.name+' · '+lead.email+'</div>'+
+      '<div style="padding:10px 12px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:16px;border:1px solid rgba(37,99,235,.15)">'+
+        '<div class="fw5 f13">'+htmlEsc(displayName)+'</div>'+
+        '<div class="f12 text3">'+htmlEsc(displaySub)+'</div>'+
       '</div>'+
       '<div class="g2 mb3">'+
-        '<div class="fgrp"><label class="flbl">Expected return date</label><input class="inp" type="date" id="rem-date" value="'+tomorrowStr+'"/></div>'+
+        '<div class="fgrp"><label class="flbl">Return / follow-up date</label><input class="inp" type="date" id="rem-date" value="'+futureStr+'"/></div>'+
         '<div class="fgrp"><label class="flbl">Reminder time (IST)</label><input class="inp" type="time" id="rem-time" value="09:00"/></div>'+
       '</div>'+
-      '<div class="fgrp"><label class="flbl">Note (optional)</label><textarea class="txta" id="rem-note" style="min-height:60px" placeholder="e.g. They mentioned returning after Diwali holidays"></textarea></div>'+
+      '<div class="fgrp"><label class="flbl">Note (optional)</label><textarea class="txta" id="rem-note" style="min-height:60px" placeholder="e.g. They are back from holiday after 15th"></textarea></div>'+
     '</div>'+
     '<div class="mf">'+
       '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
-      '<button class="btn btn-primary" onclick="saveReminder(\''+leadId+'\')">Set reminder</button>'+
+      '<button class="btn btn-primary" onclick="saveReminder(\''+( leadId||"")+'\',' +(manualEmail?'\''+manualEmail+'\'':'null')+')">Set reminder</button>'+
     '</div>'+
   '</div>';
 }
@@ -1434,129 +1616,6 @@ function htmlEsc(s){
 }
 
 // ════════════════════════════════════════════════
-// API LAYER — auto-detects if served from backend
-// ════════════════════════════════════════════════
-var API_URL = "https://fute-lms-backend.onrender.com";
-var IS_FILE_PROTOCOL = (typeof window !== "undefined" && window.location && window.location.href.indexOf("file://") === 0);
-if(typeof window !== "undefined" && window.location && window.location.href.indexOf("onrender.com") >= 0) API_URL = "";
-
-function apiGet(path){
-  return fetch(API_URL+path,{headers:{"Authorization":"Bearer "+STATE.token}}).then(function(r){
-    if(!r.ok)return r.json().then(function(e){throw new Error(e.error||r.statusText)});
-    return r.json();
-  });
-}
-function apiPost(path,body){
-  return fetch(API_URL+path,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+STATE.token},body:JSON.stringify(body)}).then(function(r){
-    if(!r.ok)return r.json().then(function(e){throw new Error(e.error||r.statusText)});
-    return r.json();
-  });
-}
-function apiPatch(path,body){
-  return fetch(API_URL+path,{method:"PATCH",headers:{"Content-Type":"application/json","Authorization":"Bearer "+STATE.token},body:JSON.stringify(body)}).then(function(r){
-    if(!r.ok)return r.json().then(function(e){throw new Error(e.error||r.statusText)});
-    return r.json();
-  });
-}
-function apiPut(path,body){
-  return fetch(API_URL+path,{method:"PUT",headers:{"Content-Type":"application/json","Authorization":"Bearer "+STATE.token},body:JSON.stringify(body)}).then(function(r){
-    if(!r.ok)return r.json().then(function(e){throw new Error(e.error||r.statusText)});
-    return r.json();
-  });
-}
-function apiDel(path){
-  return fetch(API_URL+path,{method:"DELETE",headers:{"Authorization":"Bearer "+STATE.token}}).then(function(r){
-    if(!r.ok)return r.json().then(function(e){throw new Error(e.error||r.statusText)});
-    return r.json();
-  });
-}
-
-// Normalise a user record from API → frontend shape
-function normaliseUser(u){
-  if(!u)return null;
-  return{
-    id:u.id, name:u.name, email:u.email, role:u.role,
-    empId:u.employee_id, desig:u.designation,
-    bdm:u.assigned_bdm_id||null, plt:u.platform||"Gmail",
-    av:(u.name||"?").split(" ").map(function(w){return w[0]}).join("").toUpperCase().slice(0,2),
-    avc:u.role==="admin"?"av-admin":u.role==="bd"?"av-bd":u.role==="ra"?"av-ra":"av-ra"
-  };
-}
-
-// Normalise a lead from API → frontend shape
-function normaliseLead(l){
-  if(!l)return null;
-  var co=l.company||{};
-  return{
-    id:l.id, coid:l.company_id,
-    coName:co.name, coWeb:co.website, coInd:co.industry, coLoc:co.location,
-    pos:l.position, fn:l.first_name, ln:l.last_name||"",
-    desig:l.designation, email:l.email, phone:l.phone, li:l.linkedin,
-    src:l.source, aid:l.analyst_id, bid:l.bdm_id,
-    stage:l.stage, date:l.lead_date, sent:l.email_sent_at,
-    plt:l.email_platform, notes:l.notes||"", del:l.deleted_at,
-    _raw:l
-  };
-}
-
-// Quick login for demo picks — uses default password
-window.quickLogin=function(email){
-  if(IS_FILE_PROTOCOL){
-    showToast("Open via fute-lms-backend.onrender.com to use live login","warning");
-    return;
-  }
-  STATE.loading=true;render();
-  apiPost("/auth/login",{email:email,password:"Fute@2024"}).then(function(data){
-    STATE.token=data.token;
-    STATE.user=normaliseUser(data.user);
-    localStorage.setItem("fute_token",data.token);
-    localStorage.setItem("fute_user",JSON.stringify(STATE.user));
-    STATE.page="dashboard";
-    loadAppData();
-  }).catch(function(e){
-    STATE.loading=false;
-    showToast("Login failed: "+e.message,"error");
-    render();
-  });
-}
-function loadAppData(){
-  STATE.loading=true; render();
-  var timeout=setTimeout(function(){
-    STATE.loading=false;STATE.user=null;STATE.token=null;
-    localStorage.removeItem("fute_token");localStorage.removeItem("fute_user");
-    showToast("Connection timed out. Check your internet and try again.","error");
-    render();
-  },15000);
-  return Promise.all([
-    apiGet("/users"),
-    apiGet("/leads"),
-    apiGet("/companies"),
-    apiGet("/emails"),
-    apiGet("/reminders")
-  ]).then(function(results){
-    clearTimeout(timeout);
-    STATE.users = results[0].map(normaliseUser);
-    STATE.leads = results[1].map(normaliseLead);
-    STATE.companies = results[2].map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});
-    STATE.emails = results[3].map(function(e){
-      return{id:e.id,lid:e.lead_id,by:e.sent_by,to:e.to_email,subj:e.subject,body:e.body,plt:e.platform,dt:e.sent_at,status:e.status};
-    });
-    STATE.reminders = results[4].map(function(r){
-      return{id:r.id,lid:r.lead_id,uid:r.user_id,name:r.contact_name,company:r.company_name,email:r.email,returnDate:r.return_date,reminderTime:r.reminder_time,note:r.note,status:r.status,createdAt:r.created_at};
-    });
-    STATE.activities=[];
-    STATE.loading=false;
-    render();
-  }).catch(function(err){
-    clearTimeout(timeout);
-    STATE.loading=false;STATE.user=null;STATE.token=null;
-    localStorage.removeItem("fute_token");localStorage.removeItem("fute_user");
-    showToast("Could not connect: "+err.message,"error");
-    render();
-  });
-}
-
-// ════════════════════════════════════════════════
 // BIND EVENTS
 // ════════════════════════════════════════════════
 function bindLogin(){
@@ -1566,150 +1625,65 @@ function bindLogin(){
 function bindApp(){}
 
 // ════════════════════════════════════════════════
-// ACTIONS
+// ACTIONS (global functions called from HTML)
 // ════════════════════════════════════════════════
-
-// ── AUTH ──────────────────────────────────────
-window.loginAs=function(id){
-  // Demo quick-login: find user by id and fake a login
-  var u=STATE.users.find(function(u){return u.id===id});
-  if(u){STATE.user=u;STATE.page="dashboard";render();}
-  else{
-    // Try fetching from API using email
-    var seedU=USERS.find(function(x){return x.id===id});
-    if(seedU)apiPost("/auth/login",{email:seedU.email,password:"Fute@2024"}).then(function(data){
-      STATE.token=data.token;
-      STATE.user=normaliseUser(data.user);
-      STATE.page="dashboard";
-      loadAppData();
-    }).catch(function(){showToast("Login failed","error");});
-  }
-}
-
+window.loginAs=function(id){STATE.user=STATE.users.find(function(u){return u.id===id});STATE.page="dashboard";render();}
 window.doLogin=function(){
-  if(IS_FILE_PROTOCOL){showToast("Open via fute-lms-backend.onrender.com to sign in","warning");return;}
-  var emailEl=document.getElementById("login-email");
-  var passEl=document.getElementById("login-pass");
-  var errEl=document.getElementById("login-err");
-  if(!emailEl||!passEl)return;
-  var email=emailEl.value.trim();
-  var password=passEl.value;
-  if(!email||!password){if(errEl){errEl.textContent="Enter email and password";errEl.style.display="block";}return;}
-  STATE.loading=true;render();
-  apiPost("/auth/login",{email:email,password:password}).then(function(data){
-    STATE.token=data.token;
-    STATE.user=normaliseUser(data.user);
-    localStorage.setItem("fute_token",data.token);
-    localStorage.setItem("fute_user",JSON.stringify(STATE.user));
-    STATE.page="dashboard";
-    loadAppData();
-  }).catch(function(err){
-    STATE.loading=false;render();
-    var errEl2=document.getElementById("login-err");
-    if(errEl2){errEl2.textContent=err.message||"Invalid email or password";errEl2.style.display="block";}
-  });
+  var email=document.getElementById("login-email").value.trim();
+  var u=STATE.users.find(function(x){return x.email.toLowerCase()===email.toLowerCase()});
+  if(u){STATE.user=u;STATE.page="dashboard";render();}
+  else{var e=document.getElementById("login-err");if(e){e.textContent="No account found. Use a @futeglobal.com email.";e.style.display="block";}}
 }
-
-window.signOut=function(){
-  STATE.user=null;STATE.token=null;STATE.page="dashboard";
-  STATE.leads=[];STATE.users=[];STATE.companies=[];STATE.emails=[];STATE.reminders=[];
-  STATE.modal=null;STATE.viewingUser=null;
-  render();
-}
-
-window.goPage=function(p){
-  STATE.page=p;STATE.detailLead=null;STATE.modal=null;
-  if(p!=="dashboard")STATE.viewingUser=null;
-  // Refresh data when switching to leads or reminders
-  if(p==="leads"||p==="reminders"||p==="email"){
-    var paths={leads:"/leads",reminders:"/reminders",email:"/emails"};
-    var key={leads:"leads",reminders:"reminders",email:"emails"};
-    apiGet(paths[p]).then(function(data){
-      if(p==="leads")STATE.leads=data.map(normaliseLead);
-      else if(p==="reminders")STATE.reminders=data.map(function(r){return{id:r.id,lid:r.lead_id,uid:r.user_id,name:r.contact_name,company:r.company_name,email:r.email,returnDate:r.return_date,reminderTime:r.reminder_time,note:r.note,status:r.status,createdAt:r.created_at};});
-      else if(p==="email")STATE.emails=data.map(function(e){return{id:e.id,lid:e.lead_id,by:e.sent_by,to:e.to_email,subj:e.subject,body:e.body,plt:e.platform,dt:e.sent_at,status:e.status};});
-      render();
-    }).catch(function(){});
-  }
-  render();
-}
-
+window.signOut=function(){STATE.user=null;STATE.page="dashboard";STATE.modal=null;render();}
+window.goPage=function(p){STATE.page=p;STATE.detailLead=null;STATE.modal=null;if(p!=="dashboard")STATE.viewingUser=null;render();}
 window.setPeriod=function(p){STATE.period=p;render();}
 window.setSearch=function(v){STATE.leadsFilter.search=v;render();}
 window.setFilt=function(k,v){STATE.leadsFilter[k]=v;render();}
 window.toggleSel=function(id,v){STATE.leadsSelected[id]=v;render();}
-window.toggleAll=function(v){var fl=filterLeads(getMyLeads(STATE.user));fl.forEach(function(l){STATE.leadsSelected[l.id]=v;});render();}
+window.toggleAll=function(v){
+  var fl=filterLeads(getMyLeads(STATE.user));
+  fl.forEach(function(l){STATE.leadsSelected[l.id]=v;});render();
+}
 window.clearSel=function(){STATE.leadsSelected={};render();}
-
 window.applyBulk=function(){
   var sel=document.getElementById("bulk-stage");
   if(!sel||!sel.value)return;
   var stage=sel.value;
-  var ids=Object.keys(STATE.leadsSelected).filter(function(id){return STATE.leadsSelected[id]});
-  if(!ids.length)return;
-  apiPatch("/leads/bulk/stage",{ids:ids,stage:stage}).then(function(){
-    STATE.leads=STATE.leads.map(function(l){return ids.indexOf(l.id)>=0?Object.assign({},l,{stage:stage}):l;});
-    STATE.leadsSelected={};
-    showToast("Stage updated for "+ids.length+" leads","success");
-    render();
-  }).catch(function(e){showToast("Bulk update failed: "+e.message,"error");});
+  Object.keys(STATE.leadsSelected).forEach(function(id){
+    if(STATE.leadsSelected[id]){
+      STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{stage:stage}):l;});
+    }
+  });
+  STATE.leadsSelected={};
+  showToast("Stage updated for selected leads","success");
 }
-
 window.changeStage=function(id,stage){
-  var oldLead=STATE.leads.find(function(l){return l.id===id});
-  var oldStage=oldLead?oldLead.stage:"";
-  // Optimistic update
   STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{stage:stage}):l;});
   if(STATE.detailLead&&STATE.detailLead.id===id)STATE.detailLead=Object.assign({},STATE.detailLead,{stage:stage});
-  render();
-  // Persist to backend
-  apiPatch("/leads/"+id,{stage:stage,_oldStage:oldStage}).catch(function(e){
-    // Revert on failure
-    STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{stage:oldStage}):l;});
-    showToast("Stage update failed: "+e.message,"error");render();
-  });
+  STATE.activities.push({id:"a"+Date.now(),lid:id,uid:STATE.user.id,type:"stage",txt:'Stage → "'+stage+'"',dt:todayIST()});
   showToast('Stage → "'+stage+'"',"success");
 }
-
 window.changeStageDetail=function(stage){if(STATE.detailLead)changeStage(STATE.detailLead.id,stage);}
-
 window.viewLead=function(id){
   STATE.detailLead=STATE.leads.find(function(l){return l.id===id});
-  // Load activity log for this lead
-  apiGet("/leads/"+id+"/activity").then(function(acts){
-    STATE.activities=STATE.activities.filter(function(a){return a.lid!==id});
-    acts.forEach(function(a){
-      STATE.activities.push({id:a.id,lid:a.lead_id,uid:a.user_id,type:a.action_type,txt:a.description,dt:a.created_at?a.created_at.split("T")[0]:""});
-    });
-    render();
-  }).catch(function(){});
   render();
 }
-
 window.closeDetail=function(){STATE.detailLead=null;render();}
-
 window.deleteLead=function(id){
-  if(!confirm("Move this lead to trash? It will be permanently deleted after 60 days."))return;
-  apiDel("/leads/"+id).then(function(){
-    STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{del:todayIST()}):l;});
-    if(STATE.detailLead&&STATE.detailLead.id===id)STATE.detailLead=null;
-    showToast("Lead moved to trash (deleted after 60 days)","info");render();
-  }).catch(function(e){showToast("Delete failed: "+e.message,"error");});
+  STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{del:todayIST()}):l;});
+  if(STATE.detailLead&&STATE.detailLead.id===id)STATE.detailLead=null;
+  showToast("Lead moved to trash (deleted after 60 days)","info");
 }
-
 window.saveNotes=function(){
   var el=document.getElementById("dp-notes");
   if(el&&STATE.detailLead){
     var notes=el.value;
-    apiPatch("/leads/"+STATE.detailLead.id,{notes:notes}).then(function(){
-      STATE.leads=STATE.leads.map(function(l){return l.id===STATE.detailLead.id?Object.assign({},l,{notes:notes}):l;});
-      STATE.detailLead=Object.assign({},STATE.detailLead,{notes:notes});
-      showToast("Notes saved","success");render();
-    }).catch(function(e){showToast("Save failed: "+e.message,"error");});
+    STATE.leads=STATE.leads.map(function(l){return l.id===STATE.detailLead.id?Object.assign({},l,{notes:notes}):l;});
+    STATE.detailLead=Object.assign({},STATE.detailLead,{notes:notes});
+    showToast("Notes saved","success");
   }
 }
-
-window.addContactPrompt=function(){showToast("Add contact: coming soon","info");}
+window.addContactPrompt=function(){showToast("Add contact: coming in full version","info");}
 window.openAddLead=function(){STATE.modal=renderAddLeadModal();render();}
 window.closeModal=function(){STATE.modal=null;render();}
 window.overlayClick=function(e){if(e.target.classList.contains("overlay"))closeModal();}
@@ -1717,56 +1691,36 @@ window.overlayClick=function(e){if(e.target.classList.contains("overlay"))closeM
 var coNewMode=true;
 window.toggleCoMode=function(isNew){
   coNewMode=isNew;
-  var nf=document.getElementById("co-new-fields"),ef=document.getElementById("co-exist-fields");
-  var nb=document.getElementById("co-new-btn"),eb=document.getElementById("co-exist-btn");
+  var nf=document.getElementById("co-new-fields");
+  var ef=document.getElementById("co-exist-fields");
+  var nb=document.getElementById("co-new-btn");
+  var eb=document.getElementById("co-exist-btn");
   if(nf&&ef){nf.style.display=isNew?"":"none";ef.style.display=isNew?"none":"";}
   if(nb&&eb){nb.className="fc"+(isNew?" on":"");eb.className="fc"+(!isNew?" on":"");}
 }
 
 window.saveLead=function(){
   var fn=document.getElementById("f-fn");
-  var emailEl=document.getElementById("f-email");
+  var email=document.getElementById("f-email");
   var pos=document.getElementById("f-pos");
-  if(!fn||!fn.value||!emailEl||!emailEl.value||!pos||!pos.value){showToast("First name, email and position are required","warning");return;}
-
-  var btn=document.querySelector(".modal .btn-primary");
-  if(btn){btn.textContent="Saving...";btn.disabled=true;}
-
-  function doSaveLead(coid){
-    var aid=(document.getElementById("f-ra")||{}).value||STATE.user.id;
-    var bid=(document.getElementById("f-bd")||{}).value||STATE.user.bdm;
-    apiPost("/leads",{
-      company_id:coid,position:pos.value,first_name:fn.value,
-      last_name:(document.getElementById("f-ln")||{}).value||"",
-      designation:(document.getElementById("f-desig")||{}).value||"",
-      email:emailEl.value,phone:(document.getElementById("f-phone")||{}).value||"",
-      linkedin:(document.getElementById("f-li")||{}).value||"",
-      source:(document.getElementById("f-src")||{}).value||"LinkedIn",
-      analyst_id:aid,bdm_id:bid||null,
-      lead_date:todayIST()
-    }).then(function(lead){
-      STATE.leads.unshift(normaliseLead(lead));
-      closeModal();showToast("Lead added successfully","success");render();
-    }).catch(function(e){showToast("Failed to save: "+e.message,"error");if(btn){btn.textContent="Save lead";btn.disabled=false;}});
-  }
-
+  if(!fn||!fn.value||!email||!email.value||!pos||!pos.value){showToast("First name, email and position are required","warning");return;}
+  var coid;
   if(coNewMode){
     var coname=document.getElementById("f-coname");
-    if(!coname||!coname.value){showToast("Company name is required","warning");if(btn){btn.textContent="Save lead";btn.disabled=false;}return;}
-    apiPost("/companies",{
-      name:coname.value,
-      website:(document.getElementById("f-web")||{}).value||"",
-      industry:(document.getElementById("f-ind")||{}).value||"Technology",
-      location:(document.getElementById("f-loc")||{}).value||""
-    }).then(function(co){
-      STATE.companies.push({id:co.id,name:co.name,web:co.website,ind:co.industry,loc:co.location});
-      doSaveLead(co.id);
-    }).catch(function(e){showToast("Company save failed: "+e.message,"error");if(btn){btn.textContent="Save lead";btn.disabled=false;}});
+    if(!coname||!coname.value){showToast("Company name is required","warning");return;}
+    var newco={id:"c"+Date.now(),name:coname.value,web:(document.getElementById("f-web")||{}).value||"",ind:(document.getElementById("f-ind")||{}).value||"Technology",loc:(document.getElementById("f-loc")||{}).value||""};
+    STATE.companies.push(newco);
+    coid=newco.id;
   } else {
-    var coid=(document.getElementById("f-coid")||{}).value;
-    if(!coid){showToast("Select a company","warning");if(btn){btn.textContent="Save lead";btn.disabled=false;}return;}
-    doSaveLead(coid);
+    coid=(document.getElementById("f-coid")||{}).value||STATE.companies[0].id;
   }
+  var aid=(document.getElementById("f-ra")||{}).value||STATE.user.id;
+  var bid=(document.getElementById("f-bd")||{}).value||STATE.user.bdm;
+  var newlead={id:"l"+Date.now(),coid:coid,pos:pos.value,fn:fn.value,ln:(document.getElementById("f-ln")||{}).value||"",desig:(document.getElementById("f-desig")||{}).value||"",email:email.value,phone:(document.getElementById("f-phone")||{}).value||"",li:(document.getElementById("f-li")||{}).value||"",src:(document.getElementById("f-src")||{}).value||"LinkedIn",aid:aid,bid:bid||"u1",stage:"Active",date:todayIST(),sent:null,plt:null,notes:"",del:null};
+  STATE.leads.push(newlead);
+  STATE.activities.push({id:"a"+Date.now(),lid:newlead.id,uid:STATE.user.id,type:"created",txt:"Lead created",dt:todayIST()});
+  closeModal();
+  showToast("Lead added successfully","success");
 }
 
 window.exportXL=function(){
@@ -1774,9 +1728,8 @@ window.exportXL=function(){
     var filtered=filterLeads(getMyLeads(STATE.user));
     var rows=filtered.map(function(l){
       var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
-      return{Date:l.date,Company:l.coName||co.name,Website:l.coWeb||co.web,Position:l.pos,Location:l.coLoc||co.loc,Industry:l.coInd||co.ind,FirstName:l.fn,LastName:l.ln,Designation:l.desig,Email:l.email,Phone:l.phone,LinkedIn:l.li,Source:l.src,Stage:l.stage,Analyst:uname(l.aid,STATE.users),BDManager:uname(l.bid,STATE.users)};
+      return{Date:l.date,Company:co.name,Website:co.web,Position:l.pos,Location:co.loc,Industry:co.ind,FirstName:l.fn,LastName:l.ln,Designation:l.desig,Email:l.email,Phone:l.phone,LinkedIn:l.li,Source:l.src,Stage:l.stage,Analyst:uname(l.aid,STATE.users),BDManager:uname(l.bid,STATE.users)};
     });
-    if(rows.length===0){showToast("No leads to export","warning");return;}
     if(typeof XLSX!=="undefined"){
       var ws=XLSX.utils.json_to_sheet(rows);
       var wb=XLSX.utils.book_new();
@@ -1784,6 +1737,7 @@ window.exportXL=function(){
       XLSX.writeFile(wb,"FuteGlobal_Leads_"+todayIST()+".xlsx");
       showToast("Excel exported","success");
     } else {
+      // CSV fallback
       var h=Object.keys(rows[0]);
       var csv=[h.join(",")].concat(rows.map(function(r){return h.map(function(k){return'"'+(r[k]||"")+'"'}).join(",")})).join("\n");
       var a=document.createElement("a");a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);a.download="FuteGlobal_Leads.csv";a.click();
@@ -1792,28 +1746,81 @@ window.exportXL=function(){
   }catch(e){showToast("Export failed: "+e.message,"error");}
 }
 
-window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;render();}
+window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailSearch=null;render();}
 window.setMergeLead=function(id){STATE.mergeLeadId=id;STATE.genEmail=null;render();}
 window.setPlatform=function(p){STATE.user.plt=p;render();}
 
+window.appendPrompt=function(text){
+  STATE.aiPrompt=(STATE.aiPrompt||STATE.aiPromptDefault)+"\n"+text;
+  var el=document.getElementById("ai-prompt-inp");
+  if(el)el.value=STATE.aiPrompt;
+}
+window.resetAIPrompt=function(){
+  STATE.aiPrompt=STATE.aiPromptDefault;
+  var el=document.getElementById("ai-prompt-inp");
+  if(el)el.value=STATE.aiPromptDefault;
+  showToast("Prompt reset to default","info");
+}
+
+window.emailSearchInput=function(v){
+  STATE.emailSearch=v;
+  if(v){STATE.mergeLeadId=null;STATE.manualEmail=null;STATE.manualEmailName=null;STATE.genEmail=null;}
+  render();
+  setTimeout(function(){var el=document.getElementById("email-search-inp");if(el){el.focus();el.setSelectionRange(v.length,v.length);}},0);
+}
+window.selectEmailRecipient=function(lid){
+  STATE.mergeLeadId=lid;STATE.manualEmail=null;STATE.manualEmailName=null;
+  STATE.emailSearch=null;STATE.genEmail=null;render();
+}
+window.useManualEmail=function(){
+  var email=STATE.emailSearch||"";
+  if(!email.includes("@")){showToast("Please enter a valid email address","warning");return;}
+  STATE.manualEmail=email;STATE.manualEmailName=email;
+  STATE.mergeLeadId=null;STATE.emailSearch=null;STATE.genEmail=null;render();
+}
+
 window.generateAI=function(){
-  if(!STATE.mergeLeadId){showToast("Select a lead first","warning");return;}
-  var ml=STATE.leads.find(function(l){return l.id===STATE.mergeLeadId});
-  if(!ml)return;
-  var co=STATE.companies.find(function(c){return c.id===ml.coid})||{name:ml.coName,industry:ml.coInd,location:ml.coLoc};
   var btn=document.getElementById("gen-btn");
+  var customInstructions=STATE.aiPrompt||STATE.aiPromptDefault;
+  // Sync prompt textarea value
+  var promptEl=document.getElementById("ai-prompt-inp");
+  if(promptEl&&promptEl.value)customInstructions=promptEl.value;
+
+  // Handle manual email
+  if(STATE.manualEmail&&!STATE.mergeLeadId){
+    var subj=STATE.emailSubj.replace(/{{[\w]+}}/g,"");
+    var body=STATE.emailBody.replace(/{{fn}}/g,"").replace(/{{[\w]+}}/g,"");
+    STATE.genEmail={to:STATE.manualEmailName||STATE.manualEmail,email:STATE.manualEmail,subj:subj,body:body,lid:null};
+    render();return;
+  }
+  if(!STATE.mergeLeadId){showToast("Select a recipient first","warning");return;}
+  var ml=STATE.leads.find(function(l){return l.id===STATE.mergeLeadId});
+  if(!ml){return;}
+  var co=STATE.companies.find(function(c){return c.id===ml.coid})||{};
   if(btn){btn.textContent="Generating...";btn.disabled=true;}
-  // Route through our backend (which has the API key)
-  apiPost("/ai/generate-email",{
-    lead:{first_name:ml.fn,last_name:ml.ln,designation:ml.desig,position:ml.pos},
-    company:{name:co.name||ml.coName,industry:co.ind||ml.coInd,location:co.loc||ml.coLoc},
-    template:{subject:STATE.emailSubj,body:STATE.emailBody}
-  }).then(function(data){
-    STATE.genEmail={to:ml.fn+" "+ml.ln,email:ml.email,subj:data.subject,body:data.body,lid:ml.id};
+
+  var prompt="You are a business development executive at Fute Global LLC (a specialist staffing and recruitment firm).\n\n"+
+    "Write a cold outreach email to:\n"+
+    "Name: "+ml.fn+" "+ml.ln+"\n"+
+    "Title: "+ml.desig+"\n"+
+    "Company: "+co.name+(co.ind?" ("+co.ind+")":"")+"\n"+
+    "Location: "+(co.loc||"India")+"\n"+
+    "They are hiring for: "+ml.pos+"\n\n"+
+    "Instructions from the sender:\n"+customInstructions+"\n\n"+
+    "Format your response as:\nSubject: [subject line]\n\n[email body]";
+
+  fetch("https://api.anthropic.com/v1/messages",{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,messages:[{role:"user",content:prompt}]})
+  }).then(function(r){return r.json()}).then(function(data){
+    var text=(data.content&&data.content[0]&&data.content[0].text)||"";
+    var sm=text.match(/Subject:\s*(.+)/i);
+    var subj=sm?sm[1].trim():fillEmail(STATE.emailSubj,ml,co,STATE.user.name);
+    var body=text.replace(/^Subject:.+\n*/im,"").trim()||fillEmail(STATE.emailBody,ml,co,STATE.user.name);
+    STATE.genEmail={to:ml.fn+" "+ml.ln,email:ml.email,subj:subj,body:body,lid:ml.id};
     if(btn){btn.textContent="✨ Generate with AI";btn.disabled=false;}
     render();
-  }).catch(function(e){
-    // Fallback to client-side template fill
+  }).catch(function(){
     STATE.genEmail={to:ml.fn+" "+ml.ln,email:ml.email,subj:fillEmail(STATE.emailSubj,ml,co,STATE.user.name),body:fillEmail(STATE.emailBody,ml,co,STATE.user.name),lid:ml.id};
     if(btn){btn.textContent="✨ Generate with AI";btn.disabled=false;}
     render();
@@ -1821,18 +1828,25 @@ window.generateAI=function(){
 }
 
 window.sendEmail=function(){
-  if(!STATE.genEmail){showToast("Generate email first","warning");return;}
+  // If no generated email, build one from template + current recipient
   var ge=STATE.genEmail;
+  if(!ge){
+    var toEmail=STATE.manualEmail||(STATE.mergeLeadId?STATE.leads.find(function(l){return l.id===STATE.mergeLeadId}):null);
+    if(!toEmail){showToast("Select a recipient first","warning");return;}
+    if(typeof toEmail==="object"){
+      var l=toEmail;var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
+      ge={to:l.fn+" "+l.ln,email:l.email,subj:fillEmail(STATE.emailSubj,l,co,STATE.user.name),body:fillEmail(STATE.emailBody,l,co,STATE.user.name),lid:l.id};
+    } else {
+      ge={to:STATE.manualEmailName||STATE.manualEmail,email:STATE.manualEmail,subj:STATE.emailSubj.replace(/{{[\w]+}}/g,""),body:STATE.emailBody.replace(/{{[\w]+}}/g,""),lid:null};
+    }
+  }
   var plt=STATE.user.plt||"Gmail";
   var url=plt==="Gmail"
     ?"https://mail.google.com/mail/?view=cm&to="+encodeURIComponent(ge.email)+"&su="+encodeURIComponent(ge.subj)+"&body="+encodeURIComponent(ge.body)
     :"https://outlook.live.com/mail/0/deeplink/compose?to="+encodeURIComponent(ge.email)+"&subject="+encodeURIComponent(ge.subj)+"&body="+encodeURIComponent(ge.body);
   window.open(url,"_blank");
-  // Save to backend
-  apiPost("/emails",{lead_id:ge.lid,to_email:ge.email,subject:ge.subj,body:ge.body,platform:plt}).then(function(data){
-    STATE.emails.unshift({id:data.id,lid:ge.lid,by:STATE.user.id,to:ge.email,subj:ge.subj,body:ge.body,plt:plt,dt:todayIST(),status:"sent"});
-    showToast("Email sent and saved","success");render();
-  }).catch(function(){showToast("Email opened (save failed)","warning");});
+  STATE.emails.push({id:"e"+Date.now(),lid:ge.lid,by:STATE.user.id,to:ge.email,subj:ge.subj,body:ge.body,plt:plt,dt:todayIST(),status:"sent"});
+  showToast("Email opened in "+plt,"success");
 }
 
 window.insertVar=function(v){
@@ -1840,151 +1854,732 @@ window.insertVar=function(v){
   if(el){var s=el.selectionStart||el.value.length;STATE.emailBody=STATE.emailBody.slice(0,s)+v+STATE.emailBody.slice(s);render();}
 }
 
-// ── ADMIN / USERS ──────────────────────────────
 window.openAddUser=function(){STATE.modal=renderUserModal(null);render();}
-window.editUser=function(id){
-  var u=STATE.users.find(function(x){return x.id===id});
-  if(u){STATE.modal=renderUserModal(u);render();}
-}
+window.editUser=function(id){var u=STATE.users.find(function(x){return x.id===id});if(u){STATE.modal=renderUserModal(u);render();}}
 window.removeUser=function(id){
   if(id===STATE.user.id){showToast("Cannot remove yourself","warning");return;}
-  if(!confirm("Remove this user? They will be deactivated."))return;
-  apiDel("/users/"+id).then(function(){
-    STATE.users=STATE.users.filter(function(u){return u.id!==id});
-    showToast("User removed","info");render();
-  }).catch(function(e){showToast("Remove failed: "+e.message,"error");});
+  STATE.users=STATE.users.filter(function(u){return u.id!==id});
+  showToast("User removed","info");
+  render();
 }
 window.unassignRA=function(id){
-  apiPut("/users/"+id,{assigned_bdm_id:null}).then(function(){
-    STATE.users=STATE.users.map(function(u){return u.id===id?Object.assign({},u,{bdm:null}):u;});
-    showToast("RA unassigned","info");render();
-  }).catch(function(e){showToast("Failed: "+e.message,"error");});
+  STATE.users=STATE.users.map(function(u){return u.id===id?Object.assign({},u,{bdm:null}):u;});
+  showToast("RA unassigned","info");render();
 }
 window.saveUser=function(existingId){
-  var name=(document.getElementById("u-name")||{}).value||"";
-  var email=(document.getElementById("u-email")||{}).value||"";
+  var name=document.getElementById("u-name").value.trim();
+  var email=document.getElementById("u-email").value.trim();
   if(!name||!email){showToast("Name and email required","warning");return;}
-  var role=(document.getElementById("u-role")||{}).value||"ra";
-  var eid=(document.getElementById("u-eid")||{}).value||"";
-  var desig=(document.getElementById("u-desig")||{}).value||"";
-  var plt=(document.getElementById("u-plt")||{}).value||"Gmail";
-  var bdm=(document.getElementById("u-bd")||{}).value||null;
-  var payload={name:name,email:email,role:role,employee_id:eid,designation:desig,platform:plt,assigned_bdm_id:bdm||null};
+  var role=document.getElementById("u-role").value;
+  var eid=document.getElementById("u-eid").value;
+  var desig=document.getElementById("u-desig").value;
+  var plt=document.getElementById("u-plt").value;
+  var bdm=document.getElementById("u-bd").value||null;
+  var av=name.split(" ").map(function(w){return w[0]}).join("").toUpperCase().slice(0,2);
+  var avc=role==="ra"?"av-ra":role==="bd"?"av-bd":"av-admin";
   if(existingId){
-    apiPut("/users/"+existingId,payload).then(function(data){
-      var updated=normaliseUser(data);
-      STATE.users=STATE.users.map(function(u){return u.id===existingId?updated:u;});
-      showToast("User updated","success");closeModal();render();
-    }).catch(function(e){showToast("Update failed: "+e.message,"error");});
+    STATE.users=STATE.users.map(function(u){return u.id===existingId?Object.assign({},u,{name:name,email:email,role:role,empId:eid,desig:desig,plt:plt,bdm:bdm,av:av,avc:avc}):u;});
+    showToast("User updated","success");
   } else {
-    payload.password="Fute@2024";
-    apiPost("/users",payload).then(function(data){
-      STATE.users.push(normaliseUser(data));
-      showToast("User added · default password: Fute@2024","success");closeModal();render();
-    }).catch(function(e){showToast("Add failed: "+e.message,"error");});
+    STATE.users.push({id:"u"+Date.now(),name:name,email:email,role:role,empId:eid,desig:desig,plt:plt,bdm:bdm,av:av,avc:avc});
+    showToast("User added","success");
   }
+  closeModal();render();
 }
 
-// ── PROFILE ────────────────────────────────────
 window.saveProfile=function(){
   var name=(document.getElementById("p-name")||{}).value||STATE.user.name;
   var email=(document.getElementById("p-email")||{}).value||STATE.user.email;
   var eid=(document.getElementById("p-eid")||{}).value||STATE.user.empId;
   var desig=(document.getElementById("p-desig")||{}).value||STATE.user.desig;
-  apiPut("/users/"+STATE.user.id,{name:name,email:email,employee_id:eid,designation:desig}).then(function(){
-    STATE.users=STATE.users.map(function(u){return u.id===STATE.user.id?Object.assign({},u,{name:name,email:email,empId:eid,desig:desig}):u;});
-    STATE.user=Object.assign({},STATE.user,{name:name,email:email,empId:eid,desig:desig});
-    showToast("Profile updated","success");render();
-  }).catch(function(e){showToast("Update failed: "+e.message,"error");});
+  STATE.users=STATE.users.map(function(u){return u.id===STATE.user.id?Object.assign({},u,{name:name,email:email,empId:eid,desig:desig}):u;});
+  STATE.user=Object.assign({},STATE.user,{name:name,email:email,empId:eid,desig:desig});
+  showToast("Profile updated","success");render();
 }
 window.setProfilePlt=function(p){
-  apiPut("/users/"+STATE.user.id,{platform:p}).then(function(){
-    STATE.user=Object.assign({},STATE.user,{plt:p});
-    STATE.users=STATE.users.map(function(u){return u.id===STATE.user.id?Object.assign({},u,{plt:p}):u;});
-    showToast("Platform set to "+p,"success");render();
-  }).catch(function(e){showToast("Failed: "+e.message,"error");});
+  STATE.user=Object.assign({},STATE.user,{plt:p});
+  STATE.users=STATE.users.map(function(u){return u.id===STATE.user.id?Object.assign({},u,{plt:p}):u;});
+  showToast("Platform set to "+p,"success");render();
 }
 window.changePassword=function(){
-  var cur=(document.getElementById("pw-cur")||{}).value;
-  var nw=(document.getElementById("pw-new")||{}).value;
-  var con=(document.getElementById("pw-con")||{}).value;
-  if(!nw||nw.length<6){showToast("Password must be at least 6 characters","warning");return;}
-  if(nw!==con){showToast("Passwords don't match","warning");return;}
-  apiPost("/auth/change-password",{currentPassword:cur,newPassword:nw}).then(function(){
-    showToast("Password updated successfully","success");
-    document.getElementById("pw-cur").value="";document.getElementById("pw-new").value="";document.getElementById("pw-con").value="";
-  }).catch(function(e){showToast("Failed: "+e.message,"error");});
+  var n=(document.getElementById("pw-new")||{}).value;
+  var c=(document.getElementById("pw-con")||{}).value;
+  if(!n||n.length<6){showToast("Password must be at least 6 characters","warning");return;}
+  if(n!==c){showToast("Passwords don't match","warning");return;}
+  showToast("Password updated","success");
 }
 
-// ── DASHBOARD VIEW-AS ──────────────────────────
 window.setAdminView=function(v){STATE.adminView=v;render();}
+
 window.viewAs=function(uid){
   var target=STATE.users.find(function(u){return u.id===uid});
   if(!target)return;
-  STATE.viewingUser=target;STATE.page="dashboard";render();
+  STATE.viewingUser=target;
+  STATE.page="dashboard";
+  render();
 }
-window.stopViewing=function(){STATE.viewingUser=null;STATE.page="dashboard";render();}
+window.stopViewing=function(){
+  STATE.viewingUser=null;
+  STATE.page="dashboard";
+  render();
+}
 
-// ── REMINDERS ──────────────────────────────────
-window.openSetReminder=function(lid){STATE.modal=renderSetReminderModal(lid);render();}
-window.saveReminder=function(lid){
-  var lead=STATE.leads.find(function(l){return l.id===lid});
-  if(!lead)return;
-  var co=STATE.companies.find(function(c){return c.id===lead.coid})||{};
+window.reminderSearchInput=function(v){
+  STATE.reminderSearch=v;render();
+  setTimeout(function(){var el=document.getElementById("rem-search-inp");if(el){el.focus();el.setSelectionRange(v.length,v.length);}},0);
+}
+window.openNewReminder=function(){STATE.modal=renderSetReminderModal(null,null);render();}
+window.openSetReminderFromSearch=function(lid){STATE.reminderSearch=null;STATE.modal=renderSetReminderModal(lid,null);render();}
+window.openSetReminderManual=function(email){STATE.reminderSearch=null;STATE.modal=renderSetReminderModal(null,email);render();}
+window.openSetReminder=function(lid){STATE.modal=renderSetReminderModal(lid,null);render();}
+
+window.saveReminder=function(lid,manualEmail){
+  var lead=lid?STATE.leads.find(function(l){return l.id===lid}):null;
+  var co=lead?STATE.companies.find(function(c){return c.id===lead.coid})||{}:{};
   var dt=(document.getElementById("rem-date")||{}).value;
   var tm=(document.getElementById("rem-time")||{}).value||"09:00";
   var note=(document.getElementById("rem-note")||{}).value||"";
-  if(!dt){showToast("Please set a return date","warning");return;}
-  apiPost("/reminders",{
-    lead_id:lid,contact_name:lead.fn+" "+lead.ln,
-    company_name:lead.coName||(co.name||""),email:lead.email,
-    return_date:dt,reminder_time:tm,note:note
-  }).then(function(data){
-    STATE.reminders.push({id:data.id,lid:lid,uid:STATE.user.id,name:lead.fn+" "+lead.ln,company:lead.coName||co.name||"",email:lead.email,returnDate:dt,reminderTime:tm,note:note,status:"pending",createdAt:todayIST()});
-    closeModal();showToast("Reminder set for "+fmtDate(dt)+" at "+tm,"success");render();
-  }).catch(function(e){showToast("Failed: "+e.message,"error");});
+  if(!dt){showToast("Please set a date","warning");return;}
+  STATE.reminders.push({
+    id:"r"+Date.now(),lid:lid||null,uid:STATE.user.id,
+    name:lead?(lead.fn+" "+lead.ln):(manualEmail||""),
+    company:lead?(co.name||""):"",
+    email:lead?lead.email:(manualEmail||""),
+    returnDate:dt,reminderTime:tm,note:note,status:"pending",createdAt:todayIST()
+  });
+  closeModal();STATE.reminderSearch=null;
+  showToast("Reminder set for "+fmtDate(dt)+" at "+tm,"success");
+  render();
 }
+
 window.editReminder=function(rid){
   var r=STATE.reminders.find(function(x){return x.id===rid});
-  if(r){openSetReminder(r.lid);}
+  if(!r)return;
+  STATE.modal=renderSetReminderModal(r.lid||null,r.lid?null:r.email);
+  render();
 }
 window.dismissReminder=function(rid){
-  apiDel("/reminders/"+rid).then(function(){
-    STATE.reminders=STATE.reminders.filter(function(r){return r.id!==rid});
-    showToast("Reminder removed","info");render();
-  }).catch(function(e){showToast("Failed: "+e.message,"error");});
+  STATE.reminders=STATE.reminders.filter(function(r){return r.id!==rid});
+  showToast("Reminder removed","info");render();
 }
 window.sendReminderEmail=function(rid){
   var r=STATE.reminders.find(function(x){return x.id===rid});
   if(!r)return;
   var subj="Following up — hope you're back!";
-  var body="Hi "+r.name.split(" ")[0]+",\n\nHope you had a great break! I wanted to follow up on my earlier message regarding a potential opportunity at "+r.company+".\n\nWould you have 15 minutes for a quick call this week?\n\nWarm regards,\n"+STATE.user.name+"\nFute Global LLC";
+  var body="Hi "+r.name.split(" ")[0]+",\n\nHope you had a great break! I wanted to follow up on my earlier message.\n\nWould you have 15 minutes for a quick call this week?\n\nWarm regards,\n"+STATE.user.name+"\nFute Global LLC";
   var plt=STATE.user.plt||"Gmail";
   window.open(plt==="Gmail"
     ?"https://mail.google.com/mail/?view=cm&to="+encodeURIComponent(r.email)+"&su="+encodeURIComponent(subj)+"&body="+encodeURIComponent(body)
     :"https://outlook.live.com/mail/0/deeplink/compose?to="+encodeURIComponent(r.email)+"&subject="+encodeURIComponent(subj)+"&body="+encodeURIComponent(body),"_blank");
-  apiPatch("/reminders/"+rid,{status:"sent"}).then(function(){
-    STATE.reminders=STATE.reminders.map(function(x){return x.id===rid?Object.assign({},x,{status:"sent"}):x;});
-    showToast("Follow-up email opened","success");render();
-  });
+  STATE.reminders=STATE.reminders.map(function(x){return x.id===rid?Object.assign({},x,{status:"sent"}):x;});
+  showToast("Follow-up email opened","success");render();
 }
 window.sendAllDue=function(){
   var today=todayIST();
-  STATE.reminders.filter(function(r){return r.uid===STATE.user.id&&r.status==="pending"&&r.returnDate<=today}).forEach(function(r){sendReminderEmail(r.id);});
+  var due=STATE.reminders.filter(function(r){return r.uid===STATE.user.id&&r.status==="pending"&&r.returnDate<=today});
+  due.forEach(function(r){sendReminderEmail(r.id);});
+}
+
+// ── EMAIL FROM LEADS ───────────────────────────
+window.quickSendEmail=function(lid){
+  var l=STATE.leads.find(function(x){return x.id===lid});
+  if(!l||!l.email){showToast("No email address for this lead","warning");return;}
+  var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
+  var subj=fillEmail(STATE.emailSubj,l,co,STATE.user.name);
+  var body=fillEmail(STATE.emailBody,l,co,STATE.user.name);
+  var plt=STATE.user.plt||"Gmail";
+  var url=plt==="Gmail"
+    ?"https://mail.google.com/mail/?view=cm&to="+encodeURIComponent(l.email)+"&su="+encodeURIComponent(subj)+"&body="+encodeURIComponent(body)
+    :"https://outlook.live.com/mail/0/deeplink/compose?to="+encodeURIComponent(l.email)+"&subject="+encodeURIComponent(subj)+"&body="+encodeURIComponent(body);
+  window.open(url,"_blank");
+  STATE.emails.push({id:"e"+Date.now(),lid:lid,by:STATE.user.id,to:l.email,subj:subj,body:body,plt:plt,dt:todayIST(),status:"sent"});
+  STATE.activities.push({id:"a"+Date.now(),lid:lid,uid:STATE.user.id,type:"email",txt:"Email sent via "+plt,dt:todayIST()});
+  showToast("Email opened in "+plt,"success");
+}
+
+window.bulkSendEmail=function(){
+  var ids=Object.keys(STATE.leadsSelected).filter(function(id){return STATE.leadsSelected[id]});
+  if(!ids.length)return;
+  var leads=ids.map(function(id){return STATE.leads.find(function(l){return l.id===id})}).filter(function(l){return l&&l.email});
+  if(!leads.length){showToast("No email addresses in selected leads","warning");return;}
+  var plt=STATE.user.plt||"Gmail";
+  // Open each email one by one with small delay
+  leads.forEach(function(l,i){
+    setTimeout(function(){
+      var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
+      var subj=fillEmail(STATE.emailSubj,l,co,STATE.user.name);
+      var body=fillEmail(STATE.emailBody,l,co,STATE.user.name);
+      var url=plt==="Gmail"
+        ?"https://mail.google.com/mail/?view=cm&to="+encodeURIComponent(l.email)+"&su="+encodeURIComponent(subj)+"&body="+encodeURIComponent(body)
+        :"https://outlook.live.com/mail/0/deeplink/compose?to="+encodeURIComponent(l.email)+"&subject="+encodeURIComponent(subj)+"&body="+encodeURIComponent(body);
+      window.open(url,"_blank");
+      STATE.emails.push({id:"e"+Date.now()+i,lid:l.id,by:STATE.user.id,to:l.email,subj:subj,body:body,plt:plt,dt:todayIST(),status:"sent"});
+    },i*400);
+  });
+  showToast("Opening "+leads.length+" emails in "+plt,"success");
+  STATE.leadsSelected={};
+  render();
+}
+// Parse date from Excel — handles dd/mm/yyyy, yyyy-mm-dd, Excel serial numbers
+function parseExcelDate(val){
+  if(!val)return todayIST();
+  if(typeof val==="number"){var d=new Date((val-25569)*86400000);return d.toISOString().split("T")[0];}
+  var s=String(val).trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
+  var m=s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+  if(m)return m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
+  var d2=new Date(s);
+  if(!isNaN(d2))return d2.toISOString().split("T")[0];
+  return todayIST();
+}
+
+window.triggerImport=function(){
+  var el=document.getElementById("xl-import");
+  if(el){el.value="";el.click();}
+}
+
+window.importXL=function(input){
+  if(!input.files||!input.files[0])return;
+  var file=input.files[0];
+  var reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      var data=new Uint8Array(e.target.result);
+      var wb=XLSX.read(data,{type:"array"});
+      var sheets=wb.SheetNames;
+      STATE.importWB=wb;
+      if(sheets.length===1){
+        // Only one sheet — go straight to preview
+        var ws=wb.Sheets[sheets[0]];
+        var rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+        if(!rows.length){showToast("No data found in file","warning");return;}
+        STATE.importPreview=rows;
+        STATE.importSheet=sheets[0];
+        STATE.modal=renderImportModal(rows,sheets[0]);
+      } else {
+        // Multiple sheets — show sheet picker first
+        STATE.modal=renderSheetPickerModal(sheets);
+      }
+      render();
+    }catch(err){showToast("Could not read file: "+err.message,"error");}
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function renderSheetPickerModal(sheets){
+  var items=sheets.map(function(s,i){
+    return '<div onclick="selectSheet(\''+htmlEsc(s)+'\')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1.5px solid var(--border);border-radius:var(--r2);cursor:pointer;margin-bottom:8px;transition:all .12s" onmouseenter="this.style.borderColor=\'var(--accent)\';this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.borderColor=\'var(--border)\';this.style.background=\'\'">'+
+      '<div style="width:32px;height:32px;background:var(--accent-l);border-radius:var(--r);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:13px;color:var(--accent)">'+(i+1)+'</div>'+
+      '<div><div style="font-weight:500;font-size:13.5px">'+htmlEsc(s)+'</div>'+
+      '<div class="f12 text3">Sheet '+(i+1)+' of '+sheets.length+'</div></div>'+
+      '<div style="margin-left:auto;color:var(--text3);font-size:18px">›</div>'+
+    '</div>';
+  }).join("");
+  return '<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Select sheet to import</div><button class="btn-icon" onclick="closeModal()">'+ico("x",14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div style="font-size:13px;color:var(--text3);margin-bottom:14px">This file has '+sheets.length+' sheets. Choose which one contains your leads.</div>'+
+      items+
+    '</div>'+
+  '</div>';
+}
+
+window.selectSheet=function(sheetName){
+  if(!STATE.importWB)return;
+  var ws=STATE.importWB.Sheets[sheetName];
+  var rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+  if(!rows.length){showToast("No data found in sheet: "+sheetName,"warning");return;}
+  STATE.importPreview=rows;
+  STATE.importSheet=sheetName;
+  STATE.modal=renderImportModal(rows,sheetName);
+  render();
+}
+
+// Column name mapping — accepts many variations
+function mapCol(row, keys){
+  var r={};
+  Object.keys(row).forEach(function(k){
+    var kl=k.toLowerCase().replace(/[\s_\-\.]/g,"");
+    keys.forEach(function(pair){
+      if(pair[0].some(function(v){return kl===v||kl.includes(v);})){
+        if(!r[pair[1]])r[pair[1]]=String(row[k]||"").trim();
+      }
+    });
+  });
+  return r;
+}
+
+var COL_MAP=[
+  [["companyname","company","firm","organisation","organization"],"company"],
+  [["website","web","url","site"],"website"],
+  [["industry","sector","vertical"],"industry"],
+  [["location","city","place","region"],"location"],
+  [["position","role","jobtitle","jobrole","openrole","vacancy","opening"],"position"],
+  [["firstname","fname","first"],"firstName"],
+  [["lastname","lname","last","surname"],"lastName"],
+  [["designation","title","jobtitle","currenttitle"],"designation"],
+  [["email","emailid","emailaddress","mail"],"email"],
+  [["contact","phone","mobile","phonenumber","contactno","contactnumber"],"phone"],
+  [["linkedin","linkedinurl","linkedinprofile","li"],"linkedin"],
+  [["source","leadsource","foundon","platform"],"source"],
+  [["date","leaddate","dateadded","createdon"],"date"],
+  [["notes","note","comments","remarks"],"notes"],
+];
+
+function renderImportModal(rows, sheetName){
+  var sample=rows.slice(0,3);
+  var cols=Object.keys(rows[0]);
+  var mapped=rows.map(function(r){return mapCol(r,COL_MAP);});
+  var validRows=mapped.filter(function(r){return r.email||r.company||r.firstName;});
+  var skipped=rows.length-validRows.length;
+  var multiSheet=STATE.importWB&&STATE.importWB.SheetNames.length>1;
+
+  var colRows=cols.map(function(c){
+    var kl=c.toLowerCase().replace(/[\s_\-\.]/g,"");
+    var match=COL_MAP.find(function(pair){return pair[0].some(function(v){return kl===v||kl.includes(v);});});
+    var status=match?
+      '<span style="color:var(--green);font-weight:500">→ '+match[1]+'</span>':
+      '<span style="color:var(--text3)">— not mapped</span>';
+    return '<tr><td style="padding:5px 10px;font-size:12.5px">'+htmlEsc(c)+'</td><td style="padding:5px 10px">'+status+'</td></tr>';
+  }).join("");
+
+  return '<div class="modal modal-w640">'+
+    '<div class="mh">'+
+      '<div>'+
+        '<div class="mt">Import leads from Excel</div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:3px">Sheet: <strong style="color:var(--accent)">'+htmlEsc(sheetName||"Sheet1")+'</strong>'+
+        (multiSheet?' · <span style="cursor:pointer;color:var(--accent);text-decoration:underline" onclick="STATE.modal=renderSheetPickerModal(STATE.importWB.SheetNames);render()">Change sheet</span>':'')+
+        '</div>'+
+      '</div>'+
+      '<button class="btn-icon" onclick="closeModal()">'+ico("x",14)+'</button>'+
+    '</div>'+
+    '<div class="mb_">'+
+      '<div style="padding:10px 14px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:14px;font-size:13px">'+
+        '<strong>'+rows.length+' rows found</strong> · '+validRows.length+' will be imported'+
+        (skipped?' · <span style="color:var(--amber)">'+skipped+' skipped (no email/company/name)</span>':'')+
+      '</div>'+
+      '<div class="fw5 f13 mb2">Column mapping</div>'+
+      '<div class="tbl-wrap mb4" style="max-height:200px;overflow-y:auto">'+
+        '<table><thead><tr><th>Your column</th><th>Maps to</th></tr></thead>'+
+        '<tbody>'+colRows+'</tbody></table>'+
+      '</div>'+
+      '<div class="fw5 f13 mb2">Preview (first 3 rows)</div>'+
+      '<div style="background:var(--bg);border-radius:var(--r2);padding:10px;font-size:12px;max-height:140px;overflow-y:auto">'+
+        sample.map(function(r){
+          var m=mapCol(r,COL_MAP);
+          return '<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap">'+
+            (m.firstName?'<span class="bdg bdg-blue">'+htmlEsc(m.firstName+(m.lastName?" "+m.lastName:""))+'</span>':"")+
+            (m.company?'<span class="bdg bdg-gray">'+htmlEsc(m.company)+'</span>':"")+
+            (m.position?'<span class="bdg bdg-gray">'+htmlEsc(m.position)+'</span>':"")+
+            (m.email?'<span class="bdg bdg-teal" style="background:var(--teal-l);color:var(--teal)">'+htmlEsc(m.email)+'</span>':"")+
+          '</div>';
+        }).join("")+
+      '</div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="confirmImport()">'+ico("plus",13)+' Import '+validRows.length+' leads</button>'+
+    '</div>'+
+  '</div>';
+}
+
+window.confirmImport=function(){
+  if(!STATE.importPreview||!STATE.importPreview.length){closeModal();return;}
+  var mapped=STATE.importPreview.map(function(r){return mapCol(r,COL_MAP);});
+  var validRows=mapped.filter(function(r){return r.email||r.company||r.firstName;});
+  var today=todayIST();
+  var imported=0;
+  var skippedDupe=0;
+
+  validRows.forEach(function(r){
+    // Check for duplicate email
+    if(r.email&&STATE.leads.find(function(l){return l.email&&l.email.toLowerCase()===r.email.toLowerCase()&&!l.del;})){
+      skippedDupe++;return;
+    }
+    // Find or create company
+    var coid="";
+    if(r.company){
+      var existing=STATE.companies.find(function(c){return c.name.toLowerCase()===r.company.toLowerCase();});
+      if(existing){
+        coid=existing.id;
+      } else {
+        var newco={id:"c"+Date.now()+imported,name:r.company,web:r.website||"",ind:r.industry||"",loc:r.location||""};
+        STATE.companies.push(newco);
+        coid=newco.id;
+      }
+    }
+    var newlead={
+      id:"l"+Date.now()+imported,
+      coid:coid,
+      pos:r.position||"",
+      fn:r.firstName||r.company||"Unknown",
+      ln:r.lastName||"",
+      desig:r.designation||"",
+      email:r.email||"",
+      phone:r.phone||"",
+      li:r.linkedin||"",
+      src:r.source||"Import",
+      aid:STATE.user.id,
+      bid:STATE.user.bdm||STATE.user.id,
+      stage:"Active",
+      date:r.date?parseExcelDate(r.date):today,
+      sent:null,plt:null,
+      notes:r.notes||"",
+      del:null
+    };
+    STATE.leads.unshift(newlead);
+    STATE.activities.push({id:"a"+Date.now()+imported,lid:newlead.id,uid:STATE.user.id,type:"created",txt:"Lead imported from Excel",dt:today});
+    imported++;
+  });
+
+  STATE.importPreview=null;
+  closeModal();
+  var msg=imported+" leads imported";
+  if(skippedDupe)msg+=" · "+skippedDupe+" duplicates skipped";
+  showToast(msg,"success");
+  render();
+}
+
+// ════════════════════════════════════════════════
+// API LAYER
+// ════════════════════════════════════════════════
+var API_URL = (function(){
+  var h = window.location.hostname;
+  if(h === "" || h === "localhost" || h.indexOf("127.") === 0) return "https://fute-lms-backend.onrender.com";
+  if(h.indexOf("onrender.com") >= 0) return "";
+  return "https://fute-lms-backend.onrender.com";
+})();
+var IS_FILE = window.location.protocol === "file:";
+
+function apiFetch(method, path, body){
+  var opts = { method: method, headers: { "Content-Type": "application/json" } };
+  if(STATE.token) opts.headers["Authorization"] = "Bearer " + STATE.token;
+  if(body) opts.body = JSON.stringify(body);
+  return fetch(API_URL + path, opts).then(function(r){
+    if(!r.ok) return r.json().then(function(e){ throw new Error(e.error || r.statusText); });
+    return r.json();
+  });
+}
+function apiGet(p){ return apiFetch("GET", p); }
+function apiPost(p, b){ return apiFetch("POST", p, b); }
+function apiPatch(p, b){ return apiFetch("PATCH", p, b); }
+function apiPut(p, b){ return apiFetch("PUT", p, b); }
+function apiDel(p){ return apiFetch("DELETE", p); }
+
+function normaliseUser(u){
+  if(!u) return null;
+  return {
+    id: u.id, name: u.name, email: u.email, role: u.role,
+    empId: u.employee_id, desig: u.designation,
+    bdm: u.assigned_bdm_id || null, plt: u.platform || "Gmail",
+    av: (u.name||"?").split(" ").map(function(w){return w[0];}).join("").toUpperCase().slice(0,2),
+    avc: u.role==="admin"?"av-admin":u.role==="bd"?"av-bd":"av-ra"
+  };
+}
+
+function normaliseLead(l){
+  if(!l) return null;
+  var co = l.company || {};
+  return {
+    id: l.id, coid: l.company_id,
+    coName: co.name, coWeb: co.website, coInd: co.industry, coLoc: co.location,
+    pos: l.position, fn: l.first_name, ln: l.last_name || "",
+    desig: l.designation, email: l.email, phone: l.phone, li: l.linkedin,
+    src: l.source, aid: l.analyst_id, bid: l.bdm_id,
+    stage: l.stage, date: l.lead_date, sent: l.email_sent_at,
+    plt: l.email_platform, notes: l.notes || "", del: l.deleted_at
+  };
+}
+
+function loadAppData(){
+  STATE.loading = true; render();
+  var timeout = setTimeout(function(){
+    STATE.loading = false; STATE.user = null; STATE.token = null;
+    localStorage.removeItem("fg_token"); localStorage.removeItem("fg_user");
+    showToast("Connection timed out. Try again.", "error"); render();
+  }, 15000);
+  return Promise.all([
+    apiGet("/users"), apiGet("/leads"), apiGet("/companies"),
+    apiGet("/emails"), apiGet("/reminders")
+  ]).then(function(r){
+    clearTimeout(timeout);
+    STATE.users = r[0].map(normaliseUser);
+    STATE.leads = r[1].map(normaliseLead);
+    STATE.companies = r[2].map(function(c){ return {id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location}; });
+    STATE.emails = r[3].map(function(e){ return {id:e.id,lid:e.lead_id,by:e.sent_by,to:e.to_email,subj:e.subject,body:e.body,plt:e.platform,dt:e.sent_at,status:e.status}; });
+    STATE.reminders = r[4].map(function(x){ return {id:x.id,lid:x.lead_id,uid:x.user_id,name:x.contact_name,company:x.company_name,email:x.email,returnDate:x.return_date,reminderTime:x.reminder_time,note:x.note,status:x.status,createdAt:x.created_at}; });
+    STATE.activities = [];
+    STATE.loading = false; render();
+  }).catch(function(err){
+    clearTimeout(timeout);
+    STATE.loading = false; STATE.user = null; STATE.token = null;
+    localStorage.removeItem("fg_token"); localStorage.removeItem("fg_user");
+    showToast("Could not connect: " + err.message, "error"); render();
+  });
+}
+
+// ── OVERRIDE ACTIONS TO USE REAL API ────────────
+
+window.doLogin = function(){
+  if(IS_FILE){ showToast("Open via fute-lms-backend.onrender.com to sign in","warning"); return; }
+  var emailEl = document.getElementById("login-email");
+  var passEl = document.getElementById("login-pass");
+  var errEl = document.getElementById("login-err");
+  var email = (emailEl||{}).value||""; var pass = (passEl||{}).value||"";
+  if(!email||!pass){ if(errEl){errEl.textContent="Enter email and password";errEl.style.display="block";} return; }
+  STATE.loading = true; render();
+  apiPost("/auth/login", {email:email, password:pass}).then(function(data){
+    STATE.token = data.token;
+    STATE.user = normaliseUser(data.user);
+    localStorage.setItem("fg_token", data.token);
+    localStorage.setItem("fg_user", JSON.stringify(STATE.user));
+    STATE.page = "dashboard";
+    loadAppData();
+  }).catch(function(err){
+    STATE.loading = false; render();
+    var e = document.getElementById("login-err");
+    if(e){ e.textContent = err.message||"Invalid email or password"; e.style.display="block"; }
+  });
+};
+
+window.quickLogin = function(email){
+  if(IS_FILE){ showToast("Open via fute-lms-backend.onrender.com to use live login","warning"); return; }
+  STATE.loading = true; render();
+  apiPost("/auth/login", {email:email, password:"Fute@2024"}).then(function(data){
+    STATE.token = data.token;
+    STATE.user = normaliseUser(data.user);
+    localStorage.setItem("fg_token", data.token);
+    localStorage.setItem("fg_user", JSON.stringify(STATE.user));
+    STATE.page = "dashboard";
+    loadAppData();
+  }).catch(function(err){
+    STATE.loading = false; showToast("Login failed: "+err.message,"error"); render();
+  });
+};
+
+window.signOut = function(){
+  STATE.user=null; STATE.token=null; STATE.leads=[]; STATE.users=[];
+  STATE.companies=[]; STATE.emails=[]; STATE.reminders=[];
+  STATE.modal=null; STATE.viewingUser=null;
+  localStorage.removeItem("fg_token"); localStorage.removeItem("fg_user");
+  render();
+};
+
+window.changeStage = function(id, stage){
+  var old = (STATE.leads.find(function(l){return l.id===id;})||{}).stage;
+  STATE.leads = STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{stage:stage}):l;});
+  if(STATE.detailLead&&STATE.detailLead.id===id) STATE.detailLead=Object.assign({},STATE.detailLead,{stage:stage});
+  render();
+  apiPatch("/leads/"+id, {stage:stage, _oldStage:old}).catch(function(e){
+    STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{stage:old}):l;});
+    showToast("Stage update failed","error"); render();
+  });
+  showToast('Stage → "'+stage+'"',"success");
+};
+
+window.deleteLead = function(id){
+  if(!confirm("Move to trash? Deleted after 60 days.")) return;
+  apiDel("/leads/"+id).then(function(){
+    STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{del:todayIST()}):l;});
+    if(STATE.detailLead&&STATE.detailLead.id===id) STATE.detailLead=null;
+    showToast("Lead moved to trash","info"); render();
+  }).catch(function(e){showToast("Delete failed: "+e.message,"error");});
+};
+
+window.saveNotes = function(){
+  var el = document.getElementById("dp-notes");
+  if(el&&STATE.detailLead){
+    var notes = el.value;
+    apiPatch("/leads/"+STATE.detailLead.id, {notes:notes}).then(function(){
+      STATE.leads=STATE.leads.map(function(l){return l.id===STATE.detailLead.id?Object.assign({},l,{notes:notes}):l;});
+      STATE.detailLead=Object.assign({},STATE.detailLead,{notes:notes});
+      showToast("Notes saved","success"); render();
+    }).catch(function(e){showToast("Save failed: "+e.message,"error");});
+  }
+};
+
+window.applyBulk = function(){
+  var sel = document.getElementById("bulk-stage");
+  if(!sel||!sel.value) return;
+  var stage = sel.value;
+  var ids = Object.keys(STATE.leadsSelected).filter(function(id){return STATE.leadsSelected[id];});
+  if(!ids.length) return;
+  apiPatch("/leads/bulk/stage", {ids:ids, stage:stage}).then(function(){
+    STATE.leads=STATE.leads.map(function(l){return ids.indexOf(l.id)>=0?Object.assign({},l,{stage:stage}):l;});
+    STATE.leadsSelected={};
+    showToast("Stage updated for "+ids.length+" leads","success"); render();
+  }).catch(function(e){showToast("Bulk update failed: "+e.message,"error");});
+};
+
+window.saveLead = function(){
+  var fn=document.getElementById("f-fn"), emailEl=document.getElementById("f-email"), pos=document.getElementById("f-pos");
+  if(!fn||!fn.value||!emailEl||!emailEl.value||!pos||!pos.value){showToast("First name, email and position required","warning");return;}
+  var btn=document.querySelector(".modal .btn-primary");
+  if(btn){btn.textContent="Saving...";btn.disabled=true;}
+  function doSave(coid){
+    apiPost("/leads",{
+      company_id:coid, position:pos.value, first_name:fn.value,
+      last_name:(document.getElementById("f-ln")||{}).value||"",
+      designation:(document.getElementById("f-desig")||{}).value||"",
+      email:emailEl.value, phone:(document.getElementById("f-phone")||{}).value||"",
+      linkedin:(document.getElementById("f-li")||{}).value||"",
+      source:(document.getElementById("f-src")||{}).value||"LinkedIn",
+      analyst_id:(document.getElementById("f-ra")||{}).value||STATE.user.id,
+      bdm_id:(document.getElementById("f-bd")||{}).value||STATE.user.bdm||null,
+      lead_date:todayIST()
+    }).then(function(lead){
+      STATE.leads.unshift(normaliseLead(lead));
+      closeModal(); showToast("Lead added","success"); render();
+    }).catch(function(e){showToast("Failed: "+e.message,"error");if(btn){btn.textContent="Save lead";btn.disabled=false;}});
+  }
+  if(coNewMode){
+    var coname=document.getElementById("f-coname");
+    if(!coname||!coname.value){showToast("Company name required","warning");if(btn){btn.textContent="Save lead";btn.disabled=false;}return;}
+    apiPost("/companies",{name:coname.value,website:(document.getElementById("f-web")||{}).value||"",industry:(document.getElementById("f-ind")||{}).value||"",location:(document.getElementById("f-loc")||{}).value||""})
+    .then(function(co){
+      STATE.companies.push({id:co.id,name:co.name,web:co.website,ind:co.industry,loc:co.location});
+      doSave(co.id);
+    }).catch(function(e){showToast("Company save failed: "+e.message,"error");if(btn){btn.textContent="Save lead";btn.disabled=false;}});
+  } else {
+    doSave((document.getElementById("f-coid")||{}).value);
+  }
+};
+
+window.saveProfile = function(){
+  var name=(document.getElementById("p-name")||{}).value||STATE.user.name;
+  var email=(document.getElementById("p-email")||{}).value||STATE.user.email;
+  var eid=(document.getElementById("p-eid")||{}).value||STATE.user.empId;
+  var desig=(document.getElementById("p-desig")||{}).value||STATE.user.desig;
+  apiPut("/users/"+STATE.user.id,{name:name,email:email,employee_id:eid,designation:desig}).then(function(){
+    STATE.user=Object.assign({},STATE.user,{name:name,email:email,empId:eid,desig:desig});
+    STATE.users=STATE.users.map(function(u){return u.id===STATE.user.id?STATE.user:u;});
+    showToast("Profile updated","success"); render();
+  }).catch(function(e){showToast("Failed: "+e.message,"error");});
+};
+
+window.setProfilePlt = function(p){
+  apiPut("/users/"+STATE.user.id,{platform:p}).then(function(){
+    STATE.user=Object.assign({},STATE.user,{plt:p});
+    STATE.users=STATE.users.map(function(u){return u.id===STATE.user.id?STATE.user:u;});
+    showToast("Platform set to "+p,"success"); render();
+  }).catch(function(e){showToast("Failed: "+e.message,"error");});
+};
+
+window.changePassword = function(){
+  var cur=(document.getElementById("pw-cur")||{}).value;
+  var nw=(document.getElementById("pw-new")||{}).value;
+  var con=(document.getElementById("pw-con")||{}).value;
+  if(!nw||nw.length<6){showToast("Min 6 characters","warning");return;}
+  if(nw!==con){showToast("Passwords don't match","warning");return;}
+  apiPost("/auth/change-password",{currentPassword:cur,newPassword:nw}).then(function(){
+    showToast("Password updated","success");
+    ["pw-cur","pw-new","pw-con"].forEach(function(id){var e=document.getElementById(id);if(e)e.value="";});
+  }).catch(function(e){showToast("Failed: "+e.message,"error");});
+};
+
+window.saveUser = function(existingId){
+  var name=(document.getElementById("u-name")||{}).value||"";
+  var email=(document.getElementById("u-email")||{}).value||"";
+  if(!name||!email){showToast("Name and email required","warning");return;}
+  var payload={name:name,email:email,role:(document.getElementById("u-role")||{}).value||"ra",employee_id:(document.getElementById("u-eid")||{}).value||"",designation:(document.getElementById("u-desig")||{}).value||"",platform:(document.getElementById("u-plt")||{}).value||"Gmail",assigned_bdm_id:(document.getElementById("u-bd")||{}).value||null};
+  if(existingId){
+    apiPut("/users/"+existingId,payload).then(function(data){
+      STATE.users=STATE.users.map(function(u){return u.id===existingId?normaliseUser(data):u;});
+      showToast("User updated","success"); closeModal(); render();
+    }).catch(function(e){showToast("Failed: "+e.message,"error");});
+  } else {
+    payload.password="Fute@2024";
+    apiPost("/users",payload).then(function(data){
+      STATE.users.push(normaliseUser(data));
+      showToast("User added · password: Fute@2024","success"); closeModal(); render();
+    }).catch(function(e){showToast("Failed: "+e.message,"error");});
+  }
+};
+
+window.removeUser = function(id){
+  if(id===STATE.user.id){showToast("Cannot remove yourself","warning");return;}
+  if(!confirm("Remove this user?")) return;
+  apiDel("/users/"+id).then(function(){
+    STATE.users=STATE.users.filter(function(u){return u.id!==id;});
+    showToast("User removed","info"); render();
+  }).catch(function(e){showToast("Failed: "+e.message,"error");});
+};
+
+window.saveReminder = function(lid, manualEmail){
+  var lead=lid?STATE.leads.find(function(l){return l.id===lid;}):null;
+  var co=lead?STATE.companies.find(function(c){return c.id===lead.coid;})||{}:{};
+  var dt=(document.getElementById("rem-date")||{}).value;
+  var tm=(document.getElementById("rem-time")||{}).value||"09:00";
+  var note=(document.getElementById("rem-note")||{}).value||"";
+  if(!dt){showToast("Please set a date","warning");return;}
+  apiPost("/reminders",{
+    lead_id:lid||null,
+    contact_name:lead?(lead.fn+" "+lead.ln):(manualEmail||""),
+    company_name:lead?(co.name||""):"",
+    email:lead?lead.email:(manualEmail||""),
+    return_date:dt, reminder_time:tm, note:note
+  }).then(function(data){
+    STATE.reminders.push({id:data.id,lid:lid||null,uid:STATE.user.id,name:data.contact_name,company:data.company_name,email:data.email,returnDate:dt,reminderTime:tm,note:note,status:"pending",createdAt:todayIST()});
+    closeModal(); STATE.reminderSearch=null;
+    showToast("Reminder set for "+fmtDate(dt),"success"); render();
+  }).catch(function(e){showToast("Failed: "+e.message,"error");});
+};
+
+window.dismissReminder = function(rid){
+  apiDel("/reminders/"+rid).then(function(){
+    STATE.reminders=STATE.reminders.filter(function(r){return r.id!==rid;});
+    showToast("Reminder removed","info"); render();
+  }).catch(function(e){showToast("Failed: "+e.message,"error");});
+};
+
+window.sendEmail = function(){
+  var ge=STATE.genEmail;
+  if(!ge){
+    var ml=STATE.mergeLeadId?STATE.leads.find(function(l){return l.id===STATE.mergeLeadId;}):null;
+    if(!ml&&!STATE.manualEmail){showToast("Select a recipient first","warning");return;}
+    if(ml){var co=STATE.companies.find(function(c){return c.id===ml.coid;})||{};ge={to:ml.fn+" "+ml.ln,email:ml.email,subj:fillEmail(STATE.emailSubj,ml,co,STATE.user.name),body:fillEmail(STATE.emailBody,ml,co,STATE.user.name),lid:ml.id};}
+    else{ge={to:STATE.manualEmail,email:STATE.manualEmail,subj:STATE.emailSubj,body:STATE.emailBody,lid:null};}
+  }
+  var plt=STATE.user.plt||"Gmail";
+  window.open(plt==="Gmail"
+    ?"https://mail.google.com/mail/?view=cm&to="+encodeURIComponent(ge.email)+"&su="+encodeURIComponent(ge.subj)+"&body="+encodeURIComponent(ge.body)
+    :"https://outlook.live.com/mail/0/deeplink/compose?to="+encodeURIComponent(ge.email)+"&subject="+encodeURIComponent(ge.subj)+"&body="+encodeURIComponent(ge.body),"_blank");
+  apiPost("/emails",{lead_id:ge.lid,to_email:ge.email,subject:ge.subj,body:ge.body,platform:plt}).then(function(data){
+    STATE.emails.unshift({id:data.id,lid:ge.lid,by:STATE.user.id,to:ge.email,subj:ge.subj,body:ge.body,plt:plt,dt:todayIST(),status:"sent"});
+    showToast("Email sent and saved","success"); render();
+  }).catch(function(){showToast("Email opened (not saved)","warning");});
+};
+
+window.viewLead = function(id){
+  STATE.detailLead=STATE.leads.find(function(l){return l.id===id;});
+  apiGet("/leads/"+id+"/activity").then(function(acts){
+    STATE.activities=STATE.activities.filter(function(a){return a.lid!==id;});
+    acts.forEach(function(a){STATE.activities.push({id:a.id,lid:a.lead_id,uid:a.user_id,type:a.action_type,txt:a.description,dt:a.created_at?a.created_at.split("T")[0]:""});});
+    render();
+  }).catch(function(){});
+  render();
 };
 
 // ════════════════════════════════════════════════
-// BOOT — always start at login screen
+// BOOT
 // ════════════════════════════════════════════════
-document.addEventListener('DOMContentLoaded', function(){
-  localStorage.removeItem("fute_token");
-  localStorage.removeItem("fute_user");
-  STATE.loading=false;
-  STATE.user=null;
-  STATE.token=null;
-  render();
+document.addEventListener("DOMContentLoaded", function(){
+  var savedToken = localStorage.getItem("fg_token");
+  var savedUser = localStorage.getItem("fg_user");
+  if(savedToken && savedUser){
+    try{
+      STATE.token = savedToken;
+      STATE.user = JSON.parse(savedUser);
+      STATE.page = "dashboard";
+      loadAppData();
+    } catch(e){
+      localStorage.removeItem("fg_token"); localStorage.removeItem("fg_user");
+      render();
+    }
+  } else {
+    render();
+  }
 });
-
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </body>
