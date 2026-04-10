@@ -573,9 +573,35 @@ function fillEmail(tmpl,l,co,sender){
 // RENDER LOGIN
 // ════════════════════════════════════════════════
 function renderLogin(){
-  var picks=USERS.map(function(u){return '<button class="fc" onclick="loginAs(\''+u.email+'\')" style="font-size:11.5px">'+u.name+'</button>';}).join('');
-  var fileWarning=IS_FILE?'<div style="background:#FEF3C7;border:1px solid #D97706;border-radius:var(--r);padding:10px 12px;margin-bottom:14px;font-size:12px;color:#92400E"><strong>⚠ Opened as local file.</strong> Go to <a href="https://fute-lms-backend.onrender.com" style="color:#1D4ED8;font-weight:500" target="_blank">fute-lms-backend.onrender.com</a> to use the live version.</div>':'';
-  return '<div class="login-wrap"><div class="login-card"><div class="login-top"><div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><div style="width:44px;height:44px;min-width:44px;background:rgba(255,255,255,.2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:var(--display);font-weight:700;font-size:17px;color:#fff;flex-shrink:0">FG</div><div><div style="font-family:var(--display);font-weight:700;font-size:20px;color:#fff;line-height:1.2">Fute Global LLC</div><div style="font-size:12px;color:rgba(255,255,255,.82);margin-top:2px">Lead Management Software</div></div></div><div style="font-size:11.5px;color:rgba(255,255,255,.65);border-top:1px solid rgba(255,255,255,.2);padding-top:10px">Internal platform · Authorized personnel only</div></div><div class="login-body">'+fileWarning+'<div style="font-family:var(--display);font-weight:600;font-size:17px;margin-bottom:5px">Welcome back</div><div style="font-size:13px;color:var(--text3);margin-bottom:20px">Sign in with your Fute Global account</div><button class="google-btn" onclick="showToast(\'Google Workspace login coming soon\',\'info\')"><span style="width:20px;height:20px;display:inline-flex">'+icon("google")+'</span>Continue with Google Workspace</button><div class="or-div">or sign in with email</div><div class="fgrp"><label class="flbl">Work email</label><input class="inp" id="login-email" type="email" placeholder="you@futeglobal.com"/></div><div class="fgrp"><label class="flbl">Password</label><input class="inp" id="login-pass" type="password" placeholder="••••••••"/></div><div id="login-err" style="display:none;color:var(--red);font-size:12px;background:var(--red-l);padding:8px 10px;border-radius:var(--r);margin-bottom:10px"></div><button class="btn btn-primary w100" style="justify-content:center" onclick="doLogin()">Sign in</button><div style="margin-top:14px;font-size:12px;color:var(--text3)">Quick sign in — click any name:</div><div class="demo-picks">'+picks+'</div></div></div></div>'+renderToasts();
+  var picks=STATE.users.map(function(u){
+    return '<button class="fc" onclick="loginAs(\''+u.id+'\')" style="font-size:11.5px">'+u.name+'</button>';
+  }).join("");
+  return '<div class="login-wrap">'+
+    '<div class="login-card">'+
+      '<div class="login-top">'+
+        '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">'+
+          '<div style="width:44px;height:44px;min-width:44px;background:rgba(255,255,255,.2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:var(--display);font-weight:700;font-size:17px;color:#fff;flex-shrink:0">FG</div>'+
+          '<div><div style="font-family:var(--display);font-weight:700;font-size:20px;color:#fff;line-height:1.2">Fute Global LLC</div><div style="font-size:12px;color:rgba(255,255,255,.82);margin-top:2px">Lead Management Software</div></div>'+
+        '</div>'+
+        '<div style="font-size:11.5px;color:rgba(255,255,255,.65);border-top:1px solid rgba(255,255,255,.2);padding-top:10px">Internal platform · Authorized personnel only</div>'+
+      '</div>'+
+      '<div class="login-body">'+
+        '<div style="font-family:var(--display);font-weight:600;font-size:17px;margin-bottom:5px">Welcome back</div>'+
+        '<div style="font-size:13px;color:var(--text3);margin-bottom:20px">Sign in with your Fute Global account</div>'+
+        '<button class="google-btn" onclick="loginAs(\'u1\')">'+
+          '<span style="width:20px;height:20px;display:inline-flex">'+icon("google")+'</span>'+
+          'Continue with Google Workspace'+
+        '</button>'+
+        '<div class="or-div">or sign in with email</div>'+
+        '<div class="fgrp"><label class="flbl">Work email</label><input class="inp" id="login-email" type="email" placeholder="you@futeglobal.com"/></div>'+
+        '<div class="fgrp"><label class="flbl">Password</label><input class="inp" id="login-pass" type="password" placeholder="••••••••"/></div>'+
+        '<div id="login-err" style="display:none;color:var(--red);font-size:12px;background:var(--red-l);padding:8px 10px;border-radius:var(--r);margin-bottom:10px"></div>'+
+        '<button class="btn btn-primary w100" style="justify-content:center" onclick="doLogin()">Sign in</button>'+
+        '<div style="margin-top:14px;font-size:12px;color:var(--text3)">Demo: click any name below to sign in instantly</div>'+
+        '<div class="demo-picks">'+picks+'</div>'+
+      '</div>'+
+    '</div>'+
+  '</div>'+renderToasts();
 }
 
 // ════════════════════════════════════════════════
@@ -1965,10 +1991,20 @@ window.setPlatform=function(p){STATE.user.plt=p;render();}
 window.openEmailPreviewModal=function(){
   // Build genEmail if not already set (fill template variables from selected lead)
   if(!STATE.genEmail){
-    var ml=STATE.mergeLeadId?STATE.leads.find(function(l){return l.id===STATE.mergeLeadId;}):null;
+    // Use loose equality (==) so UUID strings match even if stored as different types
+    var ml=null;
+    if(STATE.mergeLeadId){
+      ml=STATE.leads.find(function(l){return l.id==STATE.mergeLeadId;});
+      if(!ml){console.warn('[preview] mergeLeadId not found in STATE.leads:',STATE.mergeLeadId);}
+    }
     if(ml){
-      var co=STATE.companies.find(function(c){return c.id===ml.coid;})||{name:ml.coName,ind:ml.coInd,loc:ml.coLoc};
-      STATE.genEmail={to:ml.fn+' '+ml.ln,email:ml.email,subj:fillEmail(STATE.emailSubj,ml,co,STATE.user.name),body:fillEmail(STATE.emailBody,ml,co,STATE.user.name),lid:ml.id};
+      // Prefer flat company fields from normaliseLead; fall back to STATE.companies lookup; final fallback to nested l.company
+      var co={
+        name:ml.coName||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).name||(ml.company&&ml.company.name)||'',
+        ind:ml.coInd||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).ind||(ml.company&&ml.company.industry)||'',
+        loc:ml.coLoc||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).loc||(ml.company&&ml.company.location)||''
+      };
+      STATE.genEmail={to:(ml.fn||'')+' '+(ml.ln||''),email:ml.email,subj:fillEmail(STATE.emailSubj,ml,co,STATE.user.name),body:fillEmail(STATE.emailBody,ml,co,STATE.user.name),lid:ml.id};
     } else if(STATE.manualEmail){
       STATE.genEmail={to:STATE.manualEmail,email:STATE.manualEmail,subj:STATE.emailSubj.replace(/{{[\w]+}}/g,''),body:STATE.emailBody.replace(/{{[\w]+}}/g,''),lid:null};
     } else {
@@ -2038,38 +2074,41 @@ window.generateAI=function(){
     render();return;
   }
   if(!STATE.mergeLeadId){showToast("Select a recipient first","warning");return;}
-  var ml=STATE.leads.find(function(l){return l.id===STATE.mergeLeadId;});
-  if(!ml)return;
-  var co=STATE.companies.find(function(c){return c.id===ml.coid;})||{};
+  var ml=STATE.leads.find(function(l){return l.id==STATE.mergeLeadId;});
+  if(!ml){showToast("Selected lead not found","error");return;}
+  var co=STATE.companies.find(function(c){return c.id==ml.coid;})||{name:ml.coName,ind:ml.coInd,loc:ml.coLoc};
 
   // Show spinner — render() preserves scroll
   STATE.aiGenerating=true;render();
 
-  var prompt="You are a business development executive at Fute Global LLC (a specialist staffing and recruitment firm).\n\n"+
-    "Write a cold outreach email to:\n"+
-    "Name: "+ml.fn+" "+ml.ln+"\n"+
-    "Title: "+ml.desig+"\n"+
-    "Company: "+co.name+(co.ind?" ("+co.ind+")":"")+"\n"+
-    "Location: "+(co.loc||"India")+"\n"+
-    "They are hiring for: "+ml.pos+"\n\n"+
-    "Instructions from the sender:\n"+customInstructions+"\n\n"+
-    "Format your response as:\nSubject: [subject line]\n\n[email body]";
-
-  fetch("https://api.anthropic.com/v1/messages",{
-    method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,messages:[{role:"user",content:prompt}]})
-  }).then(function(r){return r.json();}).then(function(data){
-    var text=(data.content&&data.content[0]&&data.content[0].text)||"";
-    var sm=text.match(/Subject:\s*(.+)/i);
-    var subj=sm?sm[1].trim():fillEmail(STATE.emailSubj,ml,co,STATE.user.name);
-    var body=text.replace(/^Subject:.+\n*/im,"").trim()||fillEmail(STATE.emailBody,ml,co,STATE.user.name);
-    STATE.genEmail={to:ml.fn+" "+ml.ln,email:ml.email,subj:subj,body:body,lid:ml.id};
-    STATE.aiGenerating=false;render();
-  }).catch(function(){
-    // Fallback to template if AI fails
+  // Helper: build a fallback genEmail from template (no AI)
+  function fallbackToTemplate(){
     STATE.genEmail={to:ml.fn+" "+ml.ln,email:ml.email,subj:fillEmail(STATE.emailSubj,ml,co,STATE.user.name),body:fillEmail(STATE.emailBody,ml,co,STATE.user.name),lid:ml.id};
     STATE.aiGenerating=false;render();
-  });
+  }
+
+  // If running in LIVE (API layer present), call backend proxy. Otherwise fall back to local template fill.
+  if(typeof apiPost==="function"){
+    apiPost("/ai/generate-email",{
+      lead:{first_name:ml.fn,last_name:ml.ln,position:ml.pos,designation:ml.desig,email:ml.email},
+      company:{name:co.name,industry:co.ind,location:co.loc},
+      template:{subject:STATE.emailSubj,body:STATE.emailBody},
+      instructions:customInstructions
+    }).then(function(data){
+      var subj=data.subject||fillEmail(STATE.emailSubj,ml,co,STATE.user.name);
+      var body=data.body||fillEmail(STATE.emailBody,ml,co,STATE.user.name);
+      STATE.genEmail={to:ml.fn+" "+ml.ln,email:ml.email,subj:subj,body:body,lid:ml.id};
+      STATE.aiGenerating=false;render();
+      showToast("Email generated","success");
+    }).catch(function(err){
+      console.error("[generateAI] backend call failed:",err);
+      showToast("AI generation failed — used template instead","warning");
+      fallbackToTemplate();
+    });
+  } else {
+    // Standalone offline mode — just use template fill
+    fallbackToTemplate();
+  }
 };
 
 window.sendEmail=function(){
@@ -2767,7 +2806,7 @@ window.confirmImport=function(){
 }
 
 // ════════════════════════════════════════════════
-// API LAYER
+// BOOT
 // ════════════════════════════════════════════════
 var API_URL=(function(){var h=window.location.hostname;if(h===''||h==='localhost'||h.indexOf('127.')===0)return'https://fute-lms-backend.onrender.com';if(h.indexOf('onrender.com')>=0)return'';return'https://fute-lms-backend.onrender.com';})();
 var IS_FILE=window.location.protocol==='file:';
@@ -2805,6 +2844,8 @@ document.addEventListener('DOMContentLoaded',function(){
   var t=localStorage.getItem('fg_token'),uu=localStorage.getItem('fg_user');
   if(t&&uu){try{STATE.token=t;STATE.user=JSON.parse(uu);STATE.page='dashboard';loadAppData();}catch(e){localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');render();}}else{render();}
 });
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </body>
