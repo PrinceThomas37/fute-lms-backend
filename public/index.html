@@ -277,19 +277,33 @@ tr.sel-row td{background:var(--accent-l)}
 // SEED DATA
 // ════════════════════════════════════════════════
 var USERS = [
-  {id:"u1",name:"Prince Thomas",email:"prince@futeglobal.com",role:"admin",empId:"FG-001",desig:"Business Dev. Manager",bdm:null,av:"PT",avc:"av-admin",plt:"Gmail"},
-  {id:"u2",name:"Ash",email:"ash@futeglobal.com",role:"bd",empId:"FG-002",desig:"Business Dev. Manager",bdm:null,av:"AS",avc:"av-bd",plt:"Gmail"},
-  {id:"u3",name:"Pranay",email:"pranay@futeglobal.com",role:"bd",empId:"FG-003",desig:"Business Dev. Manager",bdm:null,av:"PR",avc:"av-bd",plt:"Outlook"},
-  {id:"u4",name:"Andy",email:"andy@futeglobal.com",role:"bd",empId:"FG-004",desig:"Business Dev. Manager",bdm:null,av:"AN",avc:"av-bd",plt:"Gmail"},
-  {id:"u5",name:"Sarah",email:"sarah@futeglobal.com",role:"bd",empId:"FG-005",desig:"Business Dev. Manager",bdm:null,av:"SA",avc:"av-bd",plt:"Outlook"},
-  {id:"u6",name:"Mick Thompson",email:"mick@futeglobal.com",role:"ra",empId:"FG-006",desig:"Research Analyst",bdm:"u1",av:"MT",avc:"av-ra",plt:"Gmail"},
-  {id:"u7",name:"Neal Patrick",email:"neal@futeglobal.com",role:"ra",empId:"FG-007",desig:"Research Analyst",bdm:"u1",av:"NP",avc:"av-ra",plt:"Gmail"},
-  {id:"u8",name:"Lisa Anderson",email:"lisa@futeglobal.com",role:"ra",empId:"FG-008",desig:"Research Analyst",bdm:"u1",av:"LA",avc:"av-ra",plt:"Outlook"},
-  {id:"u9",name:"Daniel James",email:"daniel@futeglobal.com",role:"ra",empId:"FG-009",desig:"Research Analyst",bdm:"u1",av:"DJ",avc:"av-ra",plt:"Gmail"},
-  {id:"u10",name:"Karen",email:"karen@futeglobal.com",role:"ra",empId:"FG-010",desig:"Research Analyst",bdm:"u2",av:"KR",avc:"av-sp",plt:"Gmail"},
-  {id:"u11",name:"Kristy Scott",email:"kristy@futeglobal.com",role:"ra",empId:"FG-011",desig:"Research Analyst",bdm:"u3",av:"KS",avc:"av-ra",plt:"Outlook"},
-  {id:"u12",name:"Justin",email:"justin@futeglobal.com",role:"ra",empId:"FG-012",desig:"Research Analyst",bdm:"u4",av:"JU",avc:"av-ra",plt:"Gmail"},
-  {id:"u13",name:"Spencer Brown",email:"spencer@futeglobal.com",role:"ra",empId:"FG-013",desig:"Research Analyst",bdm:"u5",av:"SB",avc:"av-ra",plt:"Gmail"}
+  // BD Team
+  {id:"u1",name:"Prince Thomas",  email:"prince@futeglobal.com", role:"admin",empId:"FG-001",desig:"Business Development Manager",bdm:null,av:"PT",avc:"av-admin",plt:"Gmail"},
+  {id:"u2",name:"Ash Sayyad",     email:"ash@futeglobal.com",    role:"bd",   empId:"FG-002",desig:"Business Development Manager",bdm:null,av:"AS",avc:"av-bd",  plt:"Gmail"},
+  {id:"u3",name:"Pranay Narayan", email:"pranay@futeglobal.com", role:"bd",   empId:"FG-003",desig:"Business Development Manager",bdm:null,av:"PN",avc:"av-bd",  plt:"Gmail"},
+  {id:"u4",name:"Sarah Smith",    email:"sarah@futeglobal.com",  role:"bd",   empId:"FG-004",desig:"Business Development Manager",bdm:null,av:"SS",avc:"av-bd",  plt:"Gmail"},
+  {id:"u5",name:"Patrick Wilson", email:"patrick@futeglobal.com",role:"bd",   empId:"FG-005",desig:"Business Development Manager",bdm:null,av:"PW",avc:"av-bd",  plt:"Gmail"},
+  {id:"u6",name:"Michael Smith",  email:"michael@futeglobal.com",role:"bd",   empId:"FG-006",desig:"Business Development Manager",bdm:null,av:"MS",avc:"av-bd",  plt:"Gmail"},
+  {id:"u7",name:"Gregg Daniels",  email:"gregg@futeglobal.com",  role:"bd",   empId:"FG-007",desig:"Business Development Manager",bdm:null,av:"GD",avc:"av-bd",  plt:"Gmail"},
+  // RA Team (unassigned — assign via Admin tab)
+  {id:"u8", name:"Steven Parker",  email:"steven@futeglobal.com",  role:"ra",empId:"FG-008",desig:"Research Analyst",bdm:null,av:"SP",avc:"av-ra",plt:"Gmail"},
+  {id:"u9", name:"Mick Thompson",  email:"mick@futeglobal.com",    role:"ra",empId:"FG-009",desig:"Research Analyst",bdm:null,av:"MT",avc:"av-ra",plt:"Gmail"},
+  {id:"u10",name:"Dan Johnson",    email:"dan@futeglobal.com",     role:"ra",empId:"FG-010",desig:"Research Analyst",bdm:null,av:"DJ",avc:"av-ra",plt:"Gmail"},
+  {id:"u11",name:"Amy Hernandez",  email:"amy@futeglobal.com",     role:"ra",empId:"FG-011",desig:"Research Analyst",bdm:null,av:"AH",avc:"av-ra",plt:"Gmail"},
+  {id:"u12",name:"Jessica Davis",  email:"jessica@futeglobal.com", role:"ra",empId:"FG-012",desig:"Research Analyst",bdm:null,av:"JD",avc:"av-ra",plt:"Gmail"},
+  {id:"u13",name:"Nancy Parker",   email:"nancy@futeglobal.com",   role:"ra",empId:"FG-013",desig:"Research Analyst",bdm:null,av:"NP",avc:"av-ra",plt:"Gmail"},
+  {id:"u14",name:"Julia Jens",     email:"julia@futeglobal.com",   role:"ra",empId:"FG-014",desig:"Research Analyst",bdm:null,av:"JJ",avc:"av-ra",plt:"Gmail"},
+  {id:"u15",name:"Diana Davis",    email:"diana@futeglobal.com",   role:"ra",empId:"FG-015",desig:"Research Analyst",bdm:null,av:"DD",avc:"av-ra",plt:"Gmail"},
+  {id:"u16",name:"Anna Harper",    email:"anna@futeglobal.com",    role:"ra",empId:"FG-016",desig:"Research Analyst",bdm:null,av:"AH",avc:"av-ra",plt:"Gmail"},
+  {id:"u17",name:"Justin Clark",   email:"justin@futeglobal.com",  role:"ra",empId:"FG-017",desig:"Research Analyst",bdm:null,av:"JC",avc:"av-ra",plt:"Gmail"},
+  {id:"u18",name:"Lisa Anderson",  email:"lisa@futeglobal.com",    role:"ra",empId:"FG-018",desig:"Research Analyst",bdm:null,av:"LA",avc:"av-ra",plt:"Gmail"},
+  {id:"u19",name:"Kristy Scott",   email:"kristy@futeglobal.com",  role:"ra",empId:"FG-019",desig:"Research Analyst",bdm:null,av:"KS",avc:"av-ra",plt:"Gmail"},
+  {id:"u20",name:"Stephan Hunter", email:"stephan@futeglobal.com", role:"ra",empId:"FG-020",desig:"Research Analyst",bdm:null,av:"SH",avc:"av-ra",plt:"Gmail"},
+  {id:"u21",name:"Melissa White",  email:"melissa@futeglobal.com", role:"ra",empId:"FG-021",desig:"Research Analyst",bdm:null,av:"MW",avc:"av-ra",plt:"Gmail"},
+  {id:"u22",name:"David Miller",   email:"david@futeglobal.com",   role:"ra",empId:"FG-022",desig:"Research Analyst",bdm:null,av:"DM",avc:"av-ra",plt:"Gmail"},
+  {id:"u23",name:"Daniel James",   email:"daniel@futeglobal.com",  role:"ra",empId:"FG-023",desig:"Research Analyst",bdm:null,av:"DJ",avc:"av-ra",plt:"Gmail"},
+  {id:"u24",name:"Sharon Moss",    email:"sharon@futeglobal.com",  role:"ra",empId:"FG-024",desig:"Research Analyst",bdm:null,av:"SM",avc:"av-ra",plt:"Gmail"},
+  {id:"u25",name:"Neal Patrick",   email:"neal@futeglobal.com",    role:"ra",empId:"FG-025",desig:"Research Analyst",bdm:null,av:"NP",avc:"av-ra",plt:"Gmail"}
 ];
 
 var COMPANIES = [
@@ -313,8 +327,8 @@ var SOURCES = ["LinkedIn","Indeed","Naukri","Company Website","Glassdoor","Angel
 var POSITIONS = ["CTO","VP of Engineering","Head of Product","Procurement Director","Head of Digital","CFO","Director HR","VP Sales","Head of Operations","CMO","CHRO"];
 var FIRSTNAMES = ["Arjun","Sunita","Vikram","Pooja","Rahul","Priya","Aditya","Sneha","Rohan","Meera","Karan","Divya","Amit","Neha"];
 var LASTNAMES = ["Kapoor","Rao","Nair","Desai","Sharma","Singh","Mehta","Patel","Gupta","Kumar","Joshi","Verma"];
-var RA_IDS = ["u6","u7","u8","u9","u10","u11","u12","u13"];
-var RA_BD = {"u6":"u1","u7":"u1","u8":"u1","u9":"u1","u10":"u2","u11":"u3","u12":"u4","u13":"u5"};
+var RA_IDS = ["u8","u9","u10","u11","u12","u13","u14","u15","u16","u17","u18","u19","u20","u21","u22","u23","u24","u25"];
+var RA_BD = {"u8":"u1","u9":"u1","u10":"u2","u11":"u2","u12":"u3","u13":"u3","u14":"u4","u15":"u4","u16":"u5","u17":"u5","u18":"u6","u19":"u6","u20":"u7","u21":"u7","u22":"u1","u23":"u2","u24":"u3","u25":"u4"};
 
 function rp(arr){return arr[Math.floor(Math.random()*arr.length)]}
 function rd(days){var d=new Date();d.setDate(d.getDate()-Math.floor(Math.random()*days));return d.toISOString().split("T")[0]}
@@ -388,6 +402,7 @@ var STATE = {
   emailSubj: "Opportunity regarding {{pos}} at {{company}}",
   emailBody: "Hi {{fn}},\n\nI came across {{company}} and was really impressed by what you're building in the {{ind}} space.\n\nAt Fute Global, we specialize in connecting organizations with top-tier talent. Given your role as {{desig}}, I believe we could be genuinely helpful with your {{pos}} search.\n\nWould you be open to a quick 15-minute call this week?\n\nWarm regards,\n{{sender}}\nFute Global LLC",
   genEmail: null,
+  aiGenerating: false,
   adminTab: "users",
   adminView: "bd",
   addUserForm: null,
@@ -447,9 +462,23 @@ function render(){
     '</div>';
     return;
   }
+  // Save all scroll positions before re-render
+  var content=document.getElementById("content");
+  var scrollTop=content?content.scrollTop:0;
+  var pageEl=content?content.querySelector(".page"):null;
+  var pageScroll=pageEl?pageEl.scrollTop:0;
+  var winScroll=window.scrollY||0;
   root.innerHTML=renderApp();
   bindApp();
   startClock();
+  // Restore scroll positions after re-render
+  var newContent=document.getElementById("content");
+  if(newContent){
+    if(scrollTop)newContent.scrollTop=scrollTop;
+    var newPage=newContent.querySelector(".page");
+    if(newPage&&pageScroll)newPage.scrollTop=pageScroll;
+  }
+  if(winScroll)window.scrollTo(0,winScroll);
 }
 
 // ════════════════════════════════════════════════
@@ -544,37 +573,9 @@ function fillEmail(tmpl,l,co,sender){
 // RENDER LOGIN
 // ════════════════════════════════════════════════
 function renderLogin(){
-  var picks=USERS.map(function(u){
-    return '<button class="fc" onclick="loginAs(\''+u.email+'\')" style="font-size:11.5px">'+u.name+'</button>';
-  }).join('');
+  var picks=USERS.map(function(u){return '<button class="fc" onclick="loginAs(\''+u.email+'\')" style="font-size:11.5px">'+u.name+'</button>';}).join('');
   var fileWarning=IS_FILE?'<div style="background:#FEF3C7;border:1px solid #D97706;border-radius:var(--r);padding:10px 12px;margin-bottom:14px;font-size:12px;color:#92400E"><strong>⚠ Opened as local file.</strong> Go to <a href="https://fute-lms-backend.onrender.com" style="color:#1D4ED8;font-weight:500" target="_blank">fute-lms-backend.onrender.com</a> to use the live version.</div>':'';
-  return '<div class="login-wrap">'+
-    '<div class="login-card">'+
-      '<div class="login-top">'+
-        '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">'+
-          '<div style="width:44px;height:44px;min-width:44px;background:rgba(255,255,255,.2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:var(--display);font-weight:700;font-size:17px;color:#fff;flex-shrink:0">FG</div>'+
-          '<div><div style="font-family:var(--display);font-weight:700;font-size:20px;color:#fff;line-height:1.2">Fute Global LLC</div><div style="font-size:12px;color:rgba(255,255,255,.82);margin-top:2px">Lead Management Software</div></div>'+
-        '</div>'+
-        '<div style="font-size:11.5px;color:rgba(255,255,255,.65);border-top:1px solid rgba(255,255,255,.2);padding-top:10px">Internal platform · Authorized personnel only</div>'+
-      '</div>'+
-      '<div class="login-body">'+
-        fileWarning+
-        '<div style="font-family:var(--display);font-weight:600;font-size:17px;margin-bottom:5px">Welcome back</div>'+
-        '<div style="font-size:13px;color:var(--text3);margin-bottom:20px">Sign in with your Fute Global account</div>'+
-        '<button class="google-btn" onclick="showToast(\'Google Workspace login coming soon\',\'info\')">'+
-          '<span style="width:20px;height:20px;display:inline-flex">'+icon("google")+'</span>'+
-          'Continue with Google Workspace'+
-        '</button>'+
-        '<div class="or-div">or sign in with email</div>'+
-        '<div class="fgrp"><label class="flbl">Work email</label><input class="inp" id="login-email" type="email" placeholder="you@futeglobal.com"/></div>'+
-        '<div class="fgrp"><label class="flbl">Password</label><input class="inp" id="login-pass" type="password" placeholder="••••••••"/></div>'+
-        '<div id="login-err" style="display:none;color:var(--red);font-size:12px;background:var(--red-l);padding:8px 10px;border-radius:var(--r);margin-bottom:10px"></div>'+
-        '<button class="btn btn-primary w100" style="justify-content:center" onclick="doLogin()">Sign in</button>'+
-        '<div style="margin-top:14px;font-size:12px;color:var(--text3)">Quick sign in — click any name:</div>'+
-        '<div class="demo-picks">'+picks+'</div>'+
-      '</div>'+
-    '</div>'+
-  '</div>'+renderToasts();
+  return '<div class="login-wrap"><div class="login-card"><div class="login-top"><div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><div style="width:44px;height:44px;min-width:44px;background:rgba(255,255,255,.2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:var(--display);font-weight:700;font-size:17px;color:#fff;flex-shrink:0">FG</div><div><div style="font-family:var(--display);font-weight:700;font-size:20px;color:#fff;line-height:1.2">Fute Global LLC</div><div style="font-size:12px;color:rgba(255,255,255,.82);margin-top:2px">Lead Management Software</div></div></div><div style="font-size:11.5px;color:rgba(255,255,255,.65);border-top:1px solid rgba(255,255,255,.2);padding-top:10px">Internal platform · Authorized personnel only</div></div><div class="login-body">'+fileWarning+'<div style="font-family:var(--display);font-weight:600;font-size:17px;margin-bottom:5px">Welcome back</div><div style="font-size:13px;color:var(--text3);margin-bottom:20px">Sign in with your Fute Global account</div><button class="google-btn" onclick="showToast(\'Google Workspace login coming soon\',\'info\')"><span style="width:20px;height:20px;display:inline-flex">'+icon("google")+'</span>Continue with Google Workspace</button><div class="or-div">or sign in with email</div><div class="fgrp"><label class="flbl">Work email</label><input class="inp" id="login-email" type="email" placeholder="you@futeglobal.com"/></div><div class="fgrp"><label class="flbl">Password</label><input class="inp" id="login-pass" type="password" placeholder="••••••••"/></div><div id="login-err" style="display:none;color:var(--red);font-size:12px;background:var(--red-l);padding:8px 10px;border-radius:var(--r);margin-bottom:10px"></div><button class="btn btn-primary w100" style="justify-content:center" onclick="doLogin()">Sign in</button><div style="margin-top:14px;font-size:12px;color:var(--text3)">Quick sign in — click any name:</div><div class="demo-picks">'+picks+'</div></div></div></div>'+renderToasts();
 }
 
 // ════════════════════════════════════════════════
@@ -1245,7 +1246,11 @@ function renderEmail(){
           '</div>'+
 
           '<div class="flex gap2 aic flex-wrap">'+
-            '<button class="btn btn-outline" onclick="generateAI()" id="gen-btn" '+(hasRecipient?'':' disabled style="opacity:.5"')+' style="background:var(--purple-l);color:var(--purple);border-color:rgba(124,58,237,.3)">✨ Generate with AI</button>'+
+            '<button class="btn btn-outline" onclick="generateAI()" id="gen-btn" '+(hasRecipient?'':' disabled style="opacity:.5"')+' style="background:var(--purple-l);color:var(--purple);border-color:rgba(124,58,237,.3);min-width:160px">'+
+              (STATE.aiGenerating?
+                '<span style="display:inline-flex;align-items:center;gap:7px"><span style="width:13px;height:13px;border:2px solid rgba(124,58,237,.3);border-top-color:var(--purple);border-radius:50%;animation:spin .7s linear infinite;display:inline-block"></span>Generating...</span>'
+                :'✨ Generate with AI')+
+            '</button>'+
             '<div class="flex gap1">'+
               '<button class="fc'+(u.plt==="Gmail"?" on":"")+'" onclick="setPlatform(\'Gmail\')">Gmail</button>'+
               '<button class="fc'+(u.plt==="Outlook"?" on":"")+'" onclick="setPlatform(\'Outlook\')">Outlook</button>'+
@@ -1765,8 +1770,10 @@ function renderAddLeadModal(){
 // ── ADD/EDIT USER MODAL ────────────────────────
 function renderUserModal(existing){
   var u=existing||{name:"",email:"",role:"ra",empId:"FG-0"+(STATE.users.length+1),desig:"",bdm:"",plt:"Gmail"};
-  var bds=STATE.users.filter(function(x){return x.role==="bd"||x.role==="admin"});
-  var bdOpts='<option value="">— Unassigned —</option>'+bds.map(function(b){return'<option value="'+b.id+'"'+(u.bdm===b.id?" selected":"")+'>'+b.name+'</option>'}).join("");
+  var bds=STATE.users.filter(function(x){return x.role==="bd"||x.role==="admin";});
+  var bdOpts='<option value="">— Unassigned —</option>'+bds.map(function(b){return'<option value="'+b.id+'"'+(u.bdm===b.id?" selected":"")+'>'+b.name+'</option>';}).join("");
+  // Only show BD assignment field if role is RA — use onchange to show/hide dynamically
+  var isRA=u.role==="ra";
   return '<div class="modal modal-w480">'+
     '<div class="mh"><div class="mt">'+(existing?"Edit user":"Add new user")+'</div><button class="btn-icon" onclick="closeModal()">'+ico("x",14)+'</button></div>'+
     '<div class="mb_">'+
@@ -1779,10 +1786,19 @@ function renderUserModal(existing){
         '<div class="fgrp"><label class="flbl">Designation</label><input class="inp" id="u-desig" value="'+htmlEsc(u.desig)+'"/></div>'+
       '</div>'+
       '<div class="g2 mb3">'+
-        '<div class="fgrp"><label class="flbl">Role</label><select class="sel" id="u-role"><option value="ra"'+(u.role==="ra"?" selected":"")+'>Research Analyst</option><option value="bd"'+(u.role==="bd"?" selected":"")+'>BD Manager</option><option value="admin"'+(u.role==="admin"?" selected":"")+'>Admin</option></select></div>'+
+        '<div class="fgrp"><label class="flbl">Role</label>'+
+          '<select class="sel" id="u-role" onchange="toggleBDAssign(this.value)">'+
+            '<option value="ra"'+(u.role==="ra"?" selected":"")+'>Research Analyst</option>'+
+            '<option value="bd"'+(u.role==="bd"?" selected":"")+'>BD Manager</option>'+
+            '<option value="admin"'+(u.role==="admin"?" selected":"")+'>Admin</option>'+
+          '</select>'+
+        '</div>'+
         '<div class="fgrp"><label class="flbl">Email platform</label><select class="sel" id="u-plt"><option'+(u.plt==="Gmail"?" selected":"")+'>Gmail</option><option'+(u.plt==="Outlook"?" selected":"")+'>Outlook</option></select></div>'+
       '</div>'+
-      '<div class="fgrp"><label class="flbl">Assigned BD Manager</label><select class="sel" id="u-bd">'+bdOpts+'</select></div>'+
+      '<div class="fgrp" id="u-bd-wrap" style="'+(isRA?"":"display:none")+'">'+
+        '<label class="flbl">Assigned BD Manager <span style="font-size:11px;color:var(--text3)">(only for Research Analysts)</span></label>'+
+        '<select class="sel" id="u-bd">'+bdOpts+'</select>'+
+      '</div>'+
     '</div>'+
     '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveUser('+(existing?'\''+existing.id+'\'':null)+')">'+( existing?"Save changes":"Add user")+'</button></div>'+
   '</div>';
@@ -2010,13 +2026,11 @@ window.useManualEmail=function(){
 }
 
 window.generateAI=function(){
-  var btn=document.getElementById("gen-btn");
   var customInstructions=STATE.aiPrompt||STATE.aiPromptDefault;
-  // Sync prompt textarea value
   var promptEl=document.getElementById("ai-prompt-inp");
   if(promptEl&&promptEl.value)customInstructions=promptEl.value;
 
-  // Handle manual email
+  // Handle manual email — no AI needed
   if(STATE.manualEmail&&!STATE.mergeLeadId){
     var subj=STATE.emailSubj.replace(/{{[\w]+}}/g,"");
     var body=STATE.emailBody.replace(/{{fn}}/g,"").replace(/{{[\w]+}}/g,"");
@@ -2024,10 +2038,12 @@ window.generateAI=function(){
     render();return;
   }
   if(!STATE.mergeLeadId){showToast("Select a recipient first","warning");return;}
-  var ml=STATE.leads.find(function(l){return l.id===STATE.mergeLeadId});
-  if(!ml){return;}
-  var co=STATE.companies.find(function(c){return c.id===ml.coid})||{};
-  if(btn){btn.textContent="Generating...";btn.disabled=true;}
+  var ml=STATE.leads.find(function(l){return l.id===STATE.mergeLeadId;});
+  if(!ml)return;
+  var co=STATE.companies.find(function(c){return c.id===ml.coid;})||{};
+
+  // Show spinner — render() preserves scroll
+  STATE.aiGenerating=true;render();
 
   var prompt="You are a business development executive at Fute Global LLC (a specialist staffing and recruitment firm).\n\n"+
     "Write a cold outreach email to:\n"+
@@ -2042,20 +2058,19 @@ window.generateAI=function(){
   fetch("https://api.anthropic.com/v1/messages",{
     method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,messages:[{role:"user",content:prompt}]})
-  }).then(function(r){return r.json()}).then(function(data){
+  }).then(function(r){return r.json();}).then(function(data){
     var text=(data.content&&data.content[0]&&data.content[0].text)||"";
     var sm=text.match(/Subject:\s*(.+)/i);
     var subj=sm?sm[1].trim():fillEmail(STATE.emailSubj,ml,co,STATE.user.name);
     var body=text.replace(/^Subject:.+\n*/im,"").trim()||fillEmail(STATE.emailBody,ml,co,STATE.user.name);
     STATE.genEmail={to:ml.fn+" "+ml.ln,email:ml.email,subj:subj,body:body,lid:ml.id};
-    if(btn){btn.textContent="✨ Generate with AI";btn.disabled=false;}
-    render();
+    STATE.aiGenerating=false;render();
   }).catch(function(){
+    // Fallback to template if AI fails
     STATE.genEmail={to:ml.fn+" "+ml.ln,email:ml.email,subj:fillEmail(STATE.emailSubj,ml,co,STATE.user.name),body:fillEmail(STATE.emailBody,ml,co,STATE.user.name),lid:ml.id};
-    if(btn){btn.textContent="✨ Generate with AI";btn.disabled=false;}
-    render();
+    STATE.aiGenerating=false;render();
   });
-}
+};
 
 window.sendEmail=function(){
   // If no generated email, build one from template + current recipient
@@ -2096,6 +2111,10 @@ window.insertVar=function(v){
   if(el){var s=el.selectionStart||el.value.length;STATE.emailBody=STATE.emailBody.slice(0,s)+v+STATE.emailBody.slice(s);render();}
 }
 
+window.toggleBDAssign=function(role){
+  var wrap=document.getElementById("u-bd-wrap");
+  if(wrap)wrap.style.display=role==="ra"?"":"none";
+};
 window.openAddUser=function(){STATE.modal=renderUserModal(null);render();}
 window.editUser=function(id){var u=STATE.users.find(function(x){return x.id===id});if(u){STATE.modal=renderUserModal(u);render();}}
 window.removeUser=function(id){
@@ -2750,278 +2769,41 @@ window.confirmImport=function(){
 // ════════════════════════════════════════════════
 // API LAYER
 // ════════════════════════════════════════════════
-var API_URL=(function(){
-  var h=window.location.hostname;
-  if(h===''||h==='localhost'||h.indexOf('127.')===0)return'https://fute-lms-backend.onrender.com';
-  if(h.indexOf('onrender.com')>=0)return'';
-  return'https://fute-lms-backend.onrender.com';
-})();
+var API_URL=(function(){var h=window.location.hostname;if(h===''||h==='localhost'||h.indexOf('127.')===0)return'https://fute-lms-backend.onrender.com';if(h.indexOf('onrender.com')>=0)return'';return'https://fute-lms-backend.onrender.com';})();
 var IS_FILE=window.location.protocol==='file:';
-
-function apiFetch(method,path,body){
-  var opts={method:method,headers:{'Content-Type':'application/json'}};
-  if(STATE.token)opts.headers['Authorization']='Bearer '+STATE.token;
-  if(body)opts.body=JSON.stringify(body);
-  return fetch(API_URL+path,opts).then(function(r){
-    if(!r.ok)return r.json().then(function(e){throw new Error(e.error||r.statusText);});
-    return r.json();
-  });
-}
+function apiFetch(method,path,body){var opts={method:method,headers:{'Content-Type':'application/json'}};if(STATE.token)opts.headers['Authorization']='Bearer '+STATE.token;if(body)opts.body=JSON.stringify(body);return fetch(API_URL+path,opts).then(function(r){if(!r.ok)return r.json().then(function(e){throw new Error(e.error||r.statusText);});return r.json();});}
 function apiGet(p){return apiFetch('GET',p);}
 function apiPost(p,b){return apiFetch('POST',p,b);}
 function apiPatch(p,b){return apiFetch('PATCH',p,b);}
 function apiPut(p,b){return apiFetch('PUT',p,b);}
 function apiDel(p){return apiFetch('DELETE',p);}
-
-function normaliseUser(u){
-  if(!u)return null;
-  return{id:u.id,name:u.name,email:u.email,role:u.role,empId:u.employee_id,desig:u.designation,bdm:u.assigned_bdm_id||null,plt:u.platform||'Gmail',av:(u.name||'?').split(' ').map(function(w){return w[0];}).join('').toUpperCase().slice(0,2),avc:u.role==='admin'?'av-admin':u.role==='bd'?'av-bd':'av-ra'};
-}
-function normaliseLead(l){
-  if(!l)return null;
-  var co=l.company||{};
-  return{id:l.id,coid:l.company_id,coName:co.name,coWeb:co.website,coInd:co.industry,coLoc:co.location,pos:l.position,fn:l.first_name,ln:l.last_name||'',desig:l.designation,email:l.email,phone:l.phone,li:l.linkedin,src:l.source,aid:l.analyst_id,bid:l.bdm_id,stage:l.stage,date:l.lead_date,sent:l.email_sent_at,plt:l.email_platform,notes:l.notes||'',del:l.deleted_at};
-}
-
-function loadAppData(){
-  STATE.loading=true;render();
-  var timeout=setTimeout(function(){
-    STATE.loading=false;STATE.user=null;STATE.token=null;
-    localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');
-    showToast('Connection timed out. Try again.','error');render();
-  },15000);
-  return Promise.all([apiGet('/users'),apiGet('/leads'),apiGet('/companies'),apiGet('/emails'),apiGet('/reminders')])
-  .then(function(r){
-    clearTimeout(timeout);
-    STATE.users=r[0].map(normaliseUser);
-    STATE.leads=r[1].map(normaliseLead);
-    STATE.companies=r[2].map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});
-    STATE.emails=r[3].map(function(e){return{id:e.id,lid:e.lead_id,by:e.sent_by,to:e.to_email,subj:e.subject,body:e.body,plt:e.platform,dt:e.sent_at,status:e.status};});
-    STATE.reminders=r[4].map(function(x){return{id:x.id,lid:x.lead_id,uid:x.user_id,name:x.contact_name,company:x.company_name,email:x.email,returnDate:x.return_date,reminderTime:x.reminder_time,note:x.note,status:x.status,createdAt:x.created_at};});
-    STATE.activities=[];STATE.loading=false;render();
-  }).catch(function(err){
-    clearTimeout(timeout);
-    STATE.loading=false;STATE.user=null;STATE.token=null;
-    localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');
-    showToast('Could not connect: '+err.message,'error');render();
-  });
-}
-
-window.loginAs=function(email){
-  if(IS_FILE){showToast('Open via fute-lms-backend.onrender.com to sign in','warning');return;}
-  STATE.loading=true;render();
-  apiPost('/auth/login',{email:email,password:'Fute@2024'}).then(function(data){
-    STATE.token=data.token;STATE.user=normaliseUser(data.user);
-    localStorage.setItem('fg_token',data.token);localStorage.setItem('fg_user',JSON.stringify(STATE.user));
-    STATE.page='dashboard';loadAppData();
-  }).catch(function(e){STATE.loading=false;showToast('Login failed: '+e.message,'error');render();});
-};
-
-window.doLogin=function(){
-  if(IS_FILE){showToast('Open via fute-lms-backend.onrender.com to sign in','warning');return;}
-  var emailEl=document.getElementById('login-email'),passEl=document.getElementById('login-pass'),errEl=document.getElementById('login-err');
-  var email=(emailEl||{}).value||'',pass=(passEl||{}).value||'';
-  if(!email||!pass){if(errEl){errEl.textContent='Enter email and password';errEl.style.display='block';}return;}
-  STATE.loading=true;render();
-  apiPost('/auth/login',{email:email,password:pass}).then(function(data){
-    STATE.token=data.token;STATE.user=normaliseUser(data.user);
-    localStorage.setItem('fg_token',data.token);localStorage.setItem('fg_user',JSON.stringify(STATE.user));
-    STATE.page='dashboard';loadAppData();
-  }).catch(function(err){
-    STATE.loading=false;render();
-    var e=document.getElementById('login-err');
-    if(e){e.textContent=err.message||'Invalid email or password';e.style.display='block';}
-  });
-};
-
-window.signOut=function(){
-  STATE.user=null;STATE.token=null;STATE.leads=[];STATE.users=[];STATE.companies=[];STATE.emails=[];STATE.reminders=[];STATE.modal=null;STATE.viewingUser=null;
-  localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');render();
-};
-
-window.changeStage=function(id,stage){
-  var old=(STATE.leads.find(function(l){return l.id===id;})||{}).stage;
-  STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{stage:stage}):l;});
-  if(STATE.detailLead&&STATE.detailLead.id===id)STATE.detailLead=Object.assign({},STATE.detailLead,{stage:stage});
-  render();
-  apiPatch('/leads/'+id,{stage:stage,_oldStage:old}).catch(function(){
-    STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{stage:old}):l;});
-    showToast('Stage update failed','error');render();
-  });
-  showToast('Stage → "'+stage+'"','success');
-};
-
-window.deleteLead=function(id){
-  if(!confirm('Move to trash? Deleted after 60 days.'))return;
-  apiDel('/leads/'+id).then(function(){
-    STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{del:todayIST()}):l;});
-    if(STATE.detailLead&&STATE.detailLead.id===id)STATE.detailLead=null;
-    showToast('Lead moved to trash','info');render();
-  }).catch(function(e){showToast('Delete failed: '+e.message,'error');});
-};
-
-window.saveNotes=function(){
-  var el=document.getElementById('dp-notes');
-  if(el&&STATE.detailLead){
-    var notes=el.value;
-    apiPatch('/leads/'+STATE.detailLead.id,{notes:notes}).then(function(){
-      STATE.leads=STATE.leads.map(function(l){return l.id===STATE.detailLead.id?Object.assign({},l,{notes:notes}):l;});
-      STATE.detailLead=Object.assign({},STATE.detailLead,{notes:notes});
-      showToast('Notes saved','success');render();
-    }).catch(function(e){showToast('Save failed: '+e.message,'error');});
-  }
-};
-
-window.applyBulk=function(){
-  var sel=document.getElementById('bulk-stage');
-  if(!sel||!sel.value)return;
-  var stage=sel.value;
-  var ids=Object.keys(STATE.leadsSelected).filter(function(id){return STATE.leadsSelected[id];});
-  if(!ids.length)return;
-  apiPatch('/leads/bulk/stage',{ids:ids,stage:stage}).then(function(){
-    STATE.leads=STATE.leads.map(function(l){return ids.indexOf(l.id)>=0?Object.assign({},l,{stage:stage}):l;});
-    STATE.leadsSelected={};showToast('Stage updated for '+ids.length+' leads','success');render();
-  }).catch(function(e){showToast('Bulk update failed: '+e.message,'error');});
-};
-
-window.saveLead=function(){
-  var fn=document.getElementById('f-fn'),emailEl=document.getElementById('f-email'),pos=document.getElementById('f-pos');
-  if(!fn||!fn.value||!emailEl||!emailEl.value||!pos||!pos.value){showToast('First name, email and position required','warning');return;}
-  var btn=document.querySelector('.modal .btn-primary');
-  if(btn){btn.textContent='Saving...';btn.disabled=true;}
-  function doSave(coid){
-    apiPost('/leads',{company_id:coid,position:pos.value,first_name:fn.value,last_name:(document.getElementById('f-ln')||{}).value||'',designation:(document.getElementById('f-desig')||{}).value||'',email:emailEl.value,phone:(document.getElementById('f-phone')||{}).value||'',linkedin:(document.getElementById('f-li')||{}).value||'',source:(document.getElementById('f-src')||{}).value||'LinkedIn',analyst_id:(document.getElementById('f-ra')||{}).value||STATE.user.id,bdm_id:(document.getElementById('f-bd')||{}).value||STATE.user.bdm||null,lead_date:todayIST()})
-    .then(function(lead){STATE.leads.unshift(normaliseLead(lead));closeModal();showToast('Lead added','success');render();})
-    .catch(function(e){showToast('Failed: '+e.message,'error');if(btn){btn.textContent='Save lead';btn.disabled=false;}});
-  }
-  if(coNewMode){
-    var coname=document.getElementById('f-coname');
-    if(!coname||!coname.value){showToast('Company name required','warning');if(btn){btn.textContent='Save lead';btn.disabled=false;}return;}
-    apiPost('/companies',{name:coname.value,website:(document.getElementById('f-web')||{}).value||'',industry:(document.getElementById('f-ind')||{}).value||'',location:(document.getElementById('f-loc')||{}).value||''})
-    .then(function(co){STATE.companies.push({id:co.id,name:co.name,web:co.website,ind:co.industry,loc:co.location});doSave(co.id);})
-    .catch(function(e){showToast('Company save failed: '+e.message,'error');if(btn){btn.textContent='Save lead';btn.disabled=false;}});
-  } else {doSave((document.getElementById('f-coid')||{}).value);}
-};
-
-window.viewLead=function(id){
-  STATE.detailLead=STATE.leads.find(function(l){return l.id===id;});
-  apiGet('/leads/'+id+'/activity').then(function(acts){
-    STATE.activities=STATE.activities.filter(function(a){return a.lid!==id;});
-    acts.forEach(function(a){STATE.activities.push({id:a.id,lid:a.lead_id,uid:a.user_id,type:a.action_type,txt:a.description,dt:a.created_at?a.created_at.split('T')[0]:''});});
-    render();
-  }).catch(function(){});
-  render();
-};
-
-window.sendEmail=function(){
-  var ge=STATE.genEmail;
-  if(!ge){
-    var ml=STATE.mergeLeadId?STATE.leads.find(function(l){return l.id===STATE.mergeLeadId;}):null;
-    if(!ml&&!STATE.manualEmail){showToast('Select a recipient first','warning');return;}
-    if(ml){var co=STATE.companies.find(function(c){return c.id===ml.coid;})||{};ge={to:ml.fn+' '+ml.ln,email:ml.email,subj:fillEmail(STATE.emailSubj,ml,co,STATE.user.name),body:fillEmail(STATE.emailBody,ml,co,STATE.user.name),lid:ml.id};}
-    else{ge={to:STATE.manualEmail,email:STATE.manualEmail,subj:STATE.emailSubj,body:STATE.emailBody,lid:null};}
-  }
-  var plt=STATE.user.plt||'Gmail';
-  var gmailUser=STATE.user.email||'';
-  window.open(plt==='Gmail'
-    ?'https://mail.google.com/mail/u/0/?authuser='+encodeURIComponent(gmailUser)+'&view=cm&to='+encodeURIComponent(ge.email)+'&su='+encodeURIComponent(ge.subj)+'&body='+encodeURIComponent(ge.body)
-    :'https://outlook.office.com/mail/deeplink/compose?to='+encodeURIComponent(ge.email)+'&subject='+encodeURIComponent(ge.subj)+'&body='+encodeURIComponent(ge.body),'_blank');
-  apiPost('/emails',{lead_id:ge.lid,to_email:ge.email,subject:ge.subj,body:ge.body,platform:plt}).then(function(data){
-    STATE.emails.unshift({id:data.id,lid:ge.lid,by:STATE.user.id,to:ge.email,subj:ge.subj,body:ge.body,plt:plt,dt:todayIST(),status:'sent'});
-    showToast('Email sent and saved','success');render();
-  }).catch(function(){showToast('Email opened (not saved to server)','warning');});
-};
-
-window.saveReminder=function(lid,manualEmail){
-  var lead=lid?STATE.leads.find(function(l){return l.id===lid;}):null;
-  var co=lead?STATE.companies.find(function(c){return c.id===lead.coid;})||{}:{};
-  var dt=(document.getElementById('rem-date')||{}).value;
-  var tm=(document.getElementById('rem-time')||{}).value||'09:00';
-  var note=(document.getElementById('rem-note')||{}).value||'';
-  if(!dt){showToast('Please set a date','warning');return;}
-  apiPost('/reminders',{lead_id:lid||null,contact_name:lead?(lead.fn+' '+lead.ln):(manualEmail||''),company_name:lead?(co.name||''):'',email:lead?lead.email:(manualEmail||''),return_date:dt,reminder_time:tm,note:note})
-  .then(function(data){
-    STATE.reminders.push({id:data.id,lid:lid||null,uid:STATE.user.id,name:data.contact_name,company:data.company_name,email:data.email,returnDate:dt,reminderTime:tm,note:note,status:'pending',createdAt:todayIST()});
-    closeModal();STATE.reminderSearch=null;showToast('Reminder set for '+fmtDate(dt),'success');render();
-  }).catch(function(e){showToast('Failed: '+e.message,'error');});
-};
-
-window.dismissReminder=function(rid){
-  apiDel('/reminders/'+rid).then(function(){
-    STATE.reminders=STATE.reminders.filter(function(r){return r.id!==rid;});
-    showToast('Reminder removed','info');render();
-  }).catch(function(e){showToast('Failed: '+e.message,'error');});
-};
-
-window.saveUser=function(existingId){
-  var name=(document.getElementById('u-name')||{}).value||'';
-  var email=(document.getElementById('u-email')||{}).value||'';
-  if(!name||!email){showToast('Name and email required','warning');return;}
-  var payload={name:name,email:email,role:(document.getElementById('u-role')||{}).value||'ra',employee_id:(document.getElementById('u-eid')||{}).value||'',designation:(document.getElementById('u-desig')||{}).value||'',platform:(document.getElementById('u-plt')||{}).value||'Gmail',assigned_bdm_id:(document.getElementById('u-bd')||{}).value||null};
-  if(existingId){
-    apiPut('/users/'+existingId,payload).then(function(data){
-      STATE.users=STATE.users.map(function(u){return u.id===existingId?normaliseUser(data):u;});
-      showToast('User updated','success');closeModal();render();
-    }).catch(function(e){showToast('Failed: '+e.message,'error');});
-  } else {
-    payload.password='Fute@2024';
-    apiPost('/users',payload).then(function(data){
-      STATE.users.push(normaliseUser(data));
-      showToast('User added · default password: Fute@2024','success');closeModal();render();
-    }).catch(function(e){showToast('Failed: '+e.message,'error');});
-  }
-};
-
-window.removeUser=function(id){
-  if(id===STATE.user.id){showToast('Cannot remove yourself','warning');return;}
-  if(!confirm('Remove this user?'))return;
-  apiDel('/users/'+id).then(function(){
-    STATE.users=STATE.users.filter(function(u){return u.id!==id;});
-    showToast('User removed','info');render();
-  }).catch(function(e){showToast('Failed: '+e.message,'error');});
-};
-
-window.saveProfile=function(){
-  var name=(document.getElementById('p-name')||{}).value||STATE.user.name;
-  var email=(document.getElementById('p-email')||{}).value||STATE.user.email;
-  var eid=(document.getElementById('p-eid')||{}).value||STATE.user.empId;
-  var desig=(document.getElementById('p-desig')||{}).value||STATE.user.desig;
-  apiPut('/users/'+STATE.user.id,{name:name,email:email,employee_id:eid,designation:desig}).then(function(){
-    STATE.user=Object.assign({},STATE.user,{name:name,email:email,empId:eid,desig:desig});
-    STATE.users=STATE.users.map(function(u){return u.id===STATE.user.id?STATE.user:u;});
-    showToast('Profile updated','success');render();
-  }).catch(function(e){showToast('Failed: '+e.message,'error');});
-};
-
-window.setProfilePlt=function(p){
-  apiPut('/users/'+STATE.user.id,{platform:p}).then(function(){
-    STATE.user=Object.assign({},STATE.user,{plt:p});
-    STATE.users=STATE.users.map(function(u){return u.id===STATE.user.id?STATE.user:u;});
-    showToast('Platform set to '+p,'success');render();
-  }).catch(function(e){showToast('Failed: '+e.message,'error');});
-};
-
-window.changePassword=function(){
-  var cur=(document.getElementById('pw-cur')||{}).value;
-  var nw=(document.getElementById('pw-new')||{}).value;
-  var con=(document.getElementById('pw-con')||{}).value;
-  if(!nw||nw.length<6){showToast('Min 6 characters','warning');return;}
-  if(nw!==con){showToast("Passwords don't match",'warning');return;}
-  apiPost('/auth/change-password',{currentPassword:cur,newPassword:nw}).then(function(){
-    showToast('Password updated','success');
-    ['pw-cur','pw-new','pw-con'].forEach(function(id){var e=document.getElementById(id);if(e)e.value='';});
-  }).catch(function(e){showToast('Failed: '+e.message,'error');});
-};
+function normaliseUser(u){if(!u)return null;return{id:u.id,name:u.name,email:u.email,role:u.role,empId:u.employee_id,desig:u.designation,bdm:u.assigned_bdm_id||null,plt:u.platform||'Gmail',av:(u.name||'?').split(' ').map(function(w){return w[0];}).join('').toUpperCase().slice(0,2),avc:u.role==='admin'?'av-admin':u.role==='bd'?'av-bd':'av-ra'};}
+function normaliseLead(l){if(!l)return null;var co=l.company||{};return{id:l.id,coid:l.company_id,coName:co.name,coWeb:co.website,coInd:co.industry,coLoc:co.location,pos:l.position,fn:l.first_name,ln:l.last_name||'',desig:l.designation,email:l.email,phone:l.phone,li:l.linkedin,src:l.source,aid:l.analyst_id,bid:l.bdm_id,stage:l.stage,date:l.lead_date,sent:l.email_sent_at,plt:l.email_platform,notes:l.notes||'',del:l.deleted_at};}
+function loadAppData(){STATE.loading=true;render();var timeout=setTimeout(function(){STATE.loading=false;STATE.user=null;STATE.token=null;localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');showToast('Connection timed out.','error');render();},15000);return Promise.all([apiGet('/users'),apiGet('/leads'),apiGet('/companies'),apiGet('/emails'),apiGet('/reminders')]).then(function(r){clearTimeout(timeout);STATE.users=r[0].map(normaliseUser);STATE.leads=r[1].map(normaliseLead);STATE.companies=r[2].map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});STATE.emails=r[3].map(function(e){return{id:e.id,lid:e.lead_id,by:e.sent_by,to:e.to_email,subj:e.subject,body:e.body,plt:e.platform,dt:e.sent_at,status:e.status};});STATE.reminders=r[4].map(function(x){return{id:x.id,lid:x.lead_id,uid:x.user_id,name:x.contact_name,company:x.company_name,email:x.email,returnDate:x.return_date,reminderTime:x.reminder_time,note:x.note,status:x.status,createdAt:x.created_at};});STATE.activities=[];STATE.loading=false;render();}).catch(function(err){clearTimeout(timeout);STATE.loading=false;STATE.user=null;STATE.token=null;localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');showToast('Could not connect: '+err.message,'error');render();});}
+window.loginAs=function(email){if(IS_FILE){showToast('Open via fute-lms-backend.onrender.com','warning');return;}STATE.loading=true;render();apiPost('/auth/login',{email:email,password:'Fute@2024'}).then(function(data){STATE.token=data.token;STATE.user=normaliseUser(data.user);localStorage.setItem('fg_token',data.token);localStorage.setItem('fg_user',JSON.stringify(STATE.user));STATE.page='dashboard';loadAppData();}).catch(function(e){STATE.loading=false;showToast('Login failed: '+e.message,'error');render();});};
+window.doLogin=function(){if(IS_FILE){showToast('Open via fute-lms-backend.onrender.com','warning');return;}var emailEl=document.getElementById('login-email'),passEl=document.getElementById('login-pass'),errEl=document.getElementById('login-err');var email=(emailEl||{}).value||'',pass=(passEl||{}).value||'';if(!email||!pass){if(errEl){errEl.textContent='Enter email and password';errEl.style.display='block';}return;}STATE.loading=true;render();apiPost('/auth/login',{email:email,password:pass}).then(function(data){STATE.token=data.token;STATE.user=normaliseUser(data.user);localStorage.setItem('fg_token',data.token);localStorage.setItem('fg_user',JSON.stringify(STATE.user));STATE.page='dashboard';loadAppData();}).catch(function(err){STATE.loading=false;render();var e=document.getElementById('login-err');if(e){e.textContent=err.message||'Invalid email or password';e.style.display='block';}});};
+window.signOut=function(){STATE.user=null;STATE.token=null;STATE.leads=[];STATE.users=[];STATE.companies=[];STATE.emails=[];STATE.reminders=[];STATE.modal=null;STATE.viewingUser=null;localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');render();};
+window.changeStage=function(id,stage){var old=(STATE.leads.find(function(l){return l.id===id;})||{}).stage;STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{stage:stage}):l;});if(STATE.detailLead&&STATE.detailLead.id===id)STATE.detailLead=Object.assign({},STATE.detailLead,{stage:stage});render();apiPatch('/leads/'+id,{stage:stage,_oldStage:old}).catch(function(){STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{stage:old}):l;});showToast('Stage update failed','error');render();});showToast('Stage → "'+stage+'"','success');};
+window.deleteLead=function(id){if(!confirm('Move to trash? Deleted after 60 days.'))return;apiDel('/leads/'+id).then(function(){STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{del:todayIST()}):l;});if(STATE.detailLead&&STATE.detailLead.id===id)STATE.detailLead=null;showToast('Lead moved to trash','info');render();}).catch(function(e){showToast('Delete failed: '+e.message,'error');});};
+window.saveNotes=function(){var el=document.getElementById('dp-notes');if(el&&STATE.detailLead){var notes=el.value;apiPatch('/leads/'+STATE.detailLead.id,{notes:notes}).then(function(){STATE.leads=STATE.leads.map(function(l){return l.id===STATE.detailLead.id?Object.assign({},l,{notes:notes}):l;});STATE.detailLead=Object.assign({},STATE.detailLead,{notes:notes});showToast('Notes saved','success');render();}).catch(function(e){showToast('Save failed: '+e.message,'error');});}};
+window.applyBulk=function(){var sel=document.getElementById('bulk-stage');if(!sel||!sel.value)return;var stage=sel.value;var ids=Object.keys(STATE.leadsSelected).filter(function(id){return STATE.leadsSelected[id];});if(!ids.length)return;apiPatch('/leads/bulk/stage',{ids:ids,stage:stage}).then(function(){STATE.leads=STATE.leads.map(function(l){return ids.indexOf(l.id)>=0?Object.assign({},l,{stage:stage}):l;});STATE.leadsSelected={};showToast('Stage updated for '+ids.length+' leads','success');render();}).catch(function(e){showToast('Bulk update failed: '+e.message,'error');});};
+window.saveLead=function(){var fn=document.getElementById('f-fn'),emailEl=document.getElementById('f-email'),pos=document.getElementById('f-pos');if(!fn||!fn.value||!emailEl||!emailEl.value||!pos||!pos.value){showToast('First name, email and position required','warning');return;}var btn=document.querySelector('.modal .btn-primary');if(btn){btn.textContent='Saving...';btn.disabled=true;}function doSave(coid){apiPost('/leads',{company_id:coid,position:pos.value,first_name:fn.value,last_name:(document.getElementById('f-ln')||{}).value||'',designation:(document.getElementById('f-desig')||{}).value||'',email:emailEl.value,phone:(document.getElementById('f-phone')||{}).value||'',linkedin:(document.getElementById('f-li')||{}).value||'',source:(document.getElementById('f-src')||{}).value||'LinkedIn',analyst_id:(document.getElementById('f-ra')||{}).value||STATE.user.id,bdm_id:(document.getElementById('f-bd')||{}).value||STATE.user.bdm||null,lead_date:todayIST()}).then(function(lead){STATE.leads.unshift(normaliseLead(lead));closeModal();showToast('Lead added','success');render();}).catch(function(e){showToast('Failed: '+e.message,'error');if(btn){btn.textContent='Save lead';btn.disabled=false;}});}if(coNewMode){var coname=document.getElementById('f-coname');if(!coname||!coname.value){showToast('Company name required','warning');if(btn){btn.textContent='Save lead';btn.disabled=false;}return;}apiPost('/companies',{name:coname.value,website:(document.getElementById('f-web')||{}).value||'',industry:(document.getElementById('f-ind')||{}).value||'',location:(document.getElementById('f-loc')||{}).value||''}).then(function(co){STATE.companies.push({id:co.id,name:co.name,web:co.website,ind:co.industry,loc:co.location});doSave(co.id);}).catch(function(e){showToast('Company save failed: '+e.message,'error');if(btn){btn.textContent='Save lead';btn.disabled=false;}});}else{doSave((document.getElementById('f-coid')||{}).value);}};
+window.viewLead=function(id){STATE.detailLead=STATE.leads.find(function(l){return l.id===id;});apiGet('/leads/'+id+'/activity').then(function(acts){STATE.activities=STATE.activities.filter(function(a){return a.lid!==id;});acts.forEach(function(a){STATE.activities.push({id:a.id,lid:a.lead_id,uid:a.user_id,type:a.action_type,txt:a.description,dt:a.created_at?a.created_at.split('T')[0]:'',});});render();}).catch(function(){});render();};
+window.sendEmail=function(){var ge=STATE.genEmail;if(!ge){var ml=STATE.mergeLeadId?STATE.leads.find(function(l){return l.id===STATE.mergeLeadId;}):null;if(!ml&&!STATE.manualEmail){showToast('Select a recipient first','warning');return;}if(ml){var co=STATE.companies.find(function(c){return c.id===ml.coid;})||{};ge={to:ml.fn+' '+ml.ln,email:ml.email,subj:fillEmail(STATE.emailSubj,ml,co,STATE.user.name),body:fillEmail(STATE.emailBody,ml,co,STATE.user.name),lid:ml.id};}else{ge={to:STATE.manualEmail,email:STATE.manualEmail,subj:STATE.emailSubj,body:STATE.emailBody,lid:null};}}var plt=STATE.user.plt||'Gmail';var gmailUser=STATE.user.email||'';window.open(plt==='Gmail'?'https://mail.google.com/mail/u/0/?authuser='+encodeURIComponent(gmailUser)+'&view=cm&to='+encodeURIComponent(ge.email)+'&su='+encodeURIComponent(ge.subj)+'&body='+encodeURIComponent(ge.body):'https://outlook.office.com/mail/deeplink/compose?to='+encodeURIComponent(ge.email)+'&subject='+encodeURIComponent(ge.subj)+'&body='+encodeURIComponent(ge.body),'_blank');apiPost('/emails',{lead_id:ge.lid,to_email:ge.email,subject:ge.subj,body:ge.body,platform:plt}).then(function(data){STATE.emails.unshift({id:data.id,lid:ge.lid,by:STATE.user.id,to:ge.email,subj:ge.subj,body:ge.body,plt:plt,dt:todayIST(),status:'sent'});showToast('Email sent and saved','success');render();}).catch(function(){showToast('Email opened (not saved)','warning');});};
+window.saveReminder=function(lid,manualEmail){var lead=lid?STATE.leads.find(function(l){return l.id===lid;}):null;var co=lead?STATE.companies.find(function(c){return c.id===lead.coid;})||{}:{};var dt=(document.getElementById('rem-date')||{}).value;var tm=(document.getElementById('rem-time')||{}).value||'09:00';var note=(document.getElementById('rem-note')||{}).value||'';if(!dt){showToast('Please set a date','warning');return;}apiPost('/reminders',{lead_id:lid||null,contact_name:lead?(lead.fn+' '+lead.ln):(manualEmail||''),company_name:lead?(co.name||''):'',email:lead?lead.email:(manualEmail||''),return_date:dt,reminder_time:tm,note:note}).then(function(data){STATE.reminders.push({id:data.id,lid:lid||null,uid:STATE.user.id,name:data.contact_name,company:data.company_name,email:data.email,returnDate:dt,reminderTime:tm,note:note,status:'pending',createdAt:todayIST()});closeModal();STATE.reminderSearch=null;showToast('Reminder set for '+fmtDate(dt),'success');render();}).catch(function(e){showToast('Failed: '+e.message,'error');});};
+window.dismissReminder=function(rid){apiDel('/reminders/'+rid).then(function(){STATE.reminders=STATE.reminders.filter(function(r){return r.id!==rid;});showToast('Reminder removed','info');render();}).catch(function(e){showToast('Failed: '+e.message,'error');});};
+window.saveUser=function(existingId){var name=(document.getElementById('u-name')||{}).value||'';var email=(document.getElementById('u-email')||{}).value||'';if(!name||!email){showToast('Name and email required','warning');return;}var payload={name:name,email:email,role:(document.getElementById('u-role')||{}).value||'ra',employee_id:(document.getElementById('u-eid')||{}).value||'',designation:(document.getElementById('u-desig')||{}).value||'',platform:(document.getElementById('u-plt')||{}).value||'Gmail',assigned_bdm_id:(document.getElementById('u-bd')||{}).value||null};if(existingId){apiPut('/users/'+existingId,payload).then(function(data){STATE.users=STATE.users.map(function(u){return u.id===existingId?normaliseUser(data):u;});showToast('User updated','success');closeModal();render();}).catch(function(e){showToast('Failed: '+e.message,'error');});}else{payload.password='Fute@2024';apiPost('/users',payload).then(function(data){STATE.users.push(normaliseUser(data));showToast('User added · default password: Fute@2024','success');closeModal();render();}).catch(function(e){showToast('Failed: '+e.message,'error');});}};
+window.removeUser=function(id){if(id===STATE.user.id){showToast('Cannot remove yourself','warning');return;}if(!confirm('Remove this user?'))return;apiDel('/users/'+id).then(function(){STATE.users=STATE.users.filter(function(u){return u.id!==id;});showToast('User removed','info');render();}).catch(function(e){showToast('Failed: '+e.message,'error');});};
+window.saveProfile=function(){var name=(document.getElementById('p-name')||{}).value||STATE.user.name;var email=(document.getElementById('p-email')||{}).value||STATE.user.email;var eid=(document.getElementById('p-eid')||{}).value||STATE.user.empId;var desig=(document.getElementById('p-desig')||{}).value||STATE.user.desig;apiPut('/users/'+STATE.user.id,{name:name,email:email,employee_id:eid,designation:desig}).then(function(){STATE.user=Object.assign({},STATE.user,{name:name,email:email,empId:eid,desig:desig});STATE.users=STATE.users.map(function(u){return u.id===STATE.user.id?STATE.user:u;});showToast('Profile updated','success');render();}).catch(function(e){showToast('Failed: '+e.message,'error');});};
+window.setProfilePlt=function(p){apiPut('/users/'+STATE.user.id,{platform:p}).then(function(){STATE.user=Object.assign({},STATE.user,{plt:p});STATE.users=STATE.users.map(function(u){return u.id===STATE.user.id?STATE.user:u;});showToast('Platform set to '+p,'success');render();}).catch(function(e){showToast('Failed: '+e.message,'error');});};
+window.changePassword=function(){var cur=(document.getElementById('pw-cur')||{}).value;var nw=(document.getElementById('pw-new')||{}).value;var con=(document.getElementById('pw-con')||{}).value;if(!nw||nw.length<6){showToast('Min 6 characters','warning');return;}if(nw!==con){showToast("Passwords don't match",'warning');return;}apiPost('/auth/change-password',{currentPassword:cur,newPassword:nw}).then(function(){showToast('Password updated','success');['pw-cur','pw-new','pw-con'].forEach(function(id){var e=document.getElementById(id);if(e)e.value='';});}).catch(function(e){showToast('Failed: '+e.message,'error');});};
 
 // ════════════════════════════════════════════════
 // BOOT
 // ════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded',function(){
   var t=localStorage.getItem('fg_token'),uu=localStorage.getItem('fg_user');
-  if(t&&uu){
-    try{STATE.token=t;STATE.user=JSON.parse(uu);STATE.page='dashboard';loadAppData();}
-    catch(e){localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');render();}
-  } else {render();}
+  if(t&&uu){try{STATE.token=t;STATE.user=JSON.parse(uu);STATE.page='dashboard';loadAppData();}catch(e){localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');render();}}else{render();}
 });
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
