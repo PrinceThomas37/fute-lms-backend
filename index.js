@@ -36,9 +36,8 @@ async function logActivity(job_id, contact_id, user_id, action_type, description
 }
 
 // ── HEALTH ─────────────────────────────────────────────────────
-app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.0.0-jobs' }));
-
 app.use(express.static('public'));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.0.0-jobs' }));
 
 // ══════════════════════════════════════════════════════════════
 // AUTH
@@ -186,7 +185,7 @@ app.delete('/companies/:id', auth, async (req, res) => {
 // JOBS  (the new "lead" = a job opening)
 // Scoping: admin sees all; bd/ra sees created_by=self OR assigned_to=self
 // ══════════════════════════════════════════════════════════════
-const JOB_SELECT = `*, company:companies(id,name,website,industry,location,size), contacts(*), creator:users!created_by(id,name,employee_id), assignee:users!assigned_to(id,name,employee_id)`;
+const JOB_SELECT = `*, company:companies(id,name,website,industry,location), contacts(*), creator:users!created_by(id,name,employee_id), assignee:users!assigned_to(id,name,employee_id)`;
 
 app.get('/jobs', auth, async (req, res) => {
   try {
