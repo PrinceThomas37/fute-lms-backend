@@ -557,7 +557,10 @@ function render(){
 // HELPERS
 // ════════════════════════════════════════════════
 function av(user,size){
-  return '<div class="av av-'+size+' '+user.avc+'">'+user.av+'</div>';
+  var nm=user.name||'';var parts=nm.trim().split(/\s+/);
+  var initials=user.av||(((parts[0]||'')[0]||'')+((parts[1]||'')[0]||'')).toUpperCase()||'?';
+  var cls=user.avc||('av-'+(user.role||'ra'));
+  return '<div class="av av-'+size+' '+cls+'">'+initials+'</div>';
 }
 function avById(id,size){
   var u=STATE.users.find(function(x){return x.id===id});
@@ -3078,7 +3081,7 @@ function apiDelete(p){return apiFetch('DELETE',p);}
 
 // ── Restore session if present ─────────────────
 STATE.token=localStorage.getItem('fg_token')||null;
-try{var _su=localStorage.getItem('fg_user');if(_su)STATE.user=JSON.parse(_su);}catch(e){}
+try{var _su=localStorage.getItem('fg_user');if(_su){var _parsed=JSON.parse(_su);STATE.user=normaliseUser(_parsed);}}catch(e){}
 // Wipe demo seed data — will be replaced by API on login
 STATE.jobs=[];STATE.contacts=[];STATE.users=[];STATE.companies=[];STATE.emails=[];STATE.reminders=[];STATE.activities=[];STATE.leads=[];
 
