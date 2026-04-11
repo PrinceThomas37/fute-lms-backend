@@ -2979,7 +2979,7 @@ try{var _su=localStorage.getItem('fg_user');if(_su)STATE.user=JSON.parse(_su);}c
 // Wipe demo seed data — will be replaced by API on login
 STATE.jobs=[];STATE.contacts=[];STATE.users=[];STATE.companies=[];STATE.emails=[];STATE.reminders=[];STATE.activities=[];STATE.leads=[];
 
-function normaliseUser(u){return{id:u.id,name:u.name,email:u.email,role:u.role,empId:u.employee_id,desig:u.designation,plt:u.platform||'Gmail',ooo:u.ooo_until||null};}
+function normaliseUser(u){var nm=u.name||'';var parts=nm.trim().split(/\s+/);var initials=((parts[0]||'')[0]||'')+((parts[1]||'')[0]||'');return{id:u.id,name:nm,email:u.email,role:u.role,empId:u.employee_id,desig:u.designation,plt:u.platform||'Gmail',ooo:u.ooo_until||null,av:initials.toUpperCase()||'?',avc:'av-'+(u.role||'ra'),bdm:null};}
 function normaliseJob(j){
   var co=j.company||{};
   return{id:j.id,company_id:j.company_id,company_name:co.name||'',company_ind:co.industry||'',company_web:co.website||'',
