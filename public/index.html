@@ -2842,15 +2842,70 @@ var COL_MAP=[
   [["source","leadsource","foundon","platform"],"source"],
   [["date","leaddate","dateadded","createdon"],"date"],
   [["notes","note","comments","remarks"],"notes"],
+  [["analystname","analyst","raname","researchanalyst"],"analystName"],
 ];
+
+// ── Drop C: Group import rows by (company + position) ──
+function groupImportRows(mapped){
+  var groups={};var order=[];
+  var norm=function(s){return(s||"").trim().toLowerCase().replace(/\s+/g," ");};
+  mapped.forEach(function(r){
+    if(!r.company&&!r.firstName){return;}
+    var coKey=norm(r.company||"unknown");
+    var posKey=norm(r.position||"unknown");
+    var key=coKey+"||"+posKey;
+    if(!groups[key]){
+      groups[key]={
+        coName:(r.company||"").trim(),
+        website:(r.website||"").trim(),
+        industry:(r.industry||"").trim(),
+        location:(r.location||"").trim(),
+        position:(r.position||"").trim(),
+        source:(r.source||"Import").trim(),
+        contacts:[],
+        coKey:coKey
+      };
+      order.push(key);
+    }
+    if(r.firstName||r.email){
+      groups[key].contacts.push({
+        first_name:(r.firstName||"").trim(),
+        last_name:(r.lastName||"").trim(),
+        designation:(r.designation||"").trim(),
+        email:(r.email||"").trim(),
+        phone:(r.phone||"").trim(),
+        linkedin:(r.linkedin||"").trim()
+      });
+    }
+  });
+  return order.map(function(k){return groups[k];}).filter(function(g){return g.contacts.length>0;});
+}
 
 function renderImportModal(rows, sheetName){
   var sample=rows.slice(0,3);
   var cols=Object.keys(rows[0]);
   var mapped=rows.map(function(r){return mapCol(r,COL_MAP);});
-  var validRows=mapped.filter(function(r){return r.email||r.company||r.firstName;});
-  var skipped=rows.length-validRows.length;
+  var groups=groupImportRows(mapped);
+  var totalContacts=groups.reduce(function(s,g){return s+g.contacts.length;},0);
+  var skippedRows=rows.length-totalContacts;
   var multiSheet=STATE.importWB&&STATE.importWB.SheetNames.length>1;
+
+  var newCoNames={};
+  groups.forEach(function(g){
+    if(!g.coName)return;
+    var exists=STATE.companies.find(function(c){return c.name.toLowerCase()===g.coName.toLowerCase();});
+    if(!exists)newCoNames[g.coName.toLowerCase()]=g.coName;
+  });
+  var newCoCnt=Object.keys(newCoNames).length;
+
+  var dupeCnt=0;
+  groups.forEach(function(g){
+    var exists=STATE.jobs.find(function(j){
+      return j.company_name.toLowerCase()===g.coName.toLowerCase()&&j.position.toLowerCase()===g.position.toLowerCase();
+    });
+    if(exists)dupeCnt++;
+  });
+  var newJobs=groups.length-dupeCnt;
 
   var colRows=cols.map(function(c){
     var kl=c.toLowerCase().replace(/[\s_\-\.]/g,"");
@@ -2864,7 +2919,7 @@ function renderImportModal(rows, sheetName){
   return '<div class="modal modal-w640">'+
     '<div class="mh">'+
       '<div>'+
-        '<div class="mt">Import leads from Excel</div>'+
+        '<div class="mt">Import Jobs from Excel</div>'+
         '<div style="font-size:12px;color:var(--text3);margin-top:3px">Sheet: <strong style="color:var(--accent)">'+htmlEsc(sheetName||"Sheet1")+'</strong>'+
         (multiSheet?' · <span style="cursor:pointer;color:var(--accent);text-decoration:underline" onclick="STATE.modal=renderSheetPickerModal(STATE.importWB.SheetNames);render()">Change sheet</span>':'')+
         '</div>'+
@@ -2872,17 +2927,20 @@ function renderImportModal(rows, sheetName){
       '<button class="btn-icon" onclick="closeModal()">'+ico("x",14)+'</button>'+
     '</div>'+
     '<div class="mb_">'+
-      '<div style="padding:10px 14px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:14px;font-size:13px">'+
-        '<strong>'+rows.length+' rows found</strong> · '+validRows.length+' will be imported'+
-        (skipped?' · <span style="color:var(--amber)">'+skipped+' skipped (no email/company/name)</span>':'')+
+      '<div style="padding:12px 14px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:14px;font-size:13px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">'+
+        '<div><div style="font-size:20px;font-weight:700;color:var(--accent)">'+newJobs+'</div><div style="color:var(--text2);font-size:11px;margin-top:2px">NEW JOBS</div></div>'+
+        '<div><div style="font-size:20px;font-weight:700;color:var(--teal)">'+totalContacts+'</div><div style="color:var(--text2);font-size:11px;margin-top:2px">CONTACTS</div></div>'+
+        '<div><div style="font-size:20px;font-weight:700;color:var(--purple)">'+newCoCnt+'</div><div style="color:var(--text2);font-size:11px;margin-top:2px">NEW COMPANIES</div></div>'+
       '</div>'+
+      (dupeCnt?'<div style="padding:8px 12px;background:var(--amber-l);border-radius:var(--r2);margin-bottom:12px;font-size:12.5px;color:var(--amber)">⚠ '+dupeCnt+' job'+(dupeCnt>1?'s':'')+' already exist in the system and will be skipped.</div>':'')+
+      (skippedRows?'<div style="padding:8px 12px;background:var(--bg);border-radius:var(--r2);margin-bottom:12px;font-size:12.5px;color:var(--text3)">'+skippedRows+' row'+(skippedRows>1?'s':'')+' skipped — no company or contact name found.</div>':'')+
       '<div class="fw5 f13 mb2">Column mapping</div>'+
-      '<div class="tbl-wrap mb4" style="max-height:200px;overflow-y:auto">'+
+      '<div class="tbl-wrap mb4" style="max-height:180px;overflow-y:auto">'+
         '<table><thead><tr><th>Your column</th><th>Maps to</th></tr></thead>'+
         '<tbody>'+colRows+'</tbody></table>'+
       '</div>'+
       '<div class="fw5 f13 mb2">Preview (first 3 rows)</div>'+
-      '<div style="background:var(--bg);border-radius:var(--r2);padding:10px;font-size:12px;max-height:140px;overflow-y:auto">'+
+      '<div style="background:var(--bg);border-radius:var(--r2);padding:10px;font-size:12px;max-height:130px;overflow-y:auto">'+
         sample.map(function(r){
           var m=mapCol(r,COL_MAP);
           return '<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap">'+
@@ -2896,67 +2954,120 @@ function renderImportModal(rows, sheetName){
     '</div>'+
     '<div class="mf">'+
       '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
-      '<button class="btn btn-primary" onclick="confirmImport()">'+ico("plus",13)+' Import '+validRows.length+' leads</button>'+
+      (newJobs>0?'<button class="btn btn-primary" onclick="confirmImport()">'+ico("plus",13)+' Import '+newJobs+' job'+(newJobs>1?'s':'')+'</button>':
+       '<button class="btn btn-primary" disabled style="opacity:.5;cursor:not-allowed">Nothing new to import</button>')+
     '</div>'+
+  '</div>';
+}
+
+function renderImportProgressModal(done, total, logLines, finished, summary){
+  var pct=total>0?Math.round(done/total*100):0;
+  return '<div class="modal modal-w480">'+
+    '<div class="mh">'+
+      '<div class="mt">'+(finished?'Import complete':'Importing…')+'</div>'+
+    '</div>'+
+    '<div class="mb_">'+
+      '<div style="margin-bottom:12px">'+
+        '<div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--text2);margin-bottom:6px">'+
+          '<span>'+(finished?'Done':'Processing job '+Math.min(done+1,total)+' of '+total)+'</span>'+
+          '<span>'+pct+'%</span>'+
+        '</div>'+
+        '<div style="height:8px;background:var(--border);border-radius:99px;overflow:hidden">'+
+          '<div style="height:100%;width:'+pct+'%;background:var(--accent);border-radius:99px;transition:width .3s"></div>'+
+        '</div>'+
+      '</div>'+
+      (finished&&summary?'<div style="padding:10px 12px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:10px;font-size:13px">'+htmlEsc(summary)+'</div>':'')+
+      '<div style="background:var(--bg);border-radius:var(--r2);padding:8px 10px;font-size:11.5px;max-height:160px;overflow-y:auto;font-family:var(--mono);color:var(--text2)" id="import-log">'+
+        (logLines.length?logLines.map(function(l){return '<div style="padding:2px 0">'+htmlEsc(l)+'</div>';}).join(''):'<div style="color:var(--text3)">Starting…</div>')+
+      '</div>'+
+    '</div>'+
+    (finished?'<div class="mf"><button class="btn btn-primary" onclick="closeModal();refreshJobs();">Done</button></div>':'')+
   '</div>';
 }
 
 window.confirmImport=function(){
   if(!STATE.importPreview||!STATE.importPreview.length){closeModal();return;}
   var mapped=STATE.importPreview.map(function(r){return mapCol(r,COL_MAP);});
-  var validRows=mapped.filter(function(r){return r.email||r.company||r.firstName;});
-  var today=todayIST();
-  var imported=0;
-  var skippedDupe=0;
+  var groups=groupImportRows(mapped);
+  STATE.importPreview=null;
 
-  validRows.forEach(function(r){
-    // Check for duplicate email
-    if(r.email&&STATE.leads.find(function(l){return l.email&&l.email.toLowerCase()===r.email.toLowerCase()&&!l.del;})){
-      skippedDupe++;return;
-    }
-    // Find or create company
-    var coid="";
-    if(r.company){
-      var existing=STATE.companies.find(function(c){return c.name.toLowerCase()===r.company.toLowerCase();});
-      if(existing){
-        coid=existing.id;
-      } else {
-        var newco={id:"c"+Date.now()+imported,name:r.company,web:r.website||"",ind:r.industry||"",loc:r.location||""};
-        STATE.companies.push(newco);
-        coid=newco.id;
-      }
-    }
-    var newlead={
-      id:"l"+Date.now()+imported,
-      coid:coid,
-      pos:r.position||"",
-      fn:r.firstName||r.company||"Unknown",
-      ln:r.lastName||"",
-      desig:r.designation||"",
-      email:r.email||"",
-      phone:r.phone||"",
-      li:r.linkedin||"",
-      src:r.source||"Import",
-      aid:STATE.user.id,
-      bid:STATE.user.bdm||STATE.user.id,
-      stage:"Active",
-      date:r.date?parseExcelDate(r.date):today,
-      sent:null,plt:null,
-      notes:r.notes||"",
-      del:null
-    };
-    STATE.leads.unshift(newlead);
-    STATE.activities.push({id:"a"+Date.now()+imported,lid:newlead.id,uid:STATE.user.id,type:"created",txt:"Lead imported from Excel",dt:today});
-    imported++;
+  var toProcess=groups.filter(function(g){
+    return !STATE.jobs.find(function(j){
+      return j.company_name.toLowerCase()===g.coName.toLowerCase()&&j.position.toLowerCase()===g.position.toLowerCase();
+    });
   });
 
-  STATE.importPreview=null;
-  closeModal();
-  var msg=imported+" leads imported";
-  if(skippedDupe)msg+=" · "+skippedDupe+" duplicates skipped";
-  showToast(msg,"success");
-  render();
-}
+  if(!toProcess.length){closeModal();showToast('All jobs already exist — nothing to import.','warning');return;}
+
+  var total=toProcess.length;
+  var done=0;var succeeded=0;var failed=0;
+  var logLines=[];
+  var failDetails=[];
+
+  function updateProgress(fin,summary){
+    STATE.modal=renderImportProgressModal(done,total,logLines,fin,summary);
+    render();
+    // auto-scroll log
+    setTimeout(function(){var el=document.getElementById('import-log');if(el)el.scrollTop=el.scrollHeight;},20);
+  }
+  updateProgress(false,'');
+
+  var coCache={};
+  STATE.companies.forEach(function(c){coCache[c.name.toLowerCase()]=c.id;});
+
+  function ensureCompany(g){
+    var key=g.coName.toLowerCase();
+    if(coCache[key])return Promise.resolve(coCache[key]);
+    return apiPost('/companies',{
+      name:g.coName,
+      website:g.website||undefined,
+      industry:g.industry||undefined,
+      location:g.location||undefined
+    }).then(function(co){
+      coCache[key]=co.id;
+      STATE.companies.push({id:co.id,name:co.name,web:co.website||'',ind:co.industry||'',loc:co.location||''});
+      return co.id;
+    });
+  }
+
+  function processNext(idx){
+    if(idx>=toProcess.length){
+      var summary=succeeded+' job'+(succeeded!==1?'s':'')+' imported'+(failed>0?', '+failed+' failed — see log above.':'. Tap Done to refresh.');
+      if(failed>0){
+        logLines.push('');
+        logLines.push('── Failed jobs ──');
+        failDetails.forEach(function(f){logLines.push('✗ '+f);});
+      }
+      updateProgress(true,summary);
+      return;
+    }
+    var g=toProcess[idx];
+    ensureCompany(g).then(function(coId){
+      return apiPost('/jobs',{
+        company_id:coId,
+        position:g.position||'(unknown)',
+        location:g.location||undefined,
+        source:g.source||'Import',
+        stage:'Active',
+        contacts:g.contacts
+      });
+    }).then(function(){
+      succeeded++;
+      logLines.push('✓ '+g.coName+' — '+g.position+' ('+g.contacts.length+' contact'+(g.contacts.length!==1?'s':'')+')');
+    }).catch(function(err){
+      failed++;
+      var msg=g.coName+' — '+g.position+': '+err.message;
+      logLines.push('✗ '+msg);
+      failDetails.push(msg);
+    }).then(function(){
+      done++;
+      updateProgress(false,'');
+      setTimeout(function(){processNext(idx+1);},80);
+    });
+  }
+
+  processNext(0);
+};
 
 // ════════════════════════════════════════════════
 // BOOT (standalone) — disabled, API layer below boots instead
