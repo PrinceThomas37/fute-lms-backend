@@ -373,7 +373,72 @@ function genActs(leads){
 // ════════════════════════════════════════════════
 // STATE
 // ════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════
+// JOBS / CONTACTS MODEL  (matches backend index.js)
+// ════════════════════════════════════════════════
+function genJobs(seedLeads, companies){
+  // Group seedLeads by (company + position) -> 1 job + N contacts
+  var jobs = [], contacts = [], jmap = {};
+  var stages = ["Active","In Progress","Interview","Closed","Lost"];
+  for (var i=0;i<seedLeads.length;i++){
+    var l = seedLeads[i];
+    var key = l.coid + "||" + l.pos;
+    var jid = jmap[key];
+    if (!jid){
+      jid = "j" + (jobs.length+1);
+      jmap[key] = jid;
+      var co = companies.find(function(c){return c.id===l.coid;}) || {};
+      jobs.push({
+        id: jid,
+        company_id: l.coid,
+        company_name: co.name || "",
+        company_ind: co.ind || "",
+        company_web: co.web || "",
+        position: l.pos,
+        location: l.loc || "",
+        source: l.src || "LinkedIn",
+        job_url: "",
+        stage: stages[Math.floor(Math.random()*3)],
+        notes: "",
+        created_by: l.aid,
+        assigned_to: l.aid,
+        created_date: l.created || new Date().toISOString().slice(0,10),
+        created_at: new Date().toISOString()
+      });
+    }
+    contacts.push({
+      id: "c" + (contacts.length+1),
+      job_id: jid,
+      first_name: l.fn,
+      last_name: l.ln || "",
+      designation: l.desig || "",
+      email: l.email || "",
+      phone: l.phone || "",
+      linkedin: "",
+      is_primary: contacts.filter(function(c){return c.job_id===jid;}).length===0,
+      email_sent_at: l.sent || null
+    });
+  }
+  return { jobs: jobs, contacts: contacts };
+}
+function getMyJobs(u){
+  if (!u) return [];
+  if (u.role==="admin") return STATE.jobs.slice();
+  return STATE.jobs.filter(function(j){
+    return j.created_by===u.id || j.assigned_to===u.id;
+  });
+}
+function jobContacts(jid){
+  return STATE.contacts.filter(function(c){return c.job_id===jid;})
+    .sort(function(a,b){return (b.is_primary?1:0)-(a.is_primary?1:0);});
+}
+function jobById(id){ return STATE.jobs.find(function(j){return j.id===id;}); }
+function escAttr(v){ return String(v==null?"":v).replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
+function escHtml(v){ return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
 var STATE = {
+
   user: null,
   page: "dashboard",
   users: JSON.parse(JSON.stringify(USERS)),
@@ -413,10 +478,17 @@ var STATE = {
   importPreview: null,
   importWB: null,
   importSheet: null,
+  jobs: [],
+  contacts: [],
+  detailJob: null,
+  jobsFilter: {search:"",stage:"all"},
 };
 
 // No pre-seeded reminders — users set them manually from the OOO list
 STATE.activities = genActs(STATE.leads);
+var _seed = genJobs(STATE.leads, STATE.companies);
+STATE.jobs = _seed.jobs;
+STATE.contacts = _seed.contacts;
 STATE.emails = STATE.leads.filter(function(l){return l.sent}).slice(0,6).map(function(l,i){
   var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
   var body="Hi "+l.fn+",\n\nI came across "+co.name+" and was really impressed by what you're building in the "+(co.ind||"")+" space.\n\nAt Fute Global, we specialize in connecting organizations with top-tier talent. Given your role as "+l.desig+", I believe we could be genuinely helpful with your "+l.pos+" search.\n\nWould you be open to a quick 15-minute call this week?\n\nWarm regards,\nFute Global LLC";
@@ -665,7 +737,7 @@ function roleLabel(r){return{ra:"Research Analyst",bd:"BD Manager",admin:"Admin 
 // ════════════════════════════════════════════════
 function renderPage(){
   if(STATE.page==="dashboard")return renderDashboard();
-  if(STATE.page==="leads")return renderLeads();
+  if(STATE.page==="leads"){var html=renderJobs();setTimeout(bindJobsControls,0);return html;}
   if(STATE.page==="email")return renderEmail();
   if(STATE.page==="reminders")return renderReminders();
   if(STATE.page==="admin")return renderAdmin();
@@ -901,175 +973,255 @@ function filterPeriod(leads,p){
 }
 
 // ── LEADS ──────────────────────────────────────
-function renderLeads(){
+function renderJobs(){
   var u=STATE.user;
-  var myLeads=getMyLeads(u);
-  var filtered=filterLeads(myLeads);
-  var selCount=Object.keys(STATE.leadsSelected).filter(function(id){return STATE.leadsSelected[id]}).length;
+  var jobs=getMyJobs(u);
+  var f=STATE.jobsFilter;
+  if(f.search){
+    var q=f.search.toLowerCase();
+    jobs=jobs.filter(function(j){
+      if((j.position||"").toLowerCase().indexOf(q)>-1)return true;
+      if((j.company_name||"").toLowerCase().indexOf(q)>-1)return true;
+      if((j.location||"").toLowerCase().indexOf(q)>-1)return true;
+      var cs=jobContacts(j.id);
+      for(var i=0;i<cs.length;i++){
+        var c=cs[i];
+        if(((c.first_name||"")+" "+(c.last_name||"")).toLowerCase().indexOf(q)>-1)return true;
+        if((c.email||"").toLowerCase().indexOf(q)>-1)return true;
+      }
+      return false;
+    });
+  }
+  if(f.stage&&f.stage!=="all")jobs=jobs.filter(function(j){return j.stage===f.stage;});
 
-  // ── PAGINATION ──────────────────────────────
-  var pageSize=STATE.leadsPageSize||20;
-  var currentPage=STATE.leadsPage||0;
-  var totalPages=Math.ceil(filtered.length/pageSize);
-  if(currentPage>=totalPages)currentPage=Math.max(0,totalPages-1);
-  var paginated=filtered.slice(currentPage*pageSize,(currentPage+1)*pageSize);
+  var stages=["Active","In Progress","Interview","Closed","Lost"];
+  var stageOpts=stages.map(function(st){return '<option value="'+st+'"'+(f.stage===st?" selected":"")+'>'+st+'</option>';}).join("");
 
-  var stageopts=STAGES.map(function(s){return'<option value="'+s+'"'+(STATE.leadsFilter.stage===s?" selected":"")+'">'+s+'</option>'}).join("");
-  var indopts=INDUSTRIES.map(function(i){return'<option value="'+i+'"'+(STATE.leadsFilter.ind===i?" selected":"")+'">'+i+'</option>'}).join("");
-  var dateOpts=['<option value="today"'+(STATE.leadsFilter.date==="today"?" selected":"")+'>Today</option>',
-    '<option value="week"'+(STATE.leadsFilter.date==="week"?" selected":"")+'>This week</option>',
-    '<option value="month"'+(STATE.leadsFilter.date==="month"?" selected":"")+'>This month</option>',
-    '<option value="all"'+(STATE.leadsFilter.date==="all"?" selected":"")+'>All time</option>'].join("");
-
-  var allSel=paginated.length>0&&paginated.every(function(l){return STATE.leadsSelected[l.id]});
-
-  var rows=paginated.map(function(l){
-    var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
-    var sel=STATE.leadsSelected[l.id]?" sel-row":"";
-    var stOpts=STAGES.map(function(s){return'<option'+(l.stage===s?" selected":"")+'>'+s+'</option>'}).join("");
-    var anName=uname(l.aid,STATE.users);
-    return '<tr class="'+sel+'">'+
-      '<td style="width:34px"><input type="checkbox" '+(STATE.leadsSelected[l.id]?"checked":"")+' onchange="toggleSel(\''+l.id+'\',this.checked)"/></td>'+
-      '<td><div class="td1">'+l.pos+'</div><div class="td2">'+(l.fn?l.fn+' '+l.ln:'')+(l.desig?' · '+l.desig:'')+'</div></td>'+
-      '<td><div class="td1">'+(co.name||l.coName||"")+'</div><div class="td2">'+((co.ind||l.coInd)||"")+((co.loc||l.coLoc)?' · '+(co.loc||l.coLoc):'')+'</div></td>'+
-      '<td><select class="bdg '+stageClass(l.stage)+'" style="border:none;cursor:pointer;background:transparent;-webkit-appearance:none;font-weight:500;padding:2px 6px" onchange="changeStage(\''+l.id+'\',this.value)">'+stOpts+'</select></td>'+
-      '<td class="f12 text3">'+l.src+'</td>'+
-      (u.role!=="ra"?'<td class="f12">'+anName+'</td>':'')+
-      '<td class="f12 text3" style="font-family:var(--mono)">'+fmtDate(l.date)+'</td>'+
-      '<td><div class="flex gap1">'+
-        '<button class="btn-icon" title="View" onclick="viewLead(\''+l.id+'\')">'+ico("eye",13)+'</button>'+
-        '<button class="btn-icon" title="Send email" onclick="openMailMerge([\''+l.id+'\'])" style="color:var(--accent)">'+ico("email",13)+'</button>'+
-        '<button class="btn-icon" style="color:var(--red)" title="Delete" onclick="deleteLead(\''+l.id+'\')">'+ico("trash",13)+'</button>'+
-      '</div></td>'+
+  var rows=jobs.map(function(j){
+    var cs=jobContacts(j.id);
+    var primary=cs[0]||{};
+    var stageColor={Active:"#3b82f6","In Progress":"#f59e0b",Interview:"#8b5cf6",Closed:"#10b981",Lost:"#ef4444"}[j.stage]||"#64748b";
+    return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer" onclick="openJob(\''+j.id+'\')">'+
+      '<td style="padding:12px"><div style="font-weight:600;color:var(--text)">'+escHtml(j.company_name)+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.company_ind)+'</div></td>'+
+      '<td style="padding:12px"><div style="font-weight:500">'+escHtml(j.position)+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.location||"—")+'</div></td>'+
+      '<td style="padding:12px"><div>'+escHtml((primary.first_name||"")+" "+(primary.last_name||""))+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(primary.email||"—")+'</div></td>'+
+      '<td style="padding:12px;text-align:center"><span style="background:rgba(99,102,241,.1);color:var(--accent);padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600">'+cs.length+'</span></td>'+
+      '<td style="padding:12px"><span style="background:'+stageColor+'1a;color:'+stageColor+';padding:4px 10px;border-radius:10px;font-size:11px;font-weight:600">'+j.stage+'</span></td>'+
+      '<td style="padding:12px;font-size:11px;color:var(--text3)">'+escHtml(j.created_date||"")+'</td>'+
     '</tr>';
   }).join("");
 
-  // ── PAGINATION CONTROLS ──────────────────────
-  var pageSizeOpts=[20,50,100].map(function(n){
-    return '<button class="fc'+(pageSize===n?" on":"")+'" onclick="setLeadsPageSize('+n+')">'+n+'</button>';
-  }).join("");
-  var paginationBar=filtered.length>pageSize?
-    '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;padding:8px 4px">'+
-      '<div style="font-size:12.5px;color:var(--text3)">Showing '+(currentPage*pageSize+1)+'–'+Math.min((currentPage+1)*pageSize,filtered.length)+' of '+filtered.length+'</div>'+
-      '<div class="flex gap2 aic">'+
-        '<button class="btn btn-outline btn-sm" onclick="setLeadsPage('+(currentPage-1)+')" '+(currentPage===0?'disabled style="opacity:.4"':'')+'>← Prev</button>'+
-        '<span style="font-size:12.5px;color:var(--text3)">Page '+(currentPage+1)+' / '+totalPages+'</span>'+
-        '<button class="btn btn-outline btn-sm" onclick="setLeadsPage('+(currentPage+1)+')" '+(currentPage>=totalPages-1?'disabled style="opacity:.4"':'')+'>Next →</button>'+
+  if(!rows)rows='<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No jobs found. Click "+ Add Job" to create one.</td></tr>';
+
+  return '<div style="padding:24px">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;gap:12px;flex-wrap:wrap">'+
+      '<div style="display:flex;gap:10px;align-items:center;flex:1;min-width:280px">'+
+        '<input id="jobs-search" placeholder="Search jobs, companies, contacts..." value="'+escAttr(f.search)+'" style="flex:1;max-width:360px;padding:9px 13px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);font-size:13px"/>'+
+        '<select id="jobs-stage" style="padding:9px 13px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);font-size:13px"><option value="all">All stages</option>'+stageOpts+'</select>'+
       '</div>'+
-    '</div>':"";
-
-  var bulkBar=selCount>0?
-    '<div style="display:flex;align-items:center;gap:10px;padding:9px 13px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:11px;border:1px solid rgba(37,99,235,.18);flex-wrap:wrap">'+
-      '<span style="font-size:13px;font-weight:500;color:var(--accent)">'+selCount+' selected</span>'+
-      '<select class="sel" id="bulk-stage" style="width:160px;border-radius:20px;font-size:12.5px"><option value="">Change stage...</option>'+STAGES.map(function(s){return'<option>'+s+'</option>'}).join("")+'</select>'+
-      '<button class="btn btn-primary btn-sm" onclick="applyBulk()">Apply stage</button>'+
-      '<button class="btn btn-outline btn-sm" style="color:var(--accent);border-color:var(--accent)" onclick="openMailMerge(Object.keys(STATE.leadsSelected).filter(function(id){return STATE.leadsSelected[id]}))">'+ico("send",13)+' Mail merge ('+selCount+')</button>'+
-      '<button class="btn btn-outline btn-sm" onclick="clearSel()">Clear</button>'+
-    '</div>':"";
-
-  var detailHtml=STATE.detailLead?renderDetailPanel():"";
-  var tblStyle=STATE.detailLead?'flex:1;overflow:auto':'';
-
-  return '<div style="display:flex;flex:1;overflow:hidden">'+
-    '<div style="'+tblStyle+'">'+
-    '<div class="page">'+
-    '<div class="ph"><div class="flex jb" style="align-items:flex-start">'+
-      '<div><div class="ptitle">Leads</div><div class="psub">'+filtered.length+' leads · showing '+pageSize+' per page</div></div>'+
-      '<div class="flex gap2 aic">'+
-        '<div class="flex gap1 aic"><span style="font-size:12px;color:var(--text3)">Per page:</span>'+pageSizeOpts+'</div>'+
-        (u.role!=="ra"?'<button class="btn btn-outline btn-sm" onclick="exportXL()">'+ico("dl",13)+'Export</button>':'')+
-        '<button class="btn btn-outline btn-sm" onclick="triggerImport()">'+ico("plus",13)+'Import Excel</button>'+
-        '<input type="file" id="xl-import" accept=".xlsx,.xls,.csv" style="display:none" onchange="importXL(this)"/>'+
-        '<button class="btn btn-primary btn-sm" onclick="openAddLead()">'+ico("plus",13)+'Add lead</button>'+
-      '</div>'+
-    '</div></div>'+
-
-    '<div class="flex gap2 mb4 flex-wrap aic">'+
-      '<div style="position:relative;flex:1;min-width:200px">'+
-        '<span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text3)">'+icon("search")+'</span>'+
-        '<input class="inp" style="padding-left:34px" placeholder="Search by email, company, POC name, job title..." value="'+htmlEsc(STATE.leadsFilter.search)+'" oninput="setSearch(this.value)"/>'+
-      '</div>'+
-      '<select class="fsel" onchange="setFilt(\'date\',this.value)">'+dateOpts+'</select>'+
-      '<select class="fsel" onchange="setFilt(\'stage\',this.value)"><option value="all"'+(STATE.leadsFilter.stage==="all"?" selected":"")+'>All stages</option>'+stageopts+'</select>'+
-      '<select class="fsel" onchange="setFilt(\'ind\',this.value)"><option value="all"'+(STATE.leadsFilter.ind==="all"?" selected":"")+'>All industries</option>'+indopts+'</select>'+
+      '<button onclick="openAddJob()" style="background:var(--accent);color:#fff;border:0;padding:10px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px">+ Add Job</button>'+
     '</div>'+
-
-    bulkBar+
-
-    (filtered.length===0?
-      '<div class="empty"><div class="empty-ico">'+ico("leads",22)+'</div><div class="empty-t">No leads found</div><div class="f13">Adjust filters or add a new lead</div></div>':
-      '<div class="tbl-wrap"><table>'+
-        '<thead><tr>'+
-          '<th style="width:34px"><input type="checkbox" '+(allSel?"checked":"")+' onchange="toggleAll(this.checked)"/></th>'+
-          '<th>Job title / Contact</th><th>Company</th><th>Stage</th>'+
-          '<th>Source</th>'+(u.role!=="ra"?'<th>Analyst</th>':'')+
-          '<th>Date</th><th></th>'+
-        '</tr></thead>'+
+    '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden">'+
+      '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
+        '<thead style="background:var(--bg3);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
+          '<tr><th style="padding:12px;text-align:left">Company</th><th style="padding:12px;text-align:left">Position</th><th style="padding:12px;text-align:left">Primary Contact</th><th style="padding:12px;text-align:center">Contacts</th><th style="padding:12px;text-align:left">Stage</th><th style="padding:12px;text-align:left">Created</th></tr>'+
+        '</thead>'+
         '<tbody>'+rows+'</tbody>'+
-      '</table></div>'+
-      paginationBar)+
-
-    '</div></div>'+
-
-    detailHtml+
-
+      '</table>'+
+    '</div>'+
+    '<div style="margin-top:12px;font-size:12px;color:var(--text3)">'+jobs.length+' job'+(jobs.length===1?"":"s")+(u.role!=="admin"?" assigned to or created by you":" total")+'</div>'+
   '</div>';
 }
 
-function renderDetailPanel(){
-  var l=STATE.detailLead;
-  var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
-  var acts=STATE.activities.filter(function(a){return a.lid===l.id}).sort(function(a,b){return b.dt>a.dt?1:-1});
-  var stOpts=STAGES.map(function(s){return'<option'+(l.stage===s?" selected":"")+'>'+s+'</option>'}).join("");
+// Bind search/filter inputs (called from render() after DOM replace)
+function bindJobsControls(){
+  var s=document.getElementById("jobs-search");
+  if(s)s.oninput=function(){STATE.jobsFilter.search=this.value;render();var x=document.getElementById("jobs-search");if(x){x.focus();x.setSelectionRange(x.value.length,x.value.length);}};
+  var st=document.getElementById("jobs-stage");
+  if(st)st.onchange=function(){STATE.jobsFilter.stage=this.value;render();};
+}
 
-  var actRows=acts.map(function(a){
-    var c=a.type==="email"?"var(--accent)":a.type==="stage"?"var(--amber)":"var(--green)";
-    return '<div class="act-item"><div class="act-dot" style="background:'+c+'"></div><div><div class="act-txt">'+a.txt+'</div><div class="act-meta">'+uname(a.uid,STATE.users)+' · '+fmtDate(a.dt)+'</div></div></div>';
-  }).join("");
+function openJob(id){ STATE.detailJob=id; STATE.modal={type:"jobDetail",id:id}; render(); }
+function openAddJob(){ STATE.modal={type:"addJob"}; render(); }
 
-  return '<div class="detail-panel">'+
-    '<div class="dp-head">'+
-      '<div class="flex jb aic">'+
-        '<div>'+
-          '<div style="font-family:var(--display);font-weight:600;font-size:15.5px">'+l.fn+' '+l.ln+'</div>'+
-          '<div class="f12 text3 mt1">'+l.desig+' · '+co.name+'</div>'+
+// ── JOB DETAIL MODAL ──────────────────────────────
+function renderJobDetailModal(){
+  var j=jobById(STATE.modal.id); if(!j) return "";
+  var u=STATE.user;
+  var canEdit=u.role==="admin"||j.created_by===u.id||j.assigned_to===u.id;
+  var cs=jobContacts(j.id);
+  var stages=["Active","In Progress","Interview","Closed","Lost"];
+  var stageOpts=stages.map(function(st){return '<option value="'+st+'"'+(j.stage===st?" selected":"")+'>'+st+'</option>';}).join("");
+
+  var contactRows=cs.map(function(c){
+    return '<div style="background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:12px;margin-bottom:8px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:start;gap:8px">'+
+        '<div style="flex:1">'+
+          '<div style="font-weight:600;color:var(--text)">'+escHtml((c.first_name||"")+" "+(c.last_name||""))+(c.is_primary?' <span style="background:rgba(16,185,129,.15);color:#10b981;padding:2px 7px;border-radius:8px;font-size:10px;margin-left:4px">PRIMARY</span>':'')+'</div>'+
+          '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+escHtml(c.designation||"—")+'</div>'+
+          '<div style="font-size:12px;color:var(--text2);margin-top:6px">📧 '+escHtml(c.email||"—")+'</div>'+
+          (c.phone?'<div style="font-size:12px;color:var(--text2);margin-top:2px">📞 '+escHtml(c.phone)+'</div>':'')+
+          (c.linkedin?'<div style="font-size:12px;color:var(--text2);margin-top:2px">🔗 '+escHtml(c.linkedin)+'</div>':'')+
         '</div>'+
-        '<button class="btn-icon" onclick="closeDetail()">'+ico("x",14)+'</button>'+
+        (canEdit?'<div style="display:flex;flex-direction:column;gap:4px">'+
+          '<button onclick="sendEmailToContact(\''+c.id+'\')" style="background:var(--accent);color:#fff;border:0;padding:5px 10px;border-radius:6px;font-size:11px;cursor:pointer">Email</button>'+
+          '<button onclick="deleteContact(\''+c.id+'\')" style="background:transparent;color:#ef4444;border:1px solid #ef4444;padding:5px 10px;border-radius:6px;font-size:11px;cursor:pointer">Delete</button>'+
+        '</div>':'')+
       '</div>'+
-      '<div class="flex aic gap2 mt2">'+
-        '<select class="bdg '+stageClass(l.stage)+'" style="border:none;cursor:pointer;background:transparent;-webkit-appearance:none;font-weight:500;padding:3px 6px" onchange="changeStageDetail(this.value)">'+stOpts+'</select>'+
-        '<span class="f11 text3">'+fmtDate(l.date)+'</span>'+
-      '</div>'+
+    '</div>';
+  }).join("");
+  if(!contactRows)contactRows='<div style="color:var(--text3);font-size:12px;padding:12px;text-align:center">No contacts yet.</div>';
+
+  return '<div style="background:var(--bg2);border-radius:14px;width:min(720px,94vw);max-height:90vh;overflow-y:auto;border:1px solid var(--border)">'+
+    '<div style="padding:20px 24px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:start;gap:12px">'+
+      '<div><div style="font-size:18px;font-weight:700;color:var(--text)">'+escHtml(j.position)+'</div><div style="font-size:13px;color:var(--text3);margin-top:3px">'+escHtml(j.company_name)+(j.location?" · "+escHtml(j.location):"")+'</div></div>'+
+      '<button onclick="closeModal()" style="background:transparent;border:0;color:var(--text3);font-size:22px;cursor:pointer;line-height:1">×</button>'+
     '</div>'+
-    '<div class="dp-body">'+
-      '<div class="dp-sec">'+
-        '<div class="dp-sec-t">Contact</div>'+
-        (l.email?'<div class="cpill"><span class="ctype">email</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(l.email)+'</span><button class="btn-icon" title="Copy email" onclick="copyToClip(\''+htmlEsc(l.email)+'\')" style="flex-shrink:0;opacity:.5" onmouseenter="this.style.opacity=\'1\'" onmouseleave="this.style.opacity=\'.5\'">'+ico("copy",13)+'</button></div>':'')+
-        (l.phone?'<div class="cpill"><span class="ctype">phone</span><span style="flex:1">'+htmlEsc(l.phone)+'</span><button class="btn-icon" title="Copy phone" onclick="copyToClip(\''+htmlEsc(l.phone)+'\')" style="flex-shrink:0;opacity:.5" onmouseenter="this.style.opacity=\'1\'" onmouseleave="this.style.opacity=\'.5\'">'+ico("copy",13)+'</button></div>':'')+
-        (l.li?'<div class="cpill"><span class="ctype">linkedin</span><a href="'+l.li+'" target="_blank" style="color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">View Profile</a></div>':"")+
-        '<button class="btn btn-outline btn-xs mt1" onclick="addContactPrompt()">+ Add contact</button>'+
+    '<div style="padding:20px 24px">'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">'+
+        '<div><label style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Stage</label>'+
+          (canEdit?'<select id="job-stage-sel" onchange="changeJobStage(\''+j.id+'\',this.value)" style="width:100%;margin-top:5px;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px">'+stageOpts+'</select>':'<div style="margin-top:5px;font-size:13px;color:var(--text)">'+j.stage+'</div>')+
+        '</div>'+
+        '<div><label style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Source</label><div style="margin-top:5px;font-size:13px;color:var(--text)">'+escHtml(j.source||"—")+'</div></div>'+
       '</div>'+
-      '<div class="hr"></div>'+
-      '<div class="dp-sec">'+
-        '<div class="dp-sec-t">Details</div>'+
-        [["Position",l.pos],["Company",co.name],["Industry",co.ind],["Location",co.loc],["Website",co.web],["Source",l.src],["Analyst",uname(l.aid,STATE.users)],["BD Manager",uname(l.bid,STATE.users)]].map(function(r){
-          return '<div class="dp-row"><span class="dp-k">'+r[0]+'</span><span class="dp-v">'+(r[1]||"—")+'</span></div>';
-        }).join("")+
+      '<div style="margin-bottom:18px"><label style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Notes</label>'+
+        (canEdit?'<textarea id="job-notes" onblur="saveJobNotes(\''+j.id+'\',this.value)" style="width:100%;margin-top:5px;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px;min-height:64px;resize:vertical;font-family:inherit">'+escHtml(j.notes||"")+'</textarea>':'<div style="margin-top:5px;font-size:13px;color:var(--text)">'+escHtml(j.notes||"—")+'</div>')+
       '</div>'+
-      '<div class="hr"></div>'+
-      '<div class="dp-sec">'+
-        '<div class="dp-sec-t">Notes</div>'+
-        '<textarea class="txta" style="min-height:70px;font-size:13px" id="dp-notes" placeholder="Add notes...">'+htmlEsc(l.notes||"")+'</textarea>'+
-        '<button class="btn btn-outline btn-sm mt2" onclick="saveNotes()">Save notes</button>'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-size:13px;font-weight:600;color:var(--text)">Contacts ('+cs.length+')</div>'+
+        (canEdit?'<button onclick="openAddContact(\''+j.id+'\')" style="background:var(--accent);color:#fff;border:0;padding:6px 12px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer">+ Add Contact</button>':'')+
       '</div>'+
-      '<div class="hr"></div>'+
-      '<div class="dp-sec">'+
-        '<div class="dp-sec-t">Activity log</div>'+
-        (actRows||'<div class="f13 text3">No activity yet</div>')+
-      '</div>'+
+      contactRows+
+      (canEdit?'<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border2);display:flex;justify-content:flex-end;gap:8px"><button onclick="deleteJob(\''+j.id+'\')" style="background:transparent;color:#ef4444;border:1px solid #ef4444;padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer">Delete Job</button></div>':'')+
     '</div>'+
   '</div>';
 }
+
+// ── ADD JOB MODAL ─────────────────────────────────
+function renderAddJobModal(){
+  var u=STATE.user;
+  var coOpts=STATE.companies.map(function(c){return '<option value="'+c.id+'">'+escHtml(c.name)+'</option>';}).join("");
+  return '<div style="background:var(--bg2);border-radius:14px;width:min(560px,94vw);max-height:90vh;overflow-y:auto;border:1px solid var(--border)">'+
+    '<div style="padding:18px 22px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between"><div style="font-size:16px;font-weight:700;color:var(--text)">Add Job</div><button onclick="closeModal()" style="background:transparent;border:0;color:var(--text3);font-size:22px;cursor:pointer;line-height:1">×</button></div>'+
+    '<div style="padding:20px 22px">'+
+      '<div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text3)">Company</label><select id="aj-co" style="width:100%;margin-top:4px;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px">'+coOpts+'</select></div>'+
+      '<div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text3)">Position</label><input id="aj-pos" placeholder="e.g. Senior Software Engineer" style="width:100%;margin-top:4px;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/></div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">'+
+        '<div><label style="font-size:11px;color:var(--text3)">Location</label><input id="aj-loc" style="width:100%;margin-top:4px;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/></div>'+
+        '<div><label style="font-size:11px;color:var(--text3)">Source</label><input id="aj-src" placeholder="LinkedIn, Indeed..." style="width:100%;margin-top:4px;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/></div>'+
+      '</div>'+
+      '<div style="margin-bottom:14px"><label style="font-size:11px;color:var(--text3)">Job URL (optional)</label><input id="aj-url" style="width:100%;margin-top:4px;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/></div>'+
+      '<div style="font-size:12px;color:var(--text3);margin-bottom:8px;padding-top:6px;border-top:1px solid var(--border2);padding-top:12px">First contact (you can add more after creating)</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
+        '<input id="aj-fn" placeholder="First name *" style="padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/>'+
+        '<input id="aj-ln" placeholder="Last name" style="padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/>'+
+      '</div>'+
+      '<input id="aj-desig" placeholder="Designation" style="width:100%;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px;margin-bottom:10px"/>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">'+
+        '<input id="aj-email" placeholder="Email" style="padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/>'+
+        '<input id="aj-phone" placeholder="Phone" style="padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/>'+
+      '</div>'+
+      '<div style="display:flex;justify-content:flex-end;gap:8px"><button onclick="closeModal()" style="background:transparent;color:var(--text3);border:1px solid var(--border);padding:9px 16px;border-radius:7px;cursor:pointer;font-size:13px">Cancel</button><button onclick="submitAddJob()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600">Create Job</button></div>'+
+    '</div>'+
+  '</div>';
+}
+
+// ── ADD CONTACT MODAL ─────────────────────────────
+function renderAddContactModal(){
+  var jid=STATE.modal.job_id;
+  return '<div style="background:var(--bg2);border-radius:14px;width:min(480px,94vw);border:1px solid var(--border)">'+
+    '<div style="padding:18px 22px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between"><div style="font-size:16px;font-weight:700;color:var(--text)">Add Contact</div><button onclick="backToJob(\''+jid+'\')" style="background:transparent;border:0;color:var(--text3);font-size:22px;cursor:pointer;line-height:1">×</button></div>'+
+    '<div style="padding:20px 22px">'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
+        '<input id="ac-fn" placeholder="First name *" style="padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/>'+
+        '<input id="ac-ln" placeholder="Last name" style="padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/>'+
+      '</div>'+
+      '<input id="ac-desig" placeholder="Designation" style="width:100%;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px;margin-bottom:10px"/>'+
+      '<input id="ac-email" placeholder="Email" style="width:100%;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px;margin-bottom:10px"/>'+
+      '<input id="ac-phone" placeholder="Phone" style="width:100%;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px;margin-bottom:10px"/>'+
+      '<input id="ac-linkedin" placeholder="LinkedIn URL" style="width:100%;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px;margin-bottom:14px"/>'+
+      '<div style="display:flex;justify-content:flex-end;gap:8px"><button onclick="backToJob(\''+jid+'\')" style="background:transparent;color:var(--text3);border:1px solid var(--border);padding:9px 16px;border-radius:7px;cursor:pointer;font-size:13px">Cancel</button><button onclick="submitAddContact(\''+jid+'\')" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600">Add Contact</button></div>'+
+    '</div>'+
+  '</div>';
+}
+
+// ── JOB/CONTACT ACTIONS (local STATE; B2 will swap to API) ──
+function changeJobStage(jid, st){
+  var j=jobById(jid); if(!j) return;
+  var old=j.stage; j.stage=st;
+  STATE.activities.unshift({id:"a"+Date.now(),lid:jid,by:STATE.user.id,type:"stage_change",txt:"Stage: "+old+" → "+st,dt:new Date().toISOString()});
+  showToast("Stage updated","success"); render();
+}
+function saveJobNotes(jid, val){
+  var j=jobById(jid); if(!j) return;
+  if (j.notes===val) return;
+  j.notes=val; showToast("Notes saved","success");
+}
+function deleteJob(jid){
+  if(!confirm("Delete this job and all its contacts?")) return;
+  STATE.jobs=STATE.jobs.filter(function(j){return j.id!==jid;});
+  STATE.contacts=STATE.contacts.filter(function(c){return c.job_id!==jid;});
+  STATE.modal=null; STATE.detailJob=null;
+  showToast("Job deleted","success"); render();
+}
+function submitAddJob(){
+  var co=document.getElementById("aj-co").value;
+  var pos=document.getElementById("aj-pos").value.trim();
+  var fn=document.getElementById("aj-fn").value.trim();
+  if(!pos){showToast("Position is required","error");return;}
+  if(!fn){showToast("First contact name is required","error");return;}
+  var c=STATE.companies.find(function(x){return x.id===co;})||{};
+  var jid="j"+Date.now();
+  STATE.jobs.unshift({
+    id:jid, company_id:co, company_name:c.name||"", company_ind:c.ind||"", company_web:c.web||"",
+    position:pos, location:document.getElementById("aj-loc").value.trim(),
+    source:document.getElementById("aj-src").value.trim()||"LinkedIn",
+    job_url:document.getElementById("aj-url").value.trim(),
+    stage:"Active", notes:"",
+    created_by:STATE.user.id, assigned_to:STATE.user.id,
+    created_date:new Date().toISOString().slice(0,10), created_at:new Date().toISOString()
+  });
+  STATE.contacts.unshift({
+    id:"c"+Date.now(), job_id:jid,
+    first_name:fn, last_name:document.getElementById("aj-ln").value.trim(),
+    designation:document.getElementById("aj-desig").value.trim(),
+    email:document.getElementById("aj-email").value.trim(),
+    phone:document.getElementById("aj-phone").value.trim(),
+    linkedin:"", is_primary:true
+  });
+  STATE.modal=null; showToast("Job created","success"); render();
+}
+function openAddContact(jid){ STATE.modal={type:"addContact",job_id:jid}; render(); }
+function backToJob(jid){ STATE.modal={type:"jobDetail",id:jid}; render(); }
+function submitAddContact(jid){
+  var fn=document.getElementById("ac-fn").value.trim();
+  if(!fn){showToast("First name is required","error");return;}
+  var existing=jobContacts(jid);
+  STATE.contacts.push({
+    id:"c"+Date.now(), job_id:jid,
+    first_name:fn, last_name:document.getElementById("ac-ln").value.trim(),
+    designation:document.getElementById("ac-desig").value.trim(),
+    email:document.getElementById("ac-email").value.trim(),
+    phone:document.getElementById("ac-phone").value.trim(),
+    linkedin:document.getElementById("ac-linkedin").value.trim(),
+    is_primary:existing.length===0
+  });
+  showToast("Contact added","success");
+  STATE.modal={type:"jobDetail",id:jid}; render();
+}
+function deleteContact(cid){
+  if(!confirm("Delete this contact?")) return;
+  var c=STATE.contacts.find(function(x){return x.id===cid;}); if(!c) return;
+  var jid=c.job_id;
+  STATE.contacts=STATE.contacts.filter(function(x){return x.id!==cid;});
+  showToast("Contact deleted","success"); render();
+}
+function sendEmailToContact(cid){
+  var c=STATE.contacts.find(function(x){return x.id===cid;}); if(!c) return;
+  var j=jobById(c.job_id)||{};
+  STATE.manualEmail=c.email; STATE.manualEmailName=(c.first_name||"")+" "+(c.last_name||"");
+  STATE.page="email"; STATE.modal=null; showToast("Compose email to "+c.first_name,"info"); render();
+}
+function closeModal(){ STATE.modal=null; render(); }
 
 // ── EMAIL ──────────────────────────────────────
 function renderEmail(){
@@ -1837,6 +1989,9 @@ function renderToasts(){
   }).join("")+'</div>';
 }
 function renderModal(){
+  if(STATE.modal&&STATE.modal.type==="jobDetail")return renderJobDetailModal();
+  if(STATE.modal&&STATE.modal.type==="addJob")return renderAddJobModal();
+  if(STATE.modal&&STATE.modal.type==="addContact")return renderAddContactModal();
   if(STATE.mailMerge&&!STATE.modal)return'<div class="overlay">'+renderMailMergeModal()+'</div>';
   if(!STATE.modal)return"";
   return'<div class="overlay" onclick="overlayClick(event)">'+STATE.modal+'</div>';
@@ -2804,46 +2959,123 @@ window.confirmImport=function(){
 }
 
 // ════════════════════════════════════════════════
-// BOOT
+// BOOT (standalone) — disabled, API layer below boots instead
 // ════════════════════════════════════════════════
-var API_URL=(function(){var h=window.location.hostname;if(h===''||h==='localhost'||h.indexOf('127.')===0)return'https://fute-lms-backend.onrender.com';if(h.indexOf('onrender.com')>=0)return'';return'https://fute-lms-backend.onrender.com';})();
-var IS_FILE=window.location.protocol==='file:';
-function apiFetch(method,path,body){var opts={method:method,headers:{'Content-Type':'application/json'}};if(STATE.token)opts.headers['Authorization']='Bearer '+STATE.token;if(body)opts.body=JSON.stringify(body);return fetch(API_URL+path,opts).then(function(r){if(!r.ok)return r.json().then(function(e){throw new Error(e.error||r.statusText);});return r.json();});}
-function apiGet(p){return apiFetch('GET',p);}
-function apiPost(p,b){return apiFetch('POST',p,b);}
-function apiPatch(p,b){return apiFetch('PATCH',p,b);}
-function apiPut(p,b){return apiFetch('PUT',p,b);}
-function apiDel(p){return apiFetch('DELETE',p);}
-function normaliseUser(u){if(!u)return null;return{id:u.id,name:u.name,email:u.email,role:u.role,empId:u.employee_id,desig:u.designation,bdm:u.assigned_bdm_id||null,plt:u.platform||'Gmail',av:(u.name||'?').split(' ').map(function(w){return w[0];}).join('').toUpperCase().slice(0,2),avc:u.role==='admin'?'av-admin':u.role==='bd'?'av-bd':'av-ra'};}
-function normaliseLead(l){if(!l)return null;var co=l.company||{};return{id:l.id,coid:l.company_id,coName:co.name,coWeb:co.website,coInd:co.industry,coLoc:co.location,pos:l.position,fn:l.first_name,ln:l.last_name||'',desig:l.designation,email:l.email,phone:l.phone,li:l.linkedin,src:l.source,aid:l.analyst_id,bid:l.bdm_id,stage:l.stage,date:l.lead_date,sent:l.email_sent_at,plt:l.email_platform,notes:l.notes||'',del:l.deleted_at};}
-function loadAppData(){STATE.loading=true;render();var timeout=setTimeout(function(){STATE.loading=false;STATE.user=null;STATE.token=null;localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');showToast('Connection timed out.','error');render();},15000);return Promise.all([apiGet('/users'),apiGet('/leads'),apiGet('/companies'),apiGet('/emails'),apiGet('/reminders')]).then(function(r){clearTimeout(timeout);STATE.users=r[0].map(normaliseUser);STATE.leads=r[1].map(normaliseLead);STATE.companies=r[2].map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});STATE.emails=r[3].map(function(e){return{id:e.id,lid:e.lead_id,by:e.sent_by,to:e.to_email,subj:e.subject,body:e.body,plt:e.platform,dt:e.sent_at,status:e.status};});STATE.reminders=r[4].map(function(x){return{id:x.id,lid:x.lead_id,uid:x.user_id,name:x.contact_name,company:x.company_name,email:x.email,returnDate:x.return_date,reminderTime:x.reminder_time,note:x.note,status:x.status,createdAt:x.created_at};});STATE.activities=[];STATE.loading=false;render();}).catch(function(err){clearTimeout(timeout);STATE.loading=false;STATE.user=null;STATE.token=null;localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');showToast('Could not connect: '+err.message,'error');render();});}
-window.loginAs=function(email){if(IS_FILE){showToast('Open via fute-lms-backend.onrender.com','warning');return;}STATE.loading=true;render();apiPost('/auth/login',{email:email,password:'Fute@2024'}).then(function(data){STATE.token=data.token;STATE.user=normaliseUser(data.user);localStorage.setItem('fg_token',data.token);localStorage.setItem('fg_user',JSON.stringify(STATE.user));STATE.page='dashboard';loadAppData();}).catch(function(e){STATE.loading=false;showToast('Login failed: '+e.message,'error');render();});};
-window.doLogin=function(){if(IS_FILE){showToast('Open via fute-lms-backend.onrender.com','warning');return;}var emailEl=document.getElementById('login-email'),passEl=document.getElementById('login-pass'),errEl=document.getElementById('login-err');var email=(emailEl||{}).value||'',pass=(passEl||{}).value||'';if(!email||!pass){if(errEl){errEl.textContent='Enter email and password';errEl.style.display='block';}return;}STATE.loading=true;render();apiPost('/auth/login',{email:email,password:pass}).then(function(data){STATE.token=data.token;STATE.user=normaliseUser(data.user);localStorage.setItem('fg_token',data.token);localStorage.setItem('fg_user',JSON.stringify(STATE.user));STATE.page='dashboard';loadAppData();}).catch(function(err){STATE.loading=false;render();var e=document.getElementById('login-err');if(e){e.textContent=err.message||'Invalid email or password';e.style.display='block';}});};
-window.signOut=function(){STATE.user=null;STATE.token=null;STATE.leads=[];STATE.users=[];STATE.companies=[];STATE.emails=[];STATE.reminders=[];STATE.modal=null;STATE.viewingUser=null;localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');render();};
-window.changeStage=function(id,stage){var old=(STATE.leads.find(function(l){return l.id===id;})||{}).stage;STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{stage:stage}):l;});if(STATE.detailLead&&STATE.detailLead.id===id)STATE.detailLead=Object.assign({},STATE.detailLead,{stage:stage});render();apiPatch('/leads/'+id,{stage:stage,_oldStage:old}).catch(function(){STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{stage:old}):l;});showToast('Stage update failed','error');render();});showToast('Stage → "'+stage+'"','success');};
-window.deleteLead=function(id){if(!confirm('Move to trash? Deleted after 60 days.'))return;apiDel('/leads/'+id).then(function(){STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{del:todayIST()}):l;});if(STATE.detailLead&&STATE.detailLead.id===id)STATE.detailLead=null;showToast('Lead moved to trash','info');render();}).catch(function(e){showToast('Delete failed: '+e.message,'error');});};
-window.saveNotes=function(){var el=document.getElementById('dp-notes');if(el&&STATE.detailLead){var notes=el.value;apiPatch('/leads/'+STATE.detailLead.id,{notes:notes}).then(function(){STATE.leads=STATE.leads.map(function(l){return l.id===STATE.detailLead.id?Object.assign({},l,{notes:notes}):l;});STATE.detailLead=Object.assign({},STATE.detailLead,{notes:notes});showToast('Notes saved','success');render();}).catch(function(e){showToast('Save failed: '+e.message,'error');});}};
-window.applyBulk=function(){var sel=document.getElementById('bulk-stage');if(!sel||!sel.value)return;var stage=sel.value;var ids=Object.keys(STATE.leadsSelected).filter(function(id){return STATE.leadsSelected[id];});if(!ids.length)return;apiPatch('/leads/bulk/stage',{ids:ids,stage:stage}).then(function(){STATE.leads=STATE.leads.map(function(l){return ids.indexOf(l.id)>=0?Object.assign({},l,{stage:stage}):l;});STATE.leadsSelected={};showToast('Stage updated for '+ids.length+' leads','success');render();}).catch(function(e){showToast('Bulk update failed: '+e.message,'error');});};
-window.saveLead=function(){var fn=document.getElementById('f-fn'),emailEl=document.getElementById('f-email'),pos=document.getElementById('f-pos');if(!fn||!fn.value||!emailEl||!emailEl.value||!pos||!pos.value){showToast('First name, email and position required','warning');return;}var btn=document.querySelector('.modal .btn-primary');if(btn){btn.textContent='Saving...';btn.disabled=true;}function doSave(coid){apiPost('/leads',{company_id:coid,position:pos.value,first_name:fn.value,last_name:(document.getElementById('f-ln')||{}).value||'',designation:(document.getElementById('f-desig')||{}).value||'',email:emailEl.value,phone:(document.getElementById('f-phone')||{}).value||'',linkedin:(document.getElementById('f-li')||{}).value||'',source:(document.getElementById('f-src')||{}).value||'LinkedIn',analyst_id:(document.getElementById('f-ra')||{}).value||STATE.user.id,bdm_id:(document.getElementById('f-bd')||{}).value||STATE.user.bdm||null,lead_date:todayIST()}).then(function(lead){STATE.leads.unshift(normaliseLead(lead));closeModal();showToast('Lead added','success');render();}).catch(function(e){showToast('Failed: '+e.message,'error');if(btn){btn.textContent='Save lead';btn.disabled=false;}});}if(coNewMode){var coname=document.getElementById('f-coname');if(!coname||!coname.value){showToast('Company name required','warning');if(btn){btn.textContent='Save lead';btn.disabled=false;}return;}apiPost('/companies',{name:coname.value,website:(document.getElementById('f-web')||{}).value||'',industry:(document.getElementById('f-ind')||{}).value||'',location:(document.getElementById('f-loc')||{}).value||''}).then(function(co){STATE.companies.push({id:co.id,name:co.name,web:co.website,ind:co.industry,loc:co.location});doSave(co.id);}).catch(function(e){showToast('Company save failed: '+e.message,'error');if(btn){btn.textContent='Save lead';btn.disabled=false;}});}else{doSave((document.getElementById('f-coid')||{}).value);}};
-window.viewLead=function(id){STATE.detailLead=STATE.leads.find(function(l){return l.id===id;});apiGet('/leads/'+id+'/activity').then(function(acts){STATE.activities=STATE.activities.filter(function(a){return a.lid!==id;});acts.forEach(function(a){STATE.activities.push({id:a.id,lid:a.lead_id,uid:a.user_id,type:a.action_type,txt:a.description,dt:a.created_at?a.created_at.split('T')[0]:'',});});render();}).catch(function(){});render();};
-window.sendEmail=function(){var ge=STATE.genEmail;if(!ge){var ml=STATE.mergeLeadId?STATE.leads.find(function(l){return l.id===STATE.mergeLeadId;}):null;if(!ml&&!STATE.manualEmail){showToast('Select a recipient first','warning');return;}if(ml){var co=STATE.companies.find(function(c){return c.id===ml.coid;})||{};ge={to:ml.fn+' '+ml.ln,email:ml.email,subj:fillEmail(STATE.emailSubj,ml,co,STATE.user.name),body:fillEmail(STATE.emailBody,ml,co,STATE.user.name),lid:ml.id};}else{ge={to:STATE.manualEmail,email:STATE.manualEmail,subj:STATE.emailSubj,body:STATE.emailBody,lid:null};}}var plt=STATE.user.plt||'Gmail';var gmailUser=STATE.user.email||'';window.open(plt==='Gmail'?'https://mail.google.com/mail/u/0/?authuser='+encodeURIComponent(gmailUser)+'&view=cm&to='+encodeURIComponent(ge.email)+'&su='+encodeURIComponent(ge.subj)+'&body='+encodeURIComponent(ge.body):'https://outlook.office.com/mail/deeplink/compose?to='+encodeURIComponent(ge.email)+'&subject='+encodeURIComponent(ge.subj)+'&body='+encodeURIComponent(ge.body),'_blank');apiPost('/emails',{lead_id:ge.lid,to_email:ge.email,subject:ge.subj,body:ge.body,platform:plt}).then(function(data){STATE.emails.unshift({id:data.id,lid:ge.lid,by:STATE.user.id,to:ge.email,subj:ge.subj,body:ge.body,plt:plt,dt:todayIST(),status:'sent'});showToast('Email sent and saved','success');render();}).catch(function(){showToast('Email opened (not saved)','warning');});};
-window.saveReminder=function(lid,manualEmail){var lead=lid?STATE.leads.find(function(l){return l.id===lid;}):null;var co=lead?STATE.companies.find(function(c){return c.id===lead.coid;})||{}:{};var dt=(document.getElementById('rem-date')||{}).value;var tm=(document.getElementById('rem-time')||{}).value||'09:00';var note=(document.getElementById('rem-note')||{}).value||'';if(!dt){showToast('Please set a date','warning');return;}apiPost('/reminders',{lead_id:lid||null,contact_name:lead?(lead.fn+' '+lead.ln):(manualEmail||''),company_name:lead?(co.name||''):'',email:lead?lead.email:(manualEmail||''),return_date:dt,reminder_time:tm,note:note}).then(function(data){STATE.reminders.push({id:data.id,lid:lid||null,uid:STATE.user.id,name:data.contact_name,company:data.company_name,email:data.email,returnDate:dt,reminderTime:tm,note:note,status:'pending',createdAt:todayIST()});closeModal();STATE.reminderSearch=null;showToast('Reminder set for '+fmtDate(dt),'success');render();}).catch(function(e){showToast('Failed: '+e.message,'error');});};
-window.dismissReminder=function(rid){apiDel('/reminders/'+rid).then(function(){STATE.reminders=STATE.reminders.filter(function(r){return r.id!==rid;});showToast('Reminder removed','info');render();}).catch(function(e){showToast('Failed: '+e.message,'error');});};
-window.saveUser=function(existingId){var name=(document.getElementById('u-name')||{}).value||'';var email=(document.getElementById('u-email')||{}).value||'';if(!name||!email){showToast('Name and email required','warning');return;}var payload={name:name,email:email,role:(document.getElementById('u-role')||{}).value||'ra',employee_id:(document.getElementById('u-eid')||{}).value||'',designation:(document.getElementById('u-desig')||{}).value||'',platform:(document.getElementById('u-plt')||{}).value||'Gmail',assigned_bdm_id:(document.getElementById('u-bd')||{}).value||null};if(existingId){apiPut('/users/'+existingId,payload).then(function(data){STATE.users=STATE.users.map(function(u){return u.id===existingId?normaliseUser(data):u;});showToast('User updated','success');closeModal();render();}).catch(function(e){showToast('Failed: '+e.message,'error');});}else{payload.password='Fute@2024';apiPost('/users',payload).then(function(data){STATE.users.push(normaliseUser(data));showToast('User added · default password: Fute@2024','success');closeModal();render();}).catch(function(e){showToast('Failed: '+e.message,'error');});}};
-window.removeUser=function(id){if(id===STATE.user.id){showToast('Cannot remove yourself','warning');return;}if(!confirm('Remove this user?'))return;apiDel('/users/'+id).then(function(){STATE.users=STATE.users.filter(function(u){return u.id!==id;});showToast('User removed','info');render();}).catch(function(e){showToast('Failed: '+e.message,'error');});};
-window.saveProfile=function(){var name=(document.getElementById('p-name')||{}).value||STATE.user.name;var email=(document.getElementById('p-email')||{}).value||STATE.user.email;var eid=(document.getElementById('p-eid')||{}).value||STATE.user.empId;var desig=(document.getElementById('p-desig')||{}).value||STATE.user.desig;apiPut('/users/'+STATE.user.id,{name:name,email:email,employee_id:eid,designation:desig}).then(function(){STATE.user=Object.assign({},STATE.user,{name:name,email:email,empId:eid,desig:desig});STATE.users=STATE.users.map(function(u){return u.id===STATE.user.id?STATE.user:u;});showToast('Profile updated','success');render();}).catch(function(e){showToast('Failed: '+e.message,'error');});};
-window.setProfilePlt=function(p){apiPut('/users/'+STATE.user.id,{platform:p}).then(function(){STATE.user=Object.assign({},STATE.user,{plt:p});STATE.users=STATE.users.map(function(u){return u.id===STATE.user.id?STATE.user:u;});showToast('Platform set to '+p,'success');render();}).catch(function(e){showToast('Failed: '+e.message,'error');});};
-window.changePassword=function(){var cur=(document.getElementById('pw-cur')||{}).value;var nw=(document.getElementById('pw-new')||{}).value;var con=(document.getElementById('pw-con')||{}).value;if(!nw||nw.length<6){showToast('Min 6 characters','warning');return;}if(nw!==con){showToast("Passwords don't match",'warning');return;}apiPost('/auth/change-password',{currentPassword:cur,newPassword:nw}).then(function(){showToast('Password updated','success');['pw-cur','pw-new','pw-con'].forEach(function(id){var e=document.getElementById(id);if(e)e.value='';});}).catch(function(e){showToast('Failed: '+e.message,'error');});};
 
 // ════════════════════════════════════════════════
-// BOOT
+// API LAYER — Drop B2 (Jobs wired to backend)
 // ════════════════════════════════════════════════
-document.addEventListener('DOMContentLoaded',function(){
-  var t=localStorage.getItem('fg_token'),uu=localStorage.getItem('fg_user');
-  if(t&&uu){try{STATE.token=t;STATE.user=JSON.parse(uu);STATE.page='dashboard';loadAppData();}catch(e){localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');render();}}else{render();}
-});
-</script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+var IS_FILE=window.location.protocol==='file:';
+var API_URL=(function(){var h=window.location.hostname;if(h===''||h==='localhost'||h.indexOf('127.')===0)return'https://fute-lms-backend.onrender.com';if(h.indexOf('onrender.com')>=0)return'';return'https://fute-lms-backend.onrender.com';})();
+function apiFetch(method,path,body){var headers={'Content-Type':'application/json'};if(STATE.token)headers['Authorization']='Bearer '+STATE.token;return fetch(API_URL+path,{method:method,headers:headers,body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||('HTTP '+r.status));return d;});});}
+function apiGet(p){return apiFetch('GET',p);}
+function apiPost(p,b){return apiFetch('POST',p,b);}
+function apiPut(p,b){return apiFetch('PUT',p,b);}
+function apiDelete(p){return apiFetch('DELETE',p);}
+
+// ── Restore session if present ─────────────────
+STATE.token=localStorage.getItem('fg_token')||null;
+try{var _su=localStorage.getItem('fg_user');if(_su)STATE.user=JSON.parse(_su);}catch(e){}
+// Wipe demo seed data — will be replaced by API on login
+STATE.jobs=[];STATE.contacts=[];STATE.users=[];STATE.companies=[];STATE.emails=[];STATE.reminders=[];STATE.activities=[];STATE.leads=[];
+
+function normaliseUser(u){return{id:u.id,name:u.name,email:u.email,role:u.role,empId:u.employee_id,desig:u.designation,plt:u.platform||'Gmail',ooo:u.ooo_until||null};}
+function normaliseJob(j){
+  var co=j.company||{};
+  return{id:j.id,company_id:j.company_id,company_name:co.name||'',company_ind:co.industry||'',company_web:co.website||'',
+    position:j.position,location:j.location||'',source:j.source||'',job_url:j.job_url||'',
+    stage:j.stage||'Active',notes:j.notes||'',created_by:j.created_by,assigned_to:j.assigned_to,
+    created_date:j.created_date,created_at:j.created_at};
+}
+function flattenContacts(jobs){var out=[];jobs.forEach(function(j){(j.contacts||[]).forEach(function(c){out.push({id:c.id,job_id:c.job_id,first_name:c.first_name,last_name:c.last_name||'',designation:c.designation||'',email:c.email||'',phone:c.phone||'',linkedin:c.linkedin||'',is_primary:!!c.is_primary});});});return out;}
+
+function loadAppData(){
+  STATE.loading=true;render();
+  return Promise.all([apiGet('/users'),apiGet('/jobs'),apiGet('/companies')]).then(function(r){
+    STATE.users=r[0].map(normaliseUser);
+    STATE.jobs=r[1].map(normaliseJob);
+    STATE.contacts=flattenContacts(r[1]);
+    STATE.companies=r[2].map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});
+    STATE.loading=false;render();
+  }).catch(function(err){
+    STATE.loading=false;STATE.user=null;STATE.token=null;
+    localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');
+    showToast('Could not connect: '+err.message,'error');render();
+  });
+}
+function refreshJobs(){return apiGet('/jobs').then(function(j){STATE.jobs=j.map(normaliseJob);STATE.contacts=flattenContacts(j);render();});}
+
+// ── Auth ───────────────────────────────────────
+window.doLogin=function(){
+  if(IS_FILE){showToast('Open via fute-lms-backend.onrender.com','warning');return;}
+  var em=(document.getElementById('login-email')||{}).value||'';
+  var pw=(document.getElementById('login-pass')||{}).value||'';
+  if(!em||!pw){var e=document.getElementById('login-err');if(e){e.textContent='Enter email and password';e.style.display='block';}return;}
+  STATE.loading=true;render();
+  apiPost('/auth/login',{email:em,password:pw}).then(function(d){
+    STATE.token=d.token;STATE.user=normaliseUser(d.user);
+    localStorage.setItem('fg_token',d.token);localStorage.setItem('fg_user',JSON.stringify(STATE.user));
+    STATE.page='dashboard';loadAppData();
+  }).catch(function(err){
+    STATE.loading=false;render();
+    var e=document.getElementById('login-err');if(e){e.textContent=err.message||'Invalid credentials';e.style.display='block';}
+  });
+};
+window.loginAs=function(){showToast('Use email + password to log in','warning');};
+window.doLogout=function(){STATE.user=null;STATE.token=null;localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');STATE.jobs=[];STATE.contacts=[];STATE.page='login';render();};
+
+// ── Jobs (wired) ───────────────────────────────
+window.changeJobStage=function(jid,st){
+  var j=jobById(jid);if(!j)return;var old=j.stage;j.stage=st;render();
+  apiPut('/jobs/'+jid,{stage:st}).then(function(){showToast('Stage updated','success');}).catch(function(e){j.stage=old;showToast('Failed: '+e.message,'error');render();});
+};
+window.saveJobNotes=function(jid,val){
+  var j=jobById(jid);if(!j||j.notes===val)return;var old=j.notes;j.notes=val;
+  apiPut('/jobs/'+jid,{notes:val}).then(function(){showToast('Notes saved','success');}).catch(function(e){j.notes=old;showToast('Failed: '+e.message,'error');render();});
+};
+window.deleteJob=function(jid){
+  if(!confirm('Delete this job and all its contacts?'))return;
+  apiDelete('/jobs/'+jid).then(function(){STATE.modal=null;STATE.detailJob=null;showToast('Job deleted','success');return refreshJobs();}).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+window.submitAddJob=function(){
+  var co=document.getElementById('aj-co').value;
+  var pos=document.getElementById('aj-pos').value.trim();
+  var fn=document.getElementById('aj-fn').value.trim();
+  if(!co){showToast('Pick a company','error');return;}
+  if(!pos){showToast('Position is required','error');return;}
+  if(!fn){showToast('First contact name is required','error');return;}
+  var payload={company_id:co,position:pos,
+    location:document.getElementById('aj-loc').value.trim(),
+    source:document.getElementById('aj-src').value.trim()||'LinkedIn',
+    job_url:document.getElementById('aj-url').value.trim(),
+    stage:'Active',notes:'',
+    contacts:[{first_name:fn,last_name:document.getElementById('aj-ln').value.trim(),
+      designation:document.getElementById('aj-desig').value.trim(),
+      email:document.getElementById('aj-email').value.trim(),
+      phone:document.getElementById('aj-phone').value.trim(),linkedin:''}]};
+  apiPost('/jobs',payload).then(function(){STATE.modal=null;showToast('Job created','success');return refreshJobs();}).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+window.submitAddContact=function(jid){
+  var fn=document.getElementById('ac-fn').value.trim();
+  if(!fn){showToast('First name is required','error');return;}
+  var existing=jobContacts(jid);
+  apiPost('/contacts',{job_id:jid,first_name:fn,
+    last_name:document.getElementById('ac-ln').value.trim(),
+    designation:document.getElementById('ac-desig').value.trim(),
+    email:document.getElementById('ac-email').value.trim(),
+    phone:document.getElementById('ac-phone').value.trim(),
+    linkedin:document.getElementById('ac-linkedin').value.trim(),
+    is_primary:existing.length===0
+  }).then(function(){showToast('Contact added','success');STATE.modal={type:'jobDetail',id:jid};return refreshJobs();}).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+window.deleteContact=function(cid){
+  if(!confirm('Delete this contact?'))return;
+  apiDelete('/contacts/'+cid).then(function(){showToast('Contact deleted','success');return refreshJobs();}).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+// ── Boot ───────────────────────────────────────
+if(STATE.token&&STATE.user){STATE.page='dashboard';loadAppData();}else{STATE.page='login';render();}
+
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </body>
