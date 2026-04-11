@@ -1019,7 +1019,7 @@ function renderJobs(){
         '<input id="jobs-search" placeholder="Search jobs, companies, contacts..." value="'+escAttr(f.search)+'" style="flex:1;max-width:360px;padding:9px 13px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);font-size:13px"/>'+
         '<select id="jobs-stage" style="padding:9px 13px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);font-size:13px"><option value="all">All stages</option>'+stageOpts+'</select>'+
       '</div>'+
-      '<button onclick="openAddJob()" style="background:var(--accent);color:#fff;border:0;padding:10px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px">+ Add Job</button>'+
+      '<div style="display:flex;gap:8px;align-items:center">'+ '<button onclick="triggerImport()" style="background:var(--card);color:var(--text);border:1.5px solid var(--border);padding:9px 15px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px">'+ ico("upload",13)+ ' Import Excel</button>'+ '<button onclick="openAddJob()" style="background:var(--accent);color:#fff;border:0;padding:10px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px">+ Add Job</button>'+ '<input type="file" id="xl-import" accept=".xlsx,.xls" style="display:none" onchange="importXL(this)"/>'+ '</div>'+
     '</div>'+
     '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden">'+
       '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
@@ -2845,42 +2845,6 @@ var COL_MAP=[
   [["analystname","analyst","raname","researchanalyst"],"analystName"],
 ];
 
-// ── Drop C: Group import rows by (company + position) ──
-function groupImportRows(mapped){
-  var groups={};var order=[];
-  var norm=function(s){return(s||"").trim().toLowerCase().replace(/\s+/g," ");};
-  mapped.forEach(function(r){
-    if(!r.company&&!r.firstName){return;}
-    var coKey=norm(r.company||"unknown");
-    var posKey=norm(r.position||"unknown");
-    var key=coKey+"||"+posKey;
-    if(!groups[key]){
-      groups[key]={
-        coName:(r.company||"").trim(),
-        website:(r.website||"").trim(),
-        industry:(r.industry||"").trim(),
-        location:(r.location||"").trim(),
-        position:(r.position||"").trim(),
-        source:(r.source||"Import").trim(),
-        contacts:[],
-        coKey:coKey
-      };
-      order.push(key);
-    }
-    if(r.firstName||r.email){
-      groups[key].contacts.push({
-        first_name:(r.firstName||"").trim(),
-        last_name:(r.lastName||"").trim(),
-        designation:(r.designation||"").trim(),
-        email:(r.email||"").trim(),
-        phone:(r.phone||"").trim(),
-        linkedin:(r.linkedin||"").trim()
-      });
-    }
-  });
-  return order.map(function(k){return groups[k];}).filter(function(g){return g.contacts.length>0;});
-}
-
 function renderImportModal(rows, sheetName){
   var sample=rows.slice(0,3);
   var cols=Object.keys(rows[0]);
@@ -2890,18 +2854,21 @@ function renderImportModal(rows, sheetName){
   var skippedRows=rows.length-totalContacts;
   var multiSheet=STATE.importWB&&STATE.importWB.SheetNames.length>1;
 
+  // new companies not yet in STATE
   var newCoNames={};
   groups.forEach(function(g){
     if(!g.coName)return;
     var exists=STATE.companies.find(function(c){return c.name.toLowerCase()===g.coName.toLowerCase();});
-    if(!exists)newCoNames[g.coName.toLowerCase()]=g.coName;
+    if(!exists)newCoNames[g.coName.toLowerCase()]=1;
   });
   var newCoCnt=Object.keys(newCoNames).length;
 
+  // duplicate jobs (already exist client-side)
   var dupeCnt=0;
   groups.forEach(function(g){
     var exists=STATE.jobs.find(function(j){
-      return j.company_name.toLowerCase()===g.coName.toLowerCase()&&j.position.toLowerCase()===g.position.toLowerCase();
+      return j.company_name.toLowerCase()===g.coName.toLowerCase()&&
+             j.position.toLowerCase()===g.position.toLowerCase();
     });
     if(exists)dupeCnt++;
   });
@@ -2911,8 +2878,8 @@ function renderImportModal(rows, sheetName){
     var kl=c.toLowerCase().replace(/[\s_\-\.]/g,"");
     var match=COL_MAP.find(function(pair){return pair[0].some(function(v){return kl===v||kl.includes(v);});});
     var status=match?
-      '<span style="color:var(--green);font-weight:500">→ '+match[1]+'</span>':
-      '<span style="color:var(--text3)">— not mapped</span>';
+      '<span style="color:var(--green);font-weight:500">\u2192 '+match[1]+'</span>':
+      '<span style="color:var(--text3)">\u2014 not mapped</span>';
     return '<tr><td style="padding:5px 10px;font-size:12.5px">'+htmlEsc(c)+'</td><td style="padding:5px 10px">'+status+'</td></tr>';
   }).join("");
 
@@ -2921,19 +2888,19 @@ function renderImportModal(rows, sheetName){
       '<div>'+
         '<div class="mt">Import Jobs from Excel</div>'+
         '<div style="font-size:12px;color:var(--text3);margin-top:3px">Sheet: <strong style="color:var(--accent)">'+htmlEsc(sheetName||"Sheet1")+'</strong>'+
-        (multiSheet?' · <span style="cursor:pointer;color:var(--accent);text-decoration:underline" onclick="STATE.modal=renderSheetPickerModal(STATE.importWB.SheetNames);render()">Change sheet</span>':'')+
+        (multiSheet?' \u00b7 <span style="cursor:pointer;color:var(--accent);text-decoration:underline" onclick="STATE.modal=renderSheetPickerModal(STATE.importWB.SheetNames);render()">Change sheet</span>':'')+
         '</div>'+
       '</div>'+
       '<button class="btn-icon" onclick="closeModal()">'+ico("x",14)+'</button>'+
     '</div>'+
     '<div class="mb_">'+
-      '<div style="padding:12px 14px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:14px;font-size:13px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">'+
-        '<div><div style="font-size:20px;font-weight:700;color:var(--accent)">'+newJobs+'</div><div style="color:var(--text2);font-size:11px;margin-top:2px">NEW JOBS</div></div>'+
-        '<div><div style="font-size:20px;font-weight:700;color:var(--teal)">'+totalContacts+'</div><div style="color:var(--text2);font-size:11px;margin-top:2px">CONTACTS</div></div>'+
-        '<div><div style="font-size:20px;font-weight:700;color:var(--purple)">'+newCoCnt+'</div><div style="color:var(--text2);font-size:11px;margin-top:2px">NEW COMPANIES</div></div>'+
+      '<div style="padding:12px 14px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:14px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">'+
+        '<div><div style="font-size:22px;font-weight:700;color:var(--accent)">'+newJobs+'</div><div style="color:var(--text2);font-size:11px;margin-top:2px">NEW JOBS</div></div>'+
+        '<div><div style="font-size:22px;font-weight:700;color:var(--teal)">'+totalContacts+'</div><div style="color:var(--text2);font-size:11px;margin-top:2px">CONTACTS</div></div>'+
+        '<div><div style="font-size:22px;font-weight:700;color:var(--purple)">'+newCoCnt+'</div><div style="color:var(--text2);font-size:11px;margin-top:2px">NEW COMPANIES</div></div>'+
       '</div>'+
-      (dupeCnt?'<div style="padding:8px 12px;background:var(--amber-l);border-radius:var(--r2);margin-bottom:12px;font-size:12.5px;color:var(--amber)">⚠ '+dupeCnt+' job'+(dupeCnt>1?'s':'')+' already exist in the system and will be skipped.</div>':'')+
-      (skippedRows?'<div style="padding:8px 12px;background:var(--bg);border-radius:var(--r2);margin-bottom:12px;font-size:12.5px;color:var(--text3)">'+skippedRows+' row'+(skippedRows>1?'s':'')+' skipped — no company or contact name found.</div>':'')+
+      (dupeCnt?'<div style="padding:8px 12px;background:var(--amber-l);border-radius:var(--r2);margin-bottom:10px;font-size:12.5px;color:var(--amber)">\u26a0 '+dupeCnt+' job'+(dupeCnt>1?'s':'')+' already exist and will be skipped.</div>':'')+
+      (skippedRows?'<div style="padding:8px 12px;background:var(--bg);border-radius:var(--r2);margin-bottom:10px;font-size:12.5px;color:var(--text3)">'+skippedRows+' row'+(skippedRows>1?'s':'')+' skipped (no company/name).</div>':'')+
       '<div class="fw5 f13 mb2">Column mapping</div>'+
       '<div class="tbl-wrap mb4" style="max-height:180px;overflow-y:auto">'+
         '<table><thead><tr><th>Your column</th><th>Maps to</th></tr></thead>'+
@@ -2954,18 +2921,52 @@ function renderImportModal(rows, sheetName){
     '</div>'+
     '<div class="mf">'+
       '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
-      (newJobs>0?'<button class="btn btn-primary" onclick="confirmImport()">'+ico("plus",13)+' Import '+newJobs+' job'+(newJobs>1?'s':'')+'</button>':
-       '<button class="btn btn-primary" disabled style="opacity:.5;cursor:not-allowed">Nothing new to import</button>')+
+      (newJobs>0
+        ?'<button class="btn btn-primary" onclick="confirmImport()">'+ico("plus",13)+' Import '+newJobs+' job'+(newJobs>1?'s':'')+'</button>'
+        :'<button class="btn btn-primary" disabled style="opacity:.5;cursor:not-allowed">Nothing new to import</button>')+
     '</div>'+
   '</div>';
 }
 
-function renderImportProgressModal(done, total, logLines, finished, summary){
+// ── Drop C helpers ──────────────────────────────
+function groupImportRows(mapped){
+  var groups={};var order=[];
+  var norm=function(s){return(s||"").trim().toLowerCase().replace(/\s+/g," ");};
+  mapped.forEach(function(r){
+    if(!r.company&&!r.firstName){return;}
+    var coKey=norm(r.company||"unknown");
+    var posKey=norm(r.position||"unknown");
+    var key=coKey+"||"+posKey;
+    if(!groups[key]){
+      groups[key]={
+        coName:(r.company||"").trim(),
+        website:(r.website||"").trim(),
+        industry:(r.industry||"").trim(),
+        location:(r.location||"").trim(),
+        position:(r.position||"").trim(),
+        source:(r.source||"Import").trim(),
+        contacts:[]
+      };
+      order.push(key);
+    }
+    if(r.firstName||r.email){
+      groups[key].contacts.push({
+        first_name:(r.firstName||"").trim(),
+        last_name:(r.lastName||"").trim(),
+        designation:(r.designation||"").trim(),
+        email:(r.email||"").trim(),
+        phone:(r.phone||"").trim(),
+        linkedin:(r.linkedin||"").trim()
+      });
+    }
+  });
+  return order.map(function(k){return groups[k];}).filter(function(g){return g.contacts.length>0;});
+}
+
+function renderImportProgressModal(done,total,logLines,finished,summary){
   var pct=total>0?Math.round(done/total*100):0;
   return '<div class="modal modal-w480">'+
-    '<div class="mh">'+
-      '<div class="mt">'+(finished?'Import complete':'Importing…')+'</div>'+
-    '</div>'+
+    '<div class="mh"><div class="mt">'+(finished?'Import complete':'Importing\u2026')+'</div></div>'+
     '<div class="mb_">'+
       '<div style="margin-bottom:12px">'+
         '<div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--text2);margin-bottom:6px">'+
@@ -2978,7 +2979,7 @@ function renderImportProgressModal(done, total, logLines, finished, summary){
       '</div>'+
       (finished&&summary?'<div style="padding:10px 12px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:10px;font-size:13px">'+htmlEsc(summary)+'</div>':'')+
       '<div style="background:var(--bg);border-radius:var(--r2);padding:8px 10px;font-size:11.5px;max-height:160px;overflow-y:auto;font-family:var(--mono);color:var(--text2)" id="import-log">'+
-        (logLines.length?logLines.map(function(l){return '<div style="padding:2px 0">'+htmlEsc(l)+'</div>';}).join(''):'<div style="color:var(--text3)">Starting…</div>')+
+        (logLines.length?logLines.map(function(l){return '<div style="padding:2px 0">'+htmlEsc(l)+'</div>';}).join(''):'<div style="color:var(--text3)">Starting\u2026</div>')+
       '</div>'+
     '</div>'+
     (finished?'<div class="mf"><button class="btn btn-primary" onclick="closeModal();refreshJobs();">Done</button></div>':'')+
@@ -2991,39 +2992,39 @@ window.confirmImport=function(){
   var groups=groupImportRows(mapped);
   STATE.importPreview=null;
 
+  // skip jobs that already exist client-side (company+position match)
   var toProcess=groups.filter(function(g){
     return !STATE.jobs.find(function(j){
-      return j.company_name.toLowerCase()===g.coName.toLowerCase()&&j.position.toLowerCase()===g.position.toLowerCase();
+      return j.company_name.toLowerCase()===g.coName.toLowerCase()&&
+             j.position.toLowerCase()===g.position.toLowerCase();
     });
   });
 
-  if(!toProcess.length){closeModal();showToast('All jobs already exist — nothing to import.','warning');return;}
+  if(!toProcess.length){closeModal();showToast('All jobs already exist \u2014 nothing to import.','warning');return;}
 
   var total=toProcess.length;
   var done=0;var succeeded=0;var failed=0;
-  var logLines=[];
-  var failDetails=[];
+  var logLines=[];var failDetails=[];
 
   function updateProgress(fin,summary){
     STATE.modal=renderImportProgressModal(done,total,logLines,fin,summary);
     render();
-    // auto-scroll log
     setTimeout(function(){var el=document.getElementById('import-log');if(el)el.scrollTop=el.scrollHeight;},20);
   }
   updateProgress(false,'');
 
+  // build company cache from current STATE
   var coCache={};
   STATE.companies.forEach(function(c){coCache[c.name.toLowerCase()]=c.id;});
 
   function ensureCompany(g){
     var key=g.coName.toLowerCase();
     if(coCache[key])return Promise.resolve(coCache[key]);
-    return apiPost('/companies',{
-      name:g.coName,
-      website:g.website||undefined,
-      industry:g.industry||undefined,
-      location:g.location||undefined
-    }).then(function(co){
+    var payload={name:g.coName};
+    if(g.website)payload.website=g.website;
+    if(g.industry)payload.industry=g.industry;
+    if(g.location)payload.location=g.location;
+    return apiPost('/companies',payload).then(function(co){
       coCache[key]=co.id;
       STATE.companies.push({id:co.id,name:co.name,web:co.website||'',ind:co.industry||'',loc:co.location||''});
       return co.id;
@@ -3032,32 +3033,24 @@ window.confirmImport=function(){
 
   function processNext(idx){
     if(idx>=toProcess.length){
-      var summary=succeeded+' job'+(succeeded!==1?'s':'')+' imported'+(failed>0?', '+failed+' failed — see log above.':'. Tap Done to refresh.');
-      if(failed>0){
-        logLines.push('');
-        logLines.push('── Failed jobs ──');
-        failDetails.forEach(function(f){logLines.push('✗ '+f);});
-      }
+      var summary=succeeded+' job'+(succeeded!==1?'s':'')+' imported'+(failed>0?', '+failed+' failed \u2014 see log.':'. Tap Done to refresh.');
+      if(failed>0){logLines.push('');logLines.push('\u2500\u2500 Failed \u2500\u2500');failDetails.forEach(function(f){logLines.push('\u2717 '+f);});}
       updateProgress(true,summary);
       return;
     }
     var g=toProcess[idx];
     ensureCompany(g).then(function(coId){
-      return apiPost('/jobs',{
-        company_id:coId,
-        position:g.position||'(unknown)',
-        location:g.location||undefined,
-        source:g.source||'Import',
-        stage:'Active',
-        contacts:g.contacts
-      });
+      var payload={company_id:coId,position:g.position||'(unknown)',stage:'Active',contacts:g.contacts};
+      if(g.location)payload.location=g.location;
+      if(g.source)payload.source=g.source;
+      return apiPost('/jobs',payload);
     }).then(function(){
       succeeded++;
-      logLines.push('✓ '+g.coName+' — '+g.position+' ('+g.contacts.length+' contact'+(g.contacts.length!==1?'s':'')+')');
+      logLines.push('\u2713 '+g.coName+' \u2014 '+g.position+' ('+g.contacts.length+' contact'+(g.contacts.length!==1?'s':'')+')');
     }).catch(function(err){
       failed++;
-      var msg=g.coName+' — '+g.position+': '+err.message;
-      logLines.push('✗ '+msg);
+      var msg=g.coName+' \u2014 '+g.position+': '+err.message;
+      logLines.push('\u2717 '+msg);
       failDetails.push(msg);
     }).then(function(){
       done++;
@@ -3065,7 +3058,6 @@ window.confirmImport=function(){
       setTimeout(function(){processNext(idx+1);},80);
     });
   }
-
   processNext(0);
 };
 
