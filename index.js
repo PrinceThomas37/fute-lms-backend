@@ -36,7 +36,9 @@ async function logActivity(job_id, contact_id, user_id, action_type, description
 }
 
 // ── HEALTH ─────────────────────────────────────────────────────
-app.get('/', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.0.0-jobs' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.0.0-jobs' }));
+
+app.use(express.static('public'));
 
 // ══════════════════════════════════════════════════════════════
 // AUTH
