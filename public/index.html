@@ -699,7 +699,7 @@ function renderApp(){
     {id:"dashboard",lbl:"Dashboard",ic:"dashboard"},
     {id:"leads",lbl:"Leads",ic:"leads",badge:todayCnt},
     {id:"email",lbl:"Email",ic:"email"},
-    {id:"reminders",lbl:"Reminders",ic:"star",badge:STATE.reminders.filter(function(r){return r.uid===u.id&&r.status==="pending"}).length||null},
+    {id:"reminders",lbl:"Reminders",ic:"star",badge:STATE.reminders.filter(function(r){return r.user_id===u.id&&r.status==="pending"}).length||null},
     {id:"profile",lbl:"My Profile",ic:"profile"}
   ];
   if(u.role==="admin"||u.role==="ra_lead"||u.role==="bd_lead")navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
@@ -917,9 +917,9 @@ function renderDashboard(){
     // ── REMINDERS WIDGET ─────────────────────────
     (function(){
       var today=todayIST();
-      var myR=STATE.reminders.filter(function(r){return r.uid===STATE.user.id&&r.status==="pending";});
-      var due=myR.filter(function(r){return r.returnDate<=today;});
-      var upcoming=myR.filter(function(r){return r.returnDate>today;}).slice(0,4);
+      var myR=STATE.reminders.filter(function(r){return r.user_id===STATE.user.id&&r.status==="pending";});
+      var due=myR.filter(function(r){return r.return_date<=today;});
+      var upcoming=myR.filter(function(r){return r.return_date>today;}).slice(0,4);
       if(!myR.length)return '<div class="card cp mt4">'+
         '<div class="flex jb aic mb3">'+
           '<div><div class="fw6">Reminders</div><div class="f12 text3">No reminders set</div></div>'+
@@ -941,12 +941,12 @@ function renderDashboard(){
       }).join("");
 
       var upcomingRows=upcoming.map(function(r){
-        var days=Math.ceil((new Date(r.returnDate)-new Date(today))/86400000);
+        var days=Math.ceil((new Date(r.return_date)-new Date(today))/86400000);
         return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">'+
           '<div style="width:7px;height:7px;border-radius:50%;background:var(--accent);flex-shrink:0"></div>'+
           '<div style="flex:1;min-width:0">'+
             '<div style="font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(r.name)+'</div>'+
-            '<div class="f12 text3">'+fmtDate(r.returnDate)+(r.reminderTime?' · '+r.reminderTime+' IST':'')+(r.note?' · '+htmlEsc(r.note):'')+'</div>'+
+            '<div class="f12 text3">'+htmlEsc(r.return_date||'')+(r.reminder_time?' · '+r.reminder_time+' IST':'')+(r.note?' · '+htmlEsc(r.note):'')+'</div>'+
           '</div>'+
           '<span style="font-size:11px;padding:2px 8px;background:'+(days<=3?"var(--red-l)":"var(--accent-l)")+';color:'+(days<=3?"var(--red)":"var(--accent)")+';border-radius:10px;white-space:nowrap">'+days+' day'+(days!==1?"s":"")+'</span>'+
         '</div>';
@@ -1639,158 +1639,97 @@ function renderAdmin(){
 function renderReminders(){
   var u=STATE.user;
   var today=todayIST();
-  var myReminders=STATE.reminders.filter(function(r){return r.uid===u.id});
-  var oooLeads=getMyLeads(u).filter(function(l){return l.stage==="Out of Office"});
-  var due=myReminders.filter(function(r){return r.status==="pending"&&r.returnDate<=today});
-  var upcoming=myReminders.filter(function(r){return r.status==="pending"&&r.returnDate>today});
-  var sent=myReminders.filter(function(r){return r.status==="sent"});
+  // API returns user_id, return_date, reminder_time, contact_name, company_name
+  var myReminders=(STATE.reminders||[]).filter(function(r){return r.user_id===u.id;});
+  var due=myReminders.filter(function(r){return r.status==='pending'&&r.return_date<=today;});
+  var upcoming=myReminders.filter(function(r){return r.status==='pending'&&r.return_date>today;});
+  var sent=myReminders.filter(function(r){return r.status==='sent';});
 
   function daysUntil(d){return Math.ceil((new Date(d)-new Date(today))/86400000);}
 
-  // Search results for new reminder
-  var reminderSearchResults="";
-  if(STATE.reminderSearch&&STATE.reminderSearch.length>1){
-    var q=STATE.reminderSearch.toLowerCase();
-    var allLeads=getMyLeads(u);
-    var matches=allLeads.filter(function(l){
-      return [l.email,l.fn,l.ln,l.pos,l.desig].some(function(v){return(v||"").toLowerCase().includes(q);});
-    }).slice(0,6);
-    if(matches.length){
-      reminderSearchResults='<div style="position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);z-index:50;max-height:220px;overflow-y:auto;margin-top:2px">';
-      reminderSearchResults+=matches.map(function(l){
-        var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
-        return '<div onclick="openSetReminderFromSearch(\''+l.id+'\')" style="display:flex;align-items:center;gap:10px;padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border)" onmouseenter="this.style.background=\'var(--bg)\'" onmouseleave="this.style.background=\'\'">'+
-          '<div style="flex:1">'+
-            '<div style="font-size:13.5px;font-weight:500">'+l.fn+' '+l.ln+' <span style="font-weight:400;color:var(--text3)">· '+l.pos+'</span></div>'+
-            '<div class="f12 text3">'+l.email+' · '+co.name+'</div>'+
-          '</div>'+
-          '<span class="bdg '+stageClass(l.stage)+'">'+l.stage+'</span>'+
-        '</div>';
-      }).join("");
-      reminderSearchResults+='</div>';
-    } else {
-      // No lead match — allow manual email reminder
-      reminderSearchResults='<div style="position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);z-index:50;margin-top:2px">'+
-        '<div style="padding:10px 13px;font-size:13px;color:var(--text3)">No leads found for "'+htmlEsc(STATE.reminderSearch)+'"</div>'+
-        (STATE.reminderSearch.includes('@')?
-          '<div onclick="openSetReminderManual(\''+htmlEsc(STATE.reminderSearch)+'\')" style="display:flex;align-items:center;gap:10px;padding:9px 13px;cursor:pointer;border-top:1px solid var(--border)" onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'\'">'+
-            '<span style="font-size:12px;padding:2px 8px;background:var(--accent);color:#fff;border-radius:10px">Set reminder for</span>'+
-            '<div class="f13 fw5">'+htmlEsc(STATE.reminderSearch)+'</div>'+
-          '</div>':"")+
-      '</div>';
-    }
-  }
-
   var dueCards=due.map(function(r){
-    var lead=STATE.leads.find(function(l){return l.id===r.lid});
-    var co=lead?STATE.companies.find(function(c){return c.id===lead.coid})||{}:{};
+    var contactId=(r.contact&&r.contact.id)||null;
+    var isOOO=r.reminder_type==='ooo_return';
     return '<div style="border:2px solid var(--amber);border-radius:var(--r2);padding:14px 16px;margin-bottom:10px;background:var(--amber-l)">'+
-      '<div class="flex jb aic mb2">'+
-        '<div class="flex aic gap2">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
+        '<div style="display:flex;align-items:center;gap:8px">'+
           '<div style="width:8px;height:8px;border-radius:50%;background:var(--amber)"></div>'+
-          '<div style="font-weight:600;font-size:14px">'+htmlEsc(r.name)+'</div>'+
-          '<span style="font-size:11px;padding:2px 7px;background:var(--amber);color:#fff;border-radius:10px">Due today</span>'+
+          '<div style="font-weight:600;font-size:14px">'+htmlEsc(r.contact_name||'Reminder')+'</div>'+
+          '<span style="font-size:11px;padding:2px 7px;background:var(--amber);color:#fff;border-radius:10px">'+(isOOO?'OOO Return':'Due today')+'</span>'+
         '</div>'+
-        '<div class="flex gap2">'+
-          '<button class="btn btn-sm" style="background:var(--amber);color:#fff" onclick="sendReminderEmail(\''+r.id+'\')">'+ico("send",13)+' Send follow-up</button>'+
+        '<div style="display:flex;gap:8px">'+
+          (contactId?'<button class="btn btn-sm" style="background:var(--amber);color:#fff" onclick="sendEmailToContact(\''+contactId+'\');dismissReminder(\''+r.id+'\')">'+ico('send',13)+' Compose email</button>':'')+
           '<button class="btn btn-outline btn-sm" onclick="dismissReminder(\''+r.id+'\')">Dismiss</button>'+
         '</div>'+
       '</div>'+
-      '<div class="f12 text3">'+htmlEsc(r.company||"")+(r.email?' · '+htmlEsc(r.email):'')+'</div>'+
-      '<div class="f12 text3 mt1">Return date: '+fmtDate(r.returnDate)+' · '+r.reminderTime+' IST</div>'+
-      (r.note?'<div class="f12" style="margin-top:6px;padding:6px 8px;background:rgba(0,0,0,.04);border-radius:var(--r)">'+htmlEsc(r.note)+'</div>':"")+
+      '<div style="font-size:12px;color:var(--text2)">'+htmlEsc(r.company_name||'')+(r.email?' · '+htmlEsc(r.email):'')+'</div>'+
+      '<div style="font-size:12px;color:var(--text3);margin-top:3px">Return date: '+htmlEsc(r.return_date||'')+' · '+htmlEsc(r.reminder_time||'09:00')+' IST</div>'+
+      (r.note?'<div style="font-size:12px;margin-top:6px;padding:6px 8px;background:rgba(0,0,0,.04);border-radius:var(--r)">'+htmlEsc(r.note)+'</div>':'')+
     '</div>';
-  }).join("");
+  }).join('');
 
   var upcomingRows=upcoming.map(function(r){
-    var days=daysUntil(r.returnDate);
+    var days=daysUntil(r.return_date);
+    var isOOO=r.reminder_type==='ooo_return';
     return '<tr>'+
-      '<td><div class="td1">'+htmlEsc(r.name)+'</div><div class="td2">'+htmlEsc(r.company||"")+'</div></td>'+
-      '<td class="f12 text3">'+htmlEsc(r.email||"")+'</td>'+
-      '<td><span style="font-size:11.5px;padding:2px 8px;background:'+(days<=3?"var(--red-l)":"var(--accent-l)")+';color:'+(days<=3?"var(--red)":"var(--accent)")+';border-radius:10px">'+days+' day'+(days!==1?"s":"")+'</span></td>'+
-      '<td class="f12 text3">'+fmtDate(r.returnDate)+'</td>'+
-      '<td class="f12 text3">'+r.reminderTime+'</td>'+
-      '<td class="f12" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(r.note||"")+'</td>'+
-      '<td><div class="flex gap1">'+
-        '<button class="btn btn-outline btn-xs" onclick="editReminder(\''+r.id+'\')">Edit</button>'+
-        '<button class="btn btn-danger btn-xs" onclick="dismissReminder(\''+r.id+'\')">Remove</button>'+
-      '</div></td>'+
+      '<td><div style="font-weight:500;font-size:13px">'+htmlEsc(r.contact_name||'—')+'</div>'+
+        '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(r.company_name||'')+'</div></td>'+
+      '<td style="font-size:12px;color:var(--text3)">'+htmlEsc(r.email||'—')+'</td>'+
+      '<td>'+(isOOO?'<span style="font-size:11px;padding:2px 7px;background:var(--amber-l);color:var(--amber);border-radius:8px;font-weight:600">OOO Return</span>':'<span style="font-size:11px;padding:2px 7px;background:var(--accent-l);color:var(--accent);border-radius:8px">Follow-up</span>')+'</td>'+
+      '<td><span style="font-size:11.5px;padding:2px 8px;background:'+(days<=3?'var(--red-l)':'var(--accent-l)')+';color:'+(days<=3?'var(--red)':'var(--accent)')+';border-radius:10px">'+days+' day'+(days!==1?'s':'')+'</span></td>'+
+      '<td style="font-size:12px;color:var(--text3)">'+htmlEsc(r.return_date||'')+'</td>'+
+      '<td style="font-size:12px;color:var(--text3)">'+htmlEsc(r.reminder_time||'09:00')+'</td>'+
+      '<td style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(r.note||'')+'</td>'+
+      '<td><button class="btn btn-outline btn-xs" onclick="dismissReminder(\''+r.id+'\')">Remove</button></td>'+
     '</tr>';
-  }).join("");
+  }).join('');
 
-  var oooList=oooLeads.map(function(l){
-    var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
-    var hasReminder=STATE.reminders.some(function(r){return r.lid===l.id&&r.status==="pending"});
+  var sentRows=sent.slice(0,10).map(function(r){
     return '<tr>'+
-      '<td><div class="td1">'+l.fn+' '+l.ln+'</div><div class="td2">'+l.desig+'</div></td>'+
-      '<td class="td1">'+co.name+'</td>'+
-      '<td class="f12 text3">'+l.email+'</td>'+
-      '<td>'+fmtDate(l.date)+'</td>'+
-      '<td>'+(hasReminder?'<span class="bdg bdg-green">Reminder set</span>':'<button class="btn btn-primary btn-xs" onclick="openSetReminder(\''+l.id+'\')">+ Set reminder</button>')+'</td>'+
+      '<td style="font-size:12px">'+htmlEsc(r.contact_name||'—')+'</td>'+
+      '<td style="font-size:12px;color:var(--text3)">'+htmlEsc(r.company_name||'')+'</td>'+
+      '<td style="font-size:12px;color:var(--text3)">'+htmlEsc(r.return_date||'')+'</td>'+
+      '<td><span style="font-size:11px;padding:2px 7px;background:var(--green-l);color:var(--green);border-radius:8px">Done</span></td>'+
     '</tr>';
-  }).join("");
+  }).join('');
 
   return '<div class="page">'+
-    '<div class="ph flex jb aic">'+
-      '<div><div class="ptitle">Reminders</div><div class="psub">Follow-up reminders for your contacts</div></div>'+
-      '<button class="btn btn-primary btn-sm" onclick="openNewReminder()">'+ico("plus",13)+'New reminder</button>'+
+    '<div class="ph"><div class="ptitle">Reminders</div>'+
+      '<div class="psub">Follow-up reminders · '+myReminders.filter(function(r){return r.status==="pending";}).length+' pending</div>'+
     '</div>'+
 
-    // Search to add reminder
-    '<div class="card cp mb4">'+
-      '<div class="fw6 mb1">Set a reminder</div>'+
-      '<div class="f12 text3 mb3">Search for any lead or POC by name, email or job title — or type an email address directly</div>'+
-      '<div style="position:relative">'+
-        '<span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text3)">'+icon("search")+'</span>'+
-        '<input class="inp" style="padding-left:34px" id="rem-search-inp" placeholder="Search by name, email, job title..." value="'+htmlEsc(STATE.reminderSearch||"")+'" oninput="reminderSearchInput(this.value)" autocomplete="off"/>'+
-        reminderSearchResults+
-      '</div>'+
-    '</div>'+
-
-    // Due banner
     (due.length?
       '<div style="background:var(--amber-l);border:1.5px solid var(--amber);border-radius:var(--r2);padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px">'+
-        '<div style="font-size:20px">⏰</div>'+
-        '<div style="flex:1"><div style="font-weight:600;font-size:14px">'+due.length+' reminder'+(due.length>1?"s":"")+" due"+'</div><div class="f12 text3">These contacts are expected back. Send your follow-up now.</div></div>'+
-        '<button class="btn btn-sm" style="background:var(--amber);color:#fff" onclick="sendAllDue()">'+ico("send",13)+'Send all</button>'+
+        '<div style="font-size:20px">\u23f0</div>'+
+        '<div style="flex:1"><div style="font-weight:600;font-size:14px">'+due.length+' reminder'+(due.length>1?'s':'')+' due today</div>'+
+          '<div style="font-size:12px;color:var(--text3)">These contacts are expected back — send your follow-up now.</div></div>'+
       '</div>'
-    :"")+
+    :'')+
     dueCards+
 
-    // Upcoming
-    '<div class="card cp mb4">'+
-      '<div class="flex jb aic mb3">'+
-        '<div><div class="fw6">Upcoming reminders</div><div class="f12 text3">'+upcoming.length+' pending</div></div>'+
-      '</div>'+
+    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;margin-bottom:18px">'+
+      '<div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:600;font-size:13px">Upcoming reminders ('+upcoming.length+')</div>'+
       (upcoming.length?
-        '<div class="tbl-wrap"><table>'+
-          '<thead><tr><th>Contact</th><th>Email</th><th>Returns in</th><th>Return date</th><th>Time (IST)</th><th>Note</th><th></th></tr></thead>'+
-          '<tbody>'+upcomingRows+'</tbody></table></div>'
-      :'<div style="padding:20px 0;font-size:13px;color:var(--text3)">No upcoming reminders. Use the search above to set one.</div>')+
+        '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">'+
+          '<thead style="background:var(--bg);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
+            '<tr><th style="padding:10px 12px;text-align:left">Contact</th><th style="padding:10px 12px;text-align:left">Email</th><th style="padding:10px 12px;text-align:left">Type</th><th style="padding:10px 12px;text-align:left">In</th><th style="padding:10px 12px;text-align:left">Date</th><th style="padding:10px 12px;text-align:left">Time</th><th style="padding:10px 12px;text-align:left">Note</th><th style="padding:10px 12px"></th></tr>'+
+          '</thead>'+
+          '<tbody>'+upcomingRows+'</tbody>'+
+        '</table></div>'
+      :'<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px">No upcoming reminders.</div>')+
     '</div>'+
 
-    // OOO
-    '<div class="card cp mb4">'+
-      '<div class="flex jb aic mb3">'+
-        '<div><div class="fw6">Out of Office leads</div><div class="f12 text3">'+oooLeads.length+' contacts marked OOO</div></div>'+
-      '</div>'+
-      (oooLeads.length?
-        '<div class="tbl-wrap"><table>'+
-          '<thead><tr><th>Contact</th><th>Company</th><th>Email</th><th>Marked OOO on</th><th>Reminder</th></tr></thead>'+
-          '<tbody>'+oooList+'</tbody></table></div>'
-      :'<div style="padding:20px 0;font-size:13px;color:var(--text3)">No leads currently marked Out of Office.</div>')+
-    '</div>'+
-
-    // Sent
     (sent.length?
-      '<div class="card cp">'+
-        '<div class="fw6 mb3">Sent follow-ups</div>'+
-        sent.map(function(r){return'<div class="flex aic gap2" style="padding:8px 0;border-bottom:1px solid var(--border)">'+
-          '<span class="bdg bdg-green">Sent</span>'+
-          '<div style="flex:1;font-size:13px">'+htmlEsc(r.name)+(r.company?' · '+htmlEsc(r.company):'')+'</div>'+
-          '<div class="f12 text3">'+fmtDate(r.returnDate)+'</div>'+
-        '</div>';}).join("")+
-      '</div>':"")+
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
+        '<div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:600;font-size:13px;color:var(--text3)">Recently dismissed ('+sent.length+')</div>'+
+        '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">'+
+          '<thead style="background:var(--bg);color:var(--text3);font-size:11px;text-transform:uppercase">'+
+            '<tr><th style="padding:10px 12px;text-align:left">Contact</th><th style="padding:10px 12px;text-align:left">Company</th><th style="padding:10px 12px;text-align:left">Date</th><th style="padding:10px 12px;text-align:left">Status</th></tr>'+
+          '</thead>'+
+          '<tbody>'+sentRows+'</tbody>'+
+        '</table></div>'+
+      '</div>'
+    :'')+
   '</div>';
 }
 
