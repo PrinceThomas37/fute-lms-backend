@@ -424,10 +424,11 @@ function genJobs(seedLeads, companies){
 }
 function getMyJobs(u){
   if (!u) return [];
-  if (u.role==="admin") return STATE.jobs.slice();
-  return STATE.jobs.filter(function(j){
-    return j.created_by===u.id || j.assigned_to===u.id;
-  });
+  if (u.role==="admin"||u.role==="ra_lead") return STATE.jobs.slice();
+  if (u.role==="bd_lead") return STATE.jobs.filter(function(j){return j.assigned_to_bd!==null;});
+  if (u.role==="bd") return STATE.jobs.filter(function(j){return j.assigned_to_bd===u.id;});
+  // ra: only jobs they created
+  return STATE.jobs.filter(function(j){return j.created_by===u.id;});
 }
 function jobContacts(jid){
   return STATE.contacts.filter(function(c){return c.job_id===jid;})
@@ -482,6 +483,9 @@ var STATE = {
   contacts: [],
   detailJob: null,
   jobsFilter: {search:"",stage:"all"},
+  assignSel: {},
+  assignTargetBD: "",
+  assignFilter: {ra:"",dup:"all"},
 };
 
 // No pre-seeded reminders — users set them manually from the OOO list
@@ -559,7 +563,8 @@ function render(){
 function av(user,size){
   var nm=user.name||'';var parts=nm.trim().split(/\s+/);
   var initials=user.av||(((parts[0]||'')[0]||'')+((parts[1]||'')[0]||'')).toUpperCase()||'?';
-  var cls=user.avc||('av-'+(user.role||'ra'));
+  var roleMap={admin:'av-admin',bd:'av-bd',ra:'av-ra',ra_lead:'av-admin',bd_lead:'av-bd'};
+  var cls=user.avc||(roleMap[user.role]||'av-ra');
   return '<div class="av av-'+size+' '+cls+'">'+initials+'</div>';
 }
 function avById(id,size){
@@ -693,7 +698,8 @@ function renderApp(){
     {id:"reminders",lbl:"Reminders",ic:"star",badge:STATE.reminders.filter(function(r){return r.uid===u.id&&r.status==="pending"}).length||null},
     {id:"profile",lbl:"My Profile",ic:"profile"}
   ];
-  if(u.role==="admin")navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
+  if(u.role==="admin"||u.role==="ra_lead"||u.role==="bd_lead")navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
+  if(u.role==="ra_lead"||u.role==="admin")navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
 
   var nav=navItems.map(function(n){
     var active=STATE.page===n.id?" active":"";
@@ -703,7 +709,7 @@ function renderApp(){
 
   var switchers=""; // removed — use team list to switch views
 
-  var pageTitles={dashboard:"Dashboard",leads:"Leads",email:"Email",admin:"Admin",profile:"My Profile",reminders:"Reminders"};
+  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",profile:"My Profile",reminders:"Reminders"};
   var viewingName=STATE.viewingUser&&STATE.viewingUser.id!==u.id?" · Viewing: "+STATE.viewingUser.name:"";
 
   return '<div id="sidebar">'+
@@ -733,7 +739,7 @@ function renderApp(){
   renderToasts()+renderModal();
 }
 
-function roleLabel(r){return{ra:"Research Analyst",bd:"BD Manager",admin:"Admin / BD Manager"}[r]||r;}
+function roleLabel(r){return{ra:"Research Analyst",bd:"BD Manager",admin:"Admin",ra_lead:"RA Team Lead",bd_lead:"BD Team Lead"}[r]||r;}
 
 // ════════════════════════════════════════════════
 // RENDER PAGES
@@ -741,6 +747,7 @@ function roleLabel(r){return{ra:"Research Analyst",bd:"BD Manager",admin:"Admin 
 function renderPage(){
   if(STATE.page==="dashboard")return renderDashboard();
   if(STATE.page==="leads"){var html=renderJobs();setTimeout(bindJobsControls,0);return html;}
+  if(STATE.page==="assign"){return renderAssignLeads();}
   if(STATE.page==="email")return renderEmail();
   if(STATE.page==="reminders")return renderReminders();
   if(STATE.page==="admin")return renderAdmin();
@@ -997,20 +1004,20 @@ function renderJobs(){
   }
   if(f.stage&&f.stage!=="all")jobs=jobs.filter(function(j){return j.stage===f.stage;});
 
-  var stages=["Active","In Progress","Interview","Closed","Lost"];
+  var stages=["Unassigned","Assigned","Connected","Rejected","Future","Qualified"];
   var stageOpts=stages.map(function(st){return '<option value="'+st+'"'+(f.stage===st?" selected":"")+'>'+st+'</option>';}).join("");
 
   var rows=jobs.map(function(j){
     var cs=jobContacts(j.id);
     var primary=cs[0]||{};
-    var stageColor={Active:"#3b82f6","In Progress":"#f59e0b",Interview:"#8b5cf6",Closed:"#10b981",Lost:"#ef4444"}[j.stage]||"#64748b";
+    var stageColor={Unassigned:"#94a3b8",Assigned:"#3b82f6",Connected:"#8b5cf6",Rejected:"#ef4444",Future:"#f59e0b",Qualified:"#10b981"}[j.stage]||"#64748b";
     return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer" onclick="openJob(\''+j.id+'\')">'+
-      '<td style="padding:12px"><div style="font-weight:600;color:var(--text)">'+escHtml(j.company_name)+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.company_ind)+'</div></td>'+
+      '<td style="padding:12px"><div style="font-weight:600;color:var(--text)">'+escHtml(j.company_name)+(j.is_duplicate?'<span style="margin-left:6px;background:#fef9c3;color:#b45309;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">DUP</span>':'')+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.company_ind)+'</div></td>'+
       '<td style="padding:12px"><div style="font-weight:500">'+escHtml(j.position)+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.location||"—")+'</div></td>'+
       '<td style="padding:12px"><div>'+escHtml((primary.first_name||"")+" "+(primary.last_name||""))+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(primary.email||"—")+'</div></td>'+
       '<td style="padding:12px;text-align:center"><span style="background:rgba(99,102,241,.1);color:var(--accent);padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600">'+cs.length+'</span></td>'+
       '<td style="padding:12px"><span style="background:'+stageColor+'1a;color:'+stageColor+';padding:4px 10px;border-radius:10px;font-size:11px;font-weight:600">'+j.stage+'</span></td>'+
-      '<td style="padding:12px;font-size:11px;color:var(--text3)">'+escHtml(j.created_date||"")+'</td>'+
+      '<td style="padding:12px;font-size:12px;color:var(--text2)">'+(j.assigned_bd_name?'<div style="font-weight:500">'+escHtml(j.assigned_bd_name)+'</div><div style="font-size:10px;color:var(--text3)">'+( j.assigned_at?(new Date(j.assigned_at)).toLocaleDateString("en-GB",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"")+'</div>':'<span style="color:var(--text3)">—</span>')+'</td>'+'<td style="padding:12px;font-size:11px;color:var(--text3)">'+escHtml(j.created_date||"")+'</td>'+
     '</tr>';
   }).join("");
 
@@ -1027,7 +1034,7 @@ function renderJobs(){
     '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden">'+
       '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
         '<thead style="background:var(--bg3);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
-          '<tr><th style="padding:12px;text-align:left">Company</th><th style="padding:12px;text-align:left">Position</th><th style="padding:12px;text-align:left">Primary Contact</th><th style="padding:12px;text-align:center">Contacts</th><th style="padding:12px;text-align:left">Stage</th><th style="padding:12px;text-align:left">Created</th></tr>'+
+          '<tr><th style="padding:12px;text-align:left">Company</th><th style="padding:12px;text-align:left">Position</th><th style="padding:12px;text-align:left">Primary Contact</th><th style="padding:12px;text-align:center">Contacts</th><th style="padding:12px;text-align:left">Stage</th><th style="padding:12px;text-align:left">Assigned BD</th><th style="padding:12px;text-align:left">Created</th></tr>'+
         '</thead>'+
         '<tbody>'+rows+'</tbody>'+
       '</table>'+
@@ -1053,7 +1060,7 @@ function renderJobDetailModal(){
   var u=STATE.user;
   var canEdit=u.role==="admin"||j.created_by===u.id||j.assigned_to===u.id;
   var cs=jobContacts(j.id);
-  var stages=["Active","In Progress","Interview","Closed","Lost"];
+  var stages=["Unassigned","Assigned","Connected","Rejected","Future","Qualified"];
   var stageOpts=stages.map(function(st){return '<option value="'+st+'"'+(j.stage===st?" selected":"")+'>'+st+'</option>';}).join("");
 
   var contactRows=cs.map(function(c){
@@ -1087,12 +1094,6 @@ function renderJobDetailModal(){
         '</div>'+
         '<div><label style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Source</label><div style="margin-top:5px;font-size:13px;color:var(--text)">'+escHtml(j.source||"—")+'</div></div>'+
       '</div>'+
-      (u.role==="admin"?(function(){
-        var ras=STATE.users.filter(function(x){return x.role==="ra";});
-        var raOpts='<option value="">\u2014 Unassigned \u2014</option>'+ras.map(function(r){return'<option value="'+r.id+'"'+(j.assigned_to===r.id?" selected":"")+'>'+escHtml(r.name)+'</option>';}).join("");
-        return '<div style="margin-bottom:14px"><label style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Assigned RA</label>'+
-          '<select onchange="assignJobToRA(\''+j.id+'\',this.value)" style="width:100%;margin-top:5px;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px">'+raOpts+'</select></div>';
-      })():"")+
       '<div style="margin-bottom:18px"><label style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Notes</label>'+
         (canEdit?'<textarea id="job-notes" onblur="saveJobNotes(\''+j.id+'\',this.value)" style="width:100%;margin-top:5px;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px;min-height:64px;resize:vertical;font-family:inherit">'+escHtml(j.notes||"")+'</textarea>':'<div style="margin-top:5px;font-size:13px;color:var(--text)">'+escHtml(j.notes||"—")+'</div>')+
       '</div>'+
@@ -1475,29 +1476,30 @@ function renderAdmin(){
   var ras=STATE.users.filter(function(x){return x.role==="ra"});
   var today=todayIST();
 
-  // BD list view — stats from STATE.jobs (Drop D)
+  // BD list view
   function bdStats(bd){
-    var mnow=new Date();
-    var allJobs=STATE.jobs.filter(function(j){return j.created_by===bd.id||j.assigned_to===bd.id;});
-    var todayJ=allJobs.filter(function(j){return j.created_date===today;});
-    var monthJ=allJobs.filter(function(j){var d=new Date(j.created_date);return d.getMonth()===mnow.getMonth()&&d.getFullYear()===mnow.getFullYear();});
+    var bdLeads=STATE.leads.filter(function(l){return!l.del&&l.bid===bd.id});
+    var todayL=bdLeads.filter(function(l){return l.date===today});
+    var monthL=bdLeads.filter(function(l){var d=new Date(l.date);var n=new Date();return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear();});
     return{
-      total:allJobs.length,today:todayJ.length,
-      pos:monthJ.filter(function(j){return j.stage==="Positive"||j.stage==="Connected";}).length,
-      neg:monthJ.filter(function(j){return j.stage==="Negative"||j.stage==="Lost";}).length,
-      ras:STATE.users.filter(function(r){return r.role==="ra";}).length
+      total:bdLeads.length,today:todayL.length,
+      pos:monthL.filter(function(l){return l.stage==="Positive"||l.stage==="Connected"}).length,
+      neg:monthL.filter(function(l){return l.stage==="Negative"}).length,
+      resp:monthL.filter(function(l){return l.sent}).length,
+      ras:STATE.users.filter(function(r){return r.bdm===bd.id&&r.role==="ra"}).length
     };
   }
   function raStats(ra){
-    var mnow=new Date();
-    var allJobs=STATE.jobs.filter(function(j){return j.created_by===ra.id||j.assigned_to===ra.id;});
-    var todayJ=allJobs.filter(function(j){return j.created_date===today;});
-    var monthJ=allJobs.filter(function(j){var d=new Date(j.created_date);return d.getMonth()===mnow.getMonth()&&d.getFullYear()===mnow.getFullYear();});
+    var raLeads=STATE.leads.filter(function(l){return!l.del&&l.aid===ra.id});
+    var todayL=raLeads.filter(function(l){return l.date===today});
+    var monthL=raLeads.filter(function(l){var d=new Date(l.date);var n=new Date();return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear();});
+    var bdUser=STATE.users.find(function(x){return x.id===ra.bdm});
     return{
-      total:allJobs.length,today:todayJ.length,
-      pos:monthJ.filter(function(j){return j.stage==="Positive"||j.stage==="Connected";}).length,
-      neg:monthJ.filter(function(j){return j.stage==="Negative"||j.stage==="Lost";}).length,
-      bdName:"—"
+      total:raLeads.length,today:todayL.length,
+      pos:monthL.filter(function(l){return l.stage==="Positive"||l.stage==="Connected"}).length,
+      neg:monthL.filter(function(l){return l.stage==="Negative"}).length,
+      resp:monthL.filter(function(l){return l.sent}).length,
+      bdName:bdUser?bdUser.name:"Unassigned"
     };
   }
 
@@ -1973,7 +1975,9 @@ function renderUserModal(existing){
         '<div class="fgrp"><label class="flbl">Role</label>'+
           '<select class="sel" id="u-role" onchange="toggleBDAssign(this.value)">'+
             '<option value="ra"'+(u.role==="ra"?" selected":"")+'>Research Analyst</option>'+
+            '<option value="ra_lead"'+(u.role==="ra_lead"?" selected":"")+'>RA Team Lead</option>'+
             '<option value="bd"'+(u.role==="bd"?" selected":"")+'>BD Manager</option>'+
+            '<option value="bd_lead"'+(u.role==="bd_lead"?" selected":"")+'>BD Team Lead</option>'+
             '<option value="admin"'+(u.role==="admin"?" selected":"")+'>Admin</option>'+
           '</select>'+
         '</div>'+
@@ -2317,53 +2321,36 @@ window.toggleBDAssign=function(role){
 };
 window.openAddUser=function(){STATE.modal=renderUserModal(null);render();}
 window.editUser=function(id){var u=STATE.users.find(function(x){return x.id===id});if(u){STATE.modal=renderUserModal(u);render();}}
-
 window.removeUser=function(id){
   if(id===STATE.user.id){showToast("Cannot remove yourself","warning");return;}
-  if(!confirm("Remove this user? They will be deactivated and can no longer log in."))return;
-  apiDelete('/users/'+id).then(function(){
-    STATE.users=STATE.users.filter(function(u){return u.id!==id;});
-    showToast("User removed","success");render();
-  }).catch(function(e){showToast("Failed: "+e.message,"error");});
-};
-
+  STATE.users=STATE.users.filter(function(u){return u.id!==id});
+  showToast("User removed","info");
+  render();
+}
 window.unassignRA=function(id){
   STATE.users=STATE.users.map(function(u){return u.id===id?Object.assign({},u,{bdm:null}):u;});
   showToast("RA unassigned","info");render();
-};
-
+}
 window.saveUser=function(existingId){
   var name=document.getElementById("u-name").value.trim();
   var email=document.getElementById("u-email").value.trim();
   if(!name||!email){showToast("Name and email required","warning");return;}
   var role=document.getElementById("u-role").value;
-  var eid=document.getElementById("u-eid").value.trim();
-  var desig=document.getElementById("u-desig").value.trim();
+  var eid=document.getElementById("u-eid").value;
+  var desig=document.getElementById("u-desig").value;
   var plt=document.getElementById("u-plt").value;
-  var payload={name:name,email:email,role:role,employee_id:eid,designation:desig,platform:plt};
+  var bdm=document.getElementById("u-bd").value||null;
+  var av=name.split(" ").map(function(w){return w[0]}).join("").toUpperCase().slice(0,2);
+  var avc=role==="ra"?"av-ra":role==="bd"?"av-bd":"av-admin";
   if(existingId){
-    apiPut('/users/'+existingId,payload).then(function(updated){
-      STATE.users=STATE.users.map(function(u){return u.id===existingId?normaliseUser(updated):u;});
-      closeModal();showToast("User updated","success");render();
-    }).catch(function(e){showToast("Failed: "+e.message,"error");});
+    STATE.users=STATE.users.map(function(u){return u.id===existingId?Object.assign({},u,{name:name,email:email,role:role,empId:eid,desig:desig,plt:plt,bdm:bdm,av:av,avc:avc}):u;});
+    showToast("User updated","success");
   } else {
-    payload.password="Fute@2024";
-    apiPost('/users',payload).then(function(created){
-      STATE.users.push(normaliseUser(created));
-      closeModal();showToast("User added — default password: Fute@2024","success");render();
-    }).catch(function(e){showToast("Failed: "+e.message,"error");});
+    STATE.users.push({id:"u"+Date.now(),name:name,email:email,role:role,empId:eid,desig:desig,plt:plt,bdm:bdm,av:av,avc:avc});
+    showToast("User added","success");
   }
-};
-
-window.assignJobToRA=function(jid,raId){
-  var j=jobById(jid);if(!j)return;
-  var old=j.assigned_to;
-  j.assigned_to=raId||null;render();
-  apiPut('/jobs/'+jid,{assigned_to:raId||null}).then(function(){
-    var raName=raId?(STATE.users.find(function(u){return u.id===raId;})||{name:"RA"}).name:"nobody";
-    showToast("Assigned to "+raName,"success");
-  }).catch(function(e){j.assigned_to=old;showToast("Failed: "+e.message,"error");render();});
-};
+  closeModal();render();
+}
 
 window.saveProfile=function(){
   var name=(document.getElementById("p-name")||{}).value||STATE.user.name;
@@ -2380,19 +2367,12 @@ window.setProfilePlt=function(p){
   showToast("Platform set to "+p,"success");render();
 }
 window.changePassword=function(){
-  var cur=(document.getElementById("pw-cur")||{}).value||"";
-  var n=(document.getElementById("pw-new")||{}).value||"";
-  var c=(document.getElementById("pw-con")||{}).value||"";
-  if(!cur){showToast("Enter your current password","warning");return;}
-  if(!n||n.length<6){showToast("New password must be at least 6 characters","warning");return;}
+  var n=(document.getElementById("pw-new")||{}).value;
+  var c=(document.getElementById("pw-con")||{}).value;
+  if(!n||n.length<6){showToast("Password must be at least 6 characters","warning");return;}
   if(n!==c){showToast("Passwords don't match","warning");return;}
-  apiPost('/auth/change-password',{currentPassword:cur,newPassword:n}).then(function(){
-    showToast("Password updated successfully","success");
-    var el=document.getElementById("pw-cur");if(el)el.value="";
-    var el2=document.getElementById("pw-new");if(el2)el2.value="";
-    var el3=document.getElementById("pw-con");if(el3)el3.value="";
-  }).catch(function(e){showToast("Failed: "+e.message,"error");});
-};
+  showToast("Password updated","success");
+}
 
 window.setAdminView=function(v){STATE.adminView=v;render();}
 
@@ -3024,16 +3004,72 @@ window.confirmImport=function(){
   var groups=groupImportRows(mapped);
   STATE.importPreview=null;
 
-  // skip jobs that already exist client-side (company+position match)
   var toProcess=groups.filter(function(g){
     return !STATE.jobs.find(function(j){
       return j.company_name.toLowerCase()===g.coName.toLowerCase()&&
              j.position.toLowerCase()===g.position.toLowerCase();
     });
   });
-
   if(!toProcess.length){closeModal();showToast('All jobs already exist \u2014 nothing to import.','warning');return;}
 
+  var allEmails=[];
+  toProcess.forEach(function(g){
+    g.contacts.forEach(function(c){if(c.email)allEmails.push(c.email.toLowerCase().trim());});
+  });
+
+  function startImport(dupEmailMap){
+    STATE._pendingImport=toProcess;
+    STATE._pendingDupMap=dupEmailMap||{};
+    doImportProcess(toProcess,dupEmailMap||{});
+  }
+
+  if(allEmails.length){
+    apiPost('/jobs/check-duplicates',{emails:allEmails}).then(function(res){
+      var dupEmailMap={};
+      (res.duplicates||[]).forEach(function(d){
+        if(d.email){dupEmailMap[d.email.toLowerCase()]={
+          position:(d.job&&d.job.position)||'',
+          company:(d.job&&d.job.company&&d.job.company.name)||''
+        };}
+      });
+      if(Object.keys(dupEmailMap).length){
+        STATE._pendingImport=toProcess;
+        STATE._pendingDupMap=dupEmailMap;
+        STATE.modal=renderDuplicateWarningModal(toProcess,dupEmailMap);
+        render();
+      } else { startImport({}); }
+    }).catch(function(){startImport({});});
+  } else { startImport({}); }
+};
+
+function renderDuplicateWarningModal(groups,dupEmailMap){
+  var dupCount=Object.keys(dupEmailMap).length;
+  var items=Object.keys(dupEmailMap).slice(0,6).map(function(email){
+    var d=dupEmailMap[email];
+    return '<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">'+
+      '<span style="color:var(--amber);font-weight:600">'+htmlEsc(email)+'</span>'+
+      (d.company?' \u2014 already in <strong>'+htmlEsc(d.company)+'</strong>'+(d.position?' ('+htmlEsc(d.position)+')':''):'')+
+    '</div>';
+  }).join('');
+  return '<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">\u26a0 Duplicate emails found</div>'+
+    '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div style="padding:10px 12px;background:var(--amber-l);border-radius:var(--r2);margin-bottom:12px;font-size:13px;color:var(--amber)">'+
+        '<strong>'+dupCount+' email ID'+(dupCount>1?'s':'')+' already exist</strong> in the system. These leads will be imported but flagged as <strong>DUPLICATE</strong> for the Team Lead to review.'+
+      '</div>'+
+      items+
+      (Object.keys(dupEmailMap).length>6?'<div style="font-size:12px;color:var(--text3);padding-top:6px">+'+(Object.keys(dupEmailMap).length-6)+' more</div>':'')+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="doImportProcess(STATE._pendingImport,STATE._pendingDupMap)">Proceed (flag as duplicates)</button>'+
+    '</div>'+
+  '</div>';
+}
+
+window.doImportProcess=function(toProcess,dupEmailMap){
+  STATE.modal=null;
   var total=toProcess.length;
   var done=0;var succeeded=0;var failed=0;
   var logLines=[];var failDetails=[];
@@ -3045,7 +3081,6 @@ window.confirmImport=function(){
   }
   updateProgress(false,'');
 
-  // build company cache from current STATE
   var coCache={};
   STATE.companies.forEach(function(c){coCache[c.name.toLowerCase()]=c.id;});
 
@@ -3071,14 +3106,15 @@ window.confirmImport=function(){
       return;
     }
     var g=toProcess[idx];
+    var groupIsDup=g.contacts.some(function(c){return c.email&&dupEmailMap[c.email.toLowerCase().trim()];});
     ensureCompany(g).then(function(coId){
-      var payload={company_id:coId,position:g.position||'(unknown)',stage:'Active',contacts:g.contacts};
+      var payload={company_id:coId,position:g.position||'(unknown)',stage:'Unassigned',contacts:g.contacts,is_duplicate:groupIsDup};
       if(g.location)payload.location=g.location;
       if(g.source)payload.source=g.source;
       return apiPost('/jobs',payload);
     }).then(function(){
       succeeded++;
-      logLines.push('\u2713 '+g.coName+' \u2014 '+g.position+' ('+g.contacts.length+' contact'+(g.contacts.length!==1?'s':'')+')');
+      logLines.push('\u2713 '+g.coName+' \u2014 '+g.position+' ('+g.contacts.length+' contact'+(g.contacts.length!==1?'s':'')+')'+(groupIsDup?' [DUP]':''));
     }).catch(function(err){
       failed++;
       var msg=g.coName+' \u2014 '+g.position+': '+err.message;
@@ -3091,6 +3127,157 @@ window.confirmImport=function(){
     });
   }
   processNext(0);
+};
+
+
+// ════════════════════════════════════════════════
+// ASSIGN LEADS — RA Team Lead bulk assign UI (Drop E)
+// ════════════════════════════════════════════════
+function renderAssignLeads(){
+  var u=STATE.user;
+  var unassigned=STATE.jobs.filter(function(j){return j.stage==='Unassigned';});
+  var bds=STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead';});
+  var sel=STATE.assignSel||{};
+  var selIds=Object.keys(sel).filter(function(k){return sel[k];});
+  var targetBD=STATE.assignTargetBD||'';
+  var f=STATE.assignFilter||{ra:'',dup:'all'};
+
+  // Filter by RA and dup flag
+  var filtered=unassigned.filter(function(j){
+    if(f.ra&&j.created_by!==f.ra)return false;
+    if(f.dup==='dup'&&!j.is_duplicate)return false;
+    if(f.dup==='clean'&&j.is_duplicate)return false;
+    return true;
+  });
+
+  var ras=STATE.users.filter(function(x){return x.role==='ra';});
+  var raOpts='<option value="">All RAs</option>'+ras.map(function(r){return'<option value="'+r.id+'"'+(f.ra===r.id?' selected':'')+'>'+r.name+'</option>';}).join('');
+  var bdOpts='<option value="">— Select BD —</option>'+bds.map(function(b){return'<option value="'+b.id+'"'+(targetBD===b.id?' selected':'')+'>'+b.name+'</option>';}).join('');
+
+  var allVisibleIds=filtered.map(function(j){return j.id;});
+  var allSelected=allVisibleIds.length>0&&allVisibleIds.every(function(id){return sel[id];});
+
+  var rows=filtered.map(function(j){
+    var cs=STATE.contacts.filter(function(c){return c.job_id===j.id;});
+    var primary=cs.find(function(c){return c.is_primary;})||cs[0]||{};
+    var creator=STATE.users.find(function(u){return u.id===j.created_by;})||{};
+    var checked=!!sel[j.id];
+    return '<tr style="border-bottom:1px solid var(--border2);background:'+(checked?'var(--accent-l)':'')+'">'+
+      '<td style="padding:10px 12px;width:36px"><input type="checkbox" '+(checked?'checked':'')+' onchange="toggleAssignSel(\''+j.id+'\',this.checked)" style="width:16px;height:16px;cursor:pointer"/></td>'+
+      '<td style="padding:10px 12px">'+
+        '<div style="font-weight:600;font-size:13px">'+escHtml(j.company_name)+(j.is_duplicate?' <span style="background:#fef9c3;color:#b45309;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">DUP</span>':'')+'</div>'+
+        '<div style="font-size:11px;color:var(--text3)">'+escHtml(j.company_ind)+'</div>'+
+      '</td>'+
+      '<td style="padding:10px 12px;font-size:13px">'+escHtml(j.position)+'</td>'+
+      '<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+escHtml((primary.first_name||'')+(primary.last_name?' '+primary.last_name:''))+'<div style="font-size:11px;color:var(--text3)">'+escHtml(primary.email||'')+'</div></td>'+
+      '<td style="padding:10px 12px;font-size:12px;color:var(--text3)">'+escHtml(creator.name||'')+'</td>'+
+      '<td style="padding:10px 12px;font-size:11px;color:var(--text3)">'+escHtml(j.created_date||'')+'</td>'+
+    '</tr>';
+  }).join('');
+
+  if(!rows)rows='<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No unassigned leads.</td></tr>';
+
+  return '<div class="page">'+
+    '<div class="ph"><div class="flex jb aic">'+
+      '<div><div class="ptitle">Assign Leads</div><div class="psub">'+unassigned.length+' unassigned · '+selIds.length+' selected</div></div>'+
+    '</div></div>'+
+
+    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px 16px;margin-bottom:14px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'+
+      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Filter by RA</label>'+
+        '<select style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px" onchange="setAssignFilter(\'ra\',this.value)">'+raOpts+'</select>'+
+      '</div>'+
+      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Filter</label>'+
+        '<select style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px" onchange="setAssignFilter(\'dup\',this.value)">'+
+          '<option value="all"'+(f.dup==='all'?' selected':'')+'>All leads</option>'+
+          '<option value="clean"'+(f.dup==='clean'?' selected':'')+'>Clean only</option>'+
+          '<option value="dup"'+(f.dup==='dup'?' selected':'')+'>Duplicates only</option>'+
+        '</select>'+
+      '</div>'+
+      '<div style="margin-left:auto;display:flex;gap:10px;align-items:flex-end">'+
+        '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Assign to BD</label>'+
+          '<select id="assign-bd-sel" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px" onchange="STATE.assignTargetBD=this.value;render()">'+bdOpts+'</select>'+
+        '</div>'+
+        '<button onclick="openAssignConfirm()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer'+(selIds.length&&targetBD?'':';opacity:.4;cursor:not-allowed')+'" '+(selIds.length&&targetBD?'':'disabled')+'>Assign '+selIds.length+' leads</button>'+
+      '</div>'+
+    '</div>'+
+
+    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
+      '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
+        '<thead style="background:var(--bg);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
+          '<tr>'+
+            '<th style="padding:10px 12px;width:36px"><input type="checkbox" '+(allSelected?'checked':'')+' onchange="toggleAllAssign(this.checked)" style="width:16px;height:16px;cursor:pointer"/></th>'+
+            '<th style="padding:10px 12px;text-align:left">Company</th>'+
+            '<th style="padding:10px 12px;text-align:left">Position</th>'+
+            '<th style="padding:10px 12px;text-align:left">Primary Contact</th>'+
+            '<th style="padding:10px 12px;text-align:left">Added by RA</th>'+
+            '<th style="padding:10px 12px;text-align:left">Date</th>'+
+          '</tr>'+
+        '</thead>'+
+        '<tbody>'+rows+'</tbody>'+
+      '</table>'+
+    '</div>'+
+    '<div style="margin-top:10px;font-size:12px;color:var(--text3)">'+filtered.length+' leads shown</div>'+
+  '</div>';
+}
+
+window.toggleAssignSel=function(id,v){
+  if(!STATE.assignSel)STATE.assignSel={};
+  STATE.assignSel[id]=v;render();
+};
+window.toggleAllAssign=function(v){
+  if(!STATE.assignSel)STATE.assignSel={};
+  var f=STATE.assignFilter||{ra:'',dup:'all'};
+  STATE.jobs.filter(function(j){
+    if(j.stage!=='Unassigned')return false;
+    if(f.ra&&j.created_by!==f.ra)return false;
+    if(f.dup==='dup'&&!j.is_duplicate)return false;
+    if(f.dup==='clean'&&j.is_duplicate)return false;
+    return true;
+  }).forEach(function(j){STATE.assignSel[j.id]=v;});
+  render();
+};
+window.setAssignFilter=function(k,v){
+  if(!STATE.assignFilter)STATE.assignFilter={ra:'',dup:'all'};
+  STATE.assignFilter[k]=v;
+  STATE.assignSel={};render();
+};
+window.openAssignConfirm=function(){
+  var sel=STATE.assignSel||{};
+  var selIds=Object.keys(sel).filter(function(k){return sel[k];});
+  var bdId=STATE.assignTargetBD;
+  if(!selIds.length||!bdId){showToast('Select leads and a BD first','warning');return;}
+  var bd=STATE.users.find(function(u){return u.id===bdId;})||{name:'Unknown'};
+  var now=new Date();
+  var dateStr=now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  var timeStr=now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  STATE.modal='<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Confirm Assignment</div></div>'+
+    '<div class="mb_">'+
+      '<div style="padding:16px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:12px">'+
+        '<div style="font-size:22px;font-weight:700;color:var(--accent);margin-bottom:4px">'+selIds.length+' leads</div>'+
+        '<div style="font-size:14px;color:var(--text2)">\u2192 <strong>'+htmlEsc(bd.name)+'</strong></div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:6px">'+dateStr+' \u00b7 '+timeStr+'</div>'+
+      '</div>'+
+      '<div style="font-size:13px;color:var(--text2)">Once confirmed, these leads will be marked <strong>Assigned</strong> and the email engine will begin sending outreach emails over the next 2\u20133 minutes.</div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="submitBulkAssign()">Confirm & Assign</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+window.submitBulkAssign=function(){
+  var sel=STATE.assignSel||{};
+  var selIds=Object.keys(sel).filter(function(k){return sel[k];});
+  var bdId=STATE.assignTargetBD;
+  if(!selIds.length||!bdId)return;
+  closeModal();
+  apiPost('/jobs/bulk-assign',{job_ids:selIds,assigned_to_bd:bdId}).then(function(res){
+    showToast(res.assigned+' leads assigned to '+res.bd_name,'success');
+    STATE.assignSel={};STATE.assignTargetBD='';
+    return refreshJobs();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
 // ════════════════════════════════════════════════
@@ -3114,12 +3301,15 @@ try{var _su=localStorage.getItem('fg_user');if(_su){var _parsed=JSON.parse(_su);
 // Wipe demo seed data — will be replaced by API on login
 STATE.jobs=[];STATE.contacts=[];STATE.users=[];STATE.companies=[];STATE.emails=[];STATE.reminders=[];STATE.activities=[];STATE.leads=[];
 
-function normaliseUser(u){var nm=u.name||'';var parts=nm.trim().split(/\s+/);var initials=((parts[0]||'')[0]||'')+((parts[1]||'')[0]||'');return{id:u.id,name:nm,email:u.email,role:u.role,empId:u.employee_id,desig:u.designation,plt:u.platform||'Gmail',ooo:u.ooo_until||null,av:initials.toUpperCase()||'?',avc:'av-'+(u.role||'ra'),bdm:null};}
+function normaliseUser(u){var nm=u.name||'';var parts=nm.trim().split(/\s+/);var initials=((parts[0]||'')[0]||'')+((parts[1]||'')[0]||'');var roleAvc={admin:'av-admin',bd:'av-bd',ra:'av-ra',ra_lead:'av-admin',bd_lead:'av-bd'};return{id:u.id,name:nm,email:u.email,role:u.role,empId:u.employee_id,desig:u.designation,plt:u.platform||'Gmail',ooo:u.ooo_until||null,av:initials.toUpperCase()||'?',avc:roleAvc[u.role]||'av-ra',bdm:null};}
 function normaliseJob(j){
   var co=j.company||{};
+  var bd=j.bd_assignee||{};
   return{id:j.id,company_id:j.company_id,company_name:co.name||'',company_ind:co.industry||'',company_web:co.website||'',
     position:j.position,location:j.location||'',source:j.source||'',job_url:j.job_url||'',
-    stage:j.stage||'Active',notes:j.notes||'',created_by:j.created_by,assigned_to:j.assigned_to,
+    stage:j.stage||'Unassigned',notes:j.notes||'',created_by:j.created_by,assigned_to:j.assigned_to,
+    assigned_to_bd:j.assigned_to_bd||null,assigned_bd_name:bd.name||'',assigned_at:j.assigned_at||null,
+    is_duplicate:!!j.is_duplicate,duplicate_of:j.duplicate_of||null,
     created_date:j.created_date,created_at:j.created_at};
 }
 function flattenContacts(jobs){var out=[];jobs.forEach(function(j){(j.contacts||[]).forEach(function(c){out.push({id:c.id,job_id:c.job_id,first_name:c.first_name,last_name:c.last_name||'',designation:c.designation||'',email:c.email||'',phone:c.phone||'',linkedin:c.linkedin||'',is_primary:!!c.is_primary});});});return out;}
