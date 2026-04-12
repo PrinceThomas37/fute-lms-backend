@@ -1011,6 +1011,7 @@ function renderJobs(){
   var stages=["Unassigned","Assigned","Connected","Rejected","Future","Qualified"];
   var stageOpts=stages.map(function(st){return '<option value="'+st+'"'+(f.stage===st?" selected":"")+'>'+st+'</option>';}).join("");
 
+  var canChangeStageInline=['admin','bd','bd_lead'].includes(u.role);
   var rows=jobs.map(function(j){
     var cs=jobContacts(j.id);
     var primary=cs[0]||{};
@@ -1020,7 +1021,7 @@ function renderJobs(){
       '<td style="padding:12px"><div style="font-weight:500">'+escHtml(j.position)+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.location||"—")+'</div></td>'+
       '<td style="padding:12px"><div>'+escHtml((primary.first_name||"")+" "+(primary.last_name||""))+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(primary.email||"—")+'</div></td>'+
       '<td style="padding:12px;text-align:center"><span style="background:rgba(99,102,241,.1);color:var(--accent);padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600">'+cs.length+'</span></td>'+
-      '<td style="padding:12px"><span style="background:'+stageColor+'1a;color:'+stageColor+';padding:4px 10px;border-radius:10px;font-size:11px;font-weight:600">'+j.stage+'</span></td>'+
+      (canChangeStageInline?'<td style="padding:12px"><select onchange="changeJobStage(\''+j.id+'\',this.value);event.stopPropagation()" onclick="event.stopPropagation()" style="font-size:11px;padding:4px 8px;border:1.5px solid '+stageColor+';border-radius:8px;background:'+stageColor+'1a;color:'+stageColor+';font-weight:600;cursor:pointer">'+['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'].map(function(s){return'<option value="'+s+'"'+(j.stage===s?' selected':'')+'>'+s+'</option>';}).join('')+'</select></td>':'<td style="padding:12px"><span style="background:'+stageColor+'1a;color:'+stageColor+';padding:4px 10px;border-radius:10px;font-size:11px;font-weight:600">'+j.stage+'</span></td>')+
       '<td style="padding:12px;font-size:12px;color:var(--text2)">'+(j.assigned_bd_name?'<div style="font-weight:500">'+escHtml(j.assigned_bd_name)+'</div><div style="font-size:10px;color:var(--text3)">'+( j.assigned_at?(new Date(j.assigned_at)).toLocaleDateString("en-GB",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"")+'</div>':'<span style="color:var(--text3)">—</span>')+'</td>'+'<td style="padding:12px;font-size:11px;color:var(--text3)">'+escHtml(j.created_date||"")+'</td>'+
     '</tr>';
   }).join("");
@@ -1062,25 +1063,44 @@ function openAddJob(){ STATE.modal={type:"addJob"}; render(); }
 function renderJobDetailModal(){
   var j=jobById(STATE.modal.id); if(!j) return "";
   var u=STATE.user;
-  var canEdit=u.role==="admin"||j.created_by===u.id||j.assigned_to===u.id;
+  var canChangeStage=['admin','bd','bd_lead'].includes(u.role);
+  var canEdit=u.role==="admin"||j.created_by===u.id||j.assigned_to===u.id||j.assigned_to_bd===u.id;
+  var bdStages=['Connected','Rejected','Future','In Discussion'];
+  var allStages=['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'];
   var cs=jobContacts(j.id);
-  var stages=["Unassigned","Assigned","Connected","Rejected","Future","Qualified"];
-  var stageOpts=stages.map(function(st){return '<option value="'+st+'"'+(j.stage===st?" selected":"")+'>'+st+'</option>';}).join("");
+  var stageOpts=allStages.map(function(st){return '<option value="'+st+'"'+(j.stage===st?" selected":"")+'>'+st+'</option>';}).join("");
+
+  var emailStatusColors={valid:'var(--green)',invalid:'var(--red)',deactivated:'var(--text3)',out_of_office:'var(--amber)'};
+  var emailStatusLabels={valid:'Valid',invalid:'Invalid',deactivated:'Deactivated',out_of_office:'Out of Office'};
+  var canChangeEmailStatus=['admin','bd','bd_lead'].includes(u.role);
 
   var contactRows=cs.map(function(c){
+    var es=c.email_status||'valid';
+    var esColor=emailStatusColors[es]||'var(--text3)';
+    var esLabel=emailStatusLabels[es]||es;
+    var emailStatusBadge='<span style="font-size:10px;padding:2px 7px;border-radius:6px;font-weight:600;background:'+esColor+'22;color:'+esColor+'">'+esLabel+'</span>';
+    var emailStatusSel=canChangeEmailStatus?
+      '<select onchange="changeEmailStatus(\''+c.id+'\',this.value,\''+escHtml(c.email||'')+'\',\''+escHtml((c.first_name||'')+' '+(c.last_name||''))+'\')" style="font-size:11px;padding:3px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);margin-top:4px">'+
+        ['valid','invalid','deactivated','out_of_office'].map(function(s){
+          return '<option value="'+s+'"'+(es===s?' selected':'')+'>'+emailStatusLabels[s]+'</option>';
+        }).join('')+
+      '</select>':'';
     return '<div style="background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:12px;margin-bottom:8px">'+
       '<div style="display:flex;justify-content:space-between;align-items:start;gap:8px">'+
         '<div style="flex:1">'+
           '<div style="font-weight:600;color:var(--text)">'+escHtml((c.first_name||"")+" "+(c.last_name||""))+(c.is_primary?' <span style="background:rgba(16,185,129,.15);color:#10b981;padding:2px 7px;border-radius:8px;font-size:10px;margin-left:4px">PRIMARY</span>':'')+'</div>'+
           '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+escHtml(c.designation||"—")+'</div>'+
-          '<div style="font-size:12px;color:var(--text2);margin-top:6px">📧 '+escHtml(c.email||"—")+'</div>'+
-          (c.phone?'<div style="font-size:12px;color:var(--text2);margin-top:2px">📞 '+escHtml(c.phone)+'</div>':'')+
-          (c.linkedin?'<div style="font-size:12px;color:var(--text2);margin-top:2px">🔗 '+escHtml(c.linkedin)+'</div>':'')+
+          '<div style="font-size:12px;color:var(--text2);margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+
+            '\ud83d\udce7 '+escHtml(c.email||"—")+' '+emailStatusBadge+
+          '</div>'+
+          (canChangeEmailStatus?'<div style="margin-top:5px">'+emailStatusSel+(c.ooo_until&&es==='out_of_office'?'<span style="font-size:11px;color:var(--amber);margin-left:8px">until '+escHtml(c.ooo_until)+'</span>':'')+'</div>':'')+
+          (c.phone?'<div style="font-size:12px;color:var(--text2);margin-top:4px">\ud83d\udcde '+escHtml(c.phone)+'</div>':'')+
+          (c.linkedin?'<div style="font-size:12px;color:var(--text2);margin-top:2px">\ud83d\udd17 '+escHtml(c.linkedin)+'</div>':'')+
         '</div>'+
-        (canEdit?'<div style="display:flex;flex-direction:column;gap:4px">'+
-          '<button onclick="sendEmailToContact(\''+c.id+'\')" style="background:var(--accent);color:#fff;border:0;padding:5px 10px;border-radius:6px;font-size:11px;cursor:pointer">Email</button>'+
-          '<button onclick="deleteContact(\''+c.id+'\')" style="background:transparent;color:#ef4444;border:1px solid #ef4444;padding:5px 10px;border-radius:6px;font-size:11px;cursor:pointer">Delete</button>'+
-        '</div>':'')+
+        '<div style="display:flex;flex-direction:column;gap:4px">'+
+          (c.email?'<button onclick="sendEmailToContact(\''+c.id+'\')" style="background:var(--accent);color:#fff;border:0;padding:5px 10px;border-radius:6px;font-size:11px;cursor:pointer">Email</button>':'')+
+          (canEdit?'<button onclick="deleteContact(\''+c.id+'\')" style="background:transparent;color:#ef4444;border:1px solid #ef4444;padding:5px 10px;border-radius:6px;font-size:11px;cursor:pointer">Delete</button>':'')+
+        '</div>'+
       '</div>'+
     '</div>';
   }).join("");
@@ -1094,7 +1114,7 @@ function renderJobDetailModal(){
     '<div style="padding:20px 24px">'+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">'+
         '<div><label style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Stage</label>'+
-          (canEdit?'<select id="job-stage-sel" onchange="changeJobStage(\''+j.id+'\',this.value)" style="width:100%;margin-top:5px;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px">'+stageOpts+'</select>':'<div style="margin-top:5px;font-size:13px;color:var(--text)">'+j.stage+'</div>')+
+          (canChangeStage?'<select id="job-stage-sel" onchange="changeJobStage(\''+j.id+'\',this.value)" style="width:100%;margin-top:5px;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px">'+stageOpts+'</select>':'<div style="margin-top:5px;font-size:13px;color:var(--text)">'+j.stage+'</div>')+
         '</div>'+
         '<div><label style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Source</label><div style="margin-top:5px;font-size:13px;color:var(--text)">'+escHtml(j.source||"—")+'</div></div>'+
       '</div>'+
@@ -1458,7 +1478,44 @@ function renderEmail(){
     '</div>';
   }
 
+
+  // OOO reminder cards for dashboard
+  var today=todayIST();
+  var oooReminders=(STATE.reminders||[]).filter(function(r){
+    return r.reminder_type==='ooo_return'&&r.status==='pending';
+  }).sort(function(a,b){return a.return_date>b.return_date?1:-1;});
+  var dueOOO=oooReminders.filter(function(r){return r.return_date<=today;});
+  var upcomingOOO=oooReminders.filter(function(r){return r.return_date>today;});
+
+  var oooCards='';
+  if(dueOOO.length){
+    oooCards+='<div style="margin-bottom:16px">';
+    oooCards+=dueOOO.map(function(r){
+      var cid=(r.contact&&r.contact.id)||null;
+      return '<div style="background:var(--green-l);border:1.5px solid var(--green);border-radius:var(--r2);padding:12px 16px;margin-bottom:8px;display:flex;align-items:center;gap:12px">'+
+        '<div style="font-size:20px">🟢</div>'+
+        '<div style="flex:1">'+
+          '<div style="font-weight:600;font-size:13px;color:var(--text)">'+htmlEsc(r.contact_name||'Contact')+' has returned from OOO</div>'+
+          '<div style="font-size:12px;color:var(--text2);margin-top:2px">'+htmlEsc(r.company_name||'')+(r.return_date?' \u00b7 Returned '+htmlEsc(r.return_date):'')+'</div>'+
+        '</div>'+
+        (cid?'<button onclick="sendEmailToContact(\''+cid+'\');dismissReminder(\''+r.id+'\')" style="background:var(--green);color:#fff;border:0;padding:6px 12px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer">Compose Email</button>':'')+
+        '<button onclick="dismissReminder(\''+r.id+'\')" style="background:transparent;border:1px solid var(--green);color:var(--green);padding:6px 10px;border-radius:7px;font-size:12px;cursor:pointer">Dismiss</button>'+
+      '</div>';
+    }).join('')+'</div>';
+  }
+  if(upcomingOOO.length){
+    oooCards+='<div style="background:var(--amber-l);border:1px solid var(--amber);border-radius:var(--r2);padding:10px 14px;margin-bottom:16px">'+
+      '<div style="font-size:12px;font-weight:600;color:var(--amber);margin-bottom:6px">⏰ Upcoming OOO Returns ('+upcomingOOO.length+')</div>'+
+      upcomingOOO.slice(0,3).map(function(r){
+        return '<div style="font-size:12px;color:var(--text2);padding:3px 0;border-bottom:1px solid rgba(0,0,0,.05)">'+
+          htmlEsc(r.contact_name||'')+(r.company_name?' \u00b7 '+htmlEsc(r.company_name):'')+'<span style="float:right;color:var(--amber);font-weight:600">'+htmlEsc(r.return_date)+'</span>'+
+        '</div>';
+      }).join('')+
+    '</div>';
+  }
+
   return '<div class="page">'+
+    (oooCards?'<div style="padding:0 24px;padding-top:16px">'+oooCards+'</div>':'')+
     '<div class="ph"><div class="ptitle">Email</div>'+
       '<div class="psub">'+(isBD?'Manage AI-generated outreach emails':'Email outreach')+' · '+u.name+'</div>'+
     '</div>'+
@@ -2400,6 +2457,13 @@ window.changePassword=function(){
 
 window.setAdminView=function(v){STATE.adminView=v;render();}
 
+window.dismissReminder=function(rid){
+  apiFetch('PATCH','/reminders/'+rid,{status:'sent'}).then(function(){
+    STATE.reminders=(STATE.reminders||[]).map(function(r){return r.id===rid?Object.assign({},r,{status:'sent'}):r;});
+    render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
 window.viewAs=function(uid){
   var target=STATE.users.find(function(u){return u.id===uid});
   if(!target)return;
@@ -3155,6 +3219,56 @@ window.doImportProcess=function(toProcess,dupEmailMap){
 
 
 // ════════════════════════════════════════════════
+// DROP G — Email status + OOO + Reminder actions
+// ════════════════════════════════════════════════
+window.changeEmailStatus=function(cid, newStatus, email, contactName){
+  if(newStatus==='out_of_office'){
+    // Show OOO date picker modal
+    STATE.modal='<div class="modal modal-w480">'+
+      '<div class="mh"><div class="mt">Out of Office — '+htmlEsc(contactName)+'</div>'+
+      '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+      '<div class="mb_">'+
+        '<div style="font-size:13px;color:var(--text2);margin-bottom:14px">'+
+          htmlEsc(contactName)+' ('+htmlEsc(email)+') will be marked as Out of Office.<br>'+
+          'A reminder will be created for their return date and shown on your dashboard.'+
+        '</div>'+
+        '<div class="fgrp"><label class="flbl">Out of office until <span style="color:var(--red)">*</span></label>'+
+          '<input type="date" class="inp" id="ooo-date-inp" style="font-size:13px" min="'+todayIST()+'"/>'+
+        '</div>'+
+      '</div>'+
+      '<div class="mf">'+
+        '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+        '<button class="btn btn-primary" onclick="submitOOO(\''+cid+'\',\''+htmlEsc(contactName)+'\')">Set OOO & Create Reminder</button>'+
+      '</div>'+
+    '</div>';
+    render();
+  } else {
+    // Directly update status
+    apiFetch('PATCH','/contacts/'+cid+'/email-status',{email_status:newStatus}).then(function(){
+      showToast(htmlEsc(contactName)+' marked as '+(newStatus==='valid'?'Valid':newStatus),'success');
+      return refreshJobs();
+    }).catch(function(e){showToast('Failed: '+e.message,'error');});
+  }
+};
+
+window.submitOOO=function(cid, contactName){
+  var dateEl=document.getElementById('ooo-date-inp');
+  if(!dateEl||!dateEl.value){showToast('Please pick a return date','warning');return;}
+  var oooUntil=dateEl.value;
+  closeModal();
+  apiFetch('PATCH','/contacts/'+cid+'/email-status',{email_status:'out_of_office',ooo_until:oooUntil}).then(function(){
+    showToast(htmlEsc(contactName)+' marked OOO until '+oooUntil+' \u2014 reminder created','success');
+    return Promise.all([refreshJobs(), loadReminders()]);
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+function loadReminders(){
+  return apiGet('/reminders').then(function(d){
+    STATE.reminders=d;render();
+  }).catch(function(){});
+}
+
+// ════════════════════════════════════════════════
 // EMAIL ACTIONS — Drop F
 // ════════════════════════════════════════════════
 window.previewPendingEmail=function(id){STATE.previewPendingId=id;render();};
@@ -3388,11 +3502,11 @@ function normaliseJob(j){
     is_duplicate:!!j.is_duplicate,duplicate_of:j.duplicate_of||null,
     created_date:j.created_date,created_at:j.created_at};
 }
-function flattenContacts(jobs){var out=[];jobs.forEach(function(j){(j.contacts||[]).forEach(function(c){out.push({id:c.id,job_id:c.job_id,first_name:c.first_name,last_name:c.last_name||'',designation:c.designation||'',email:c.email||'',phone:c.phone||'',linkedin:c.linkedin||'',is_primary:!!c.is_primary});});});return out;}
+function flattenContacts(jobs){var out=[];jobs.forEach(function(j){(j.contacts||[]).forEach(function(c){out.push({id:c.id,job_id:c.job_id,first_name:c.first_name,last_name:c.last_name||'',designation:c.designation||'',email:c.email||'',phone:c.phone||'',linkedin:c.linkedin||'',is_primary:!!c.is_primary,email_status:c.email_status||'valid',ooo_until:c.ooo_until||null});});});return out;}
 
 function loadAppData(){
   STATE.loading=true;render();
-  var calls=[apiGet('/users'),apiGet('/jobs'),apiGet('/companies')];
+  var calls=[apiGet('/users'),apiGet('/jobs'),apiGet('/companies'),apiGet('/reminders')];
   var u=STATE.user;
   var isBD=(u&&(u.role==='bd'||u.role==='bd_lead'||u.role==='admin'||u.role==='ra_lead'));
   if(isBD)calls.push(apiGet('/emails?status=pending'));
@@ -3402,6 +3516,7 @@ function loadAppData(){
     STATE.jobs=r[1].map(normaliseJob);
     STATE.contacts=flattenContacts(r[1]);
     STATE.companies=r[2].map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});
+    STATE.reminders=r[3]||[];
     if(isBD){
       STATE.pendingEmails=(r[3]||[]);
       STATE.emails=(r[4]||[]);
