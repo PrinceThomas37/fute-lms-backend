@@ -37,7 +37,7 @@ async function logActivity(job_id, contact_id, user_id, action_type, description
 
 // ── HEALTH ─────────────────────────────────────────────────────
 app.use(express.static('public'));
-app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.1.0-dropeE' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.2.0-dropF' }));
 
 // ══════════════════════════════════════════════════════════════
 // AUTH
@@ -394,13 +394,27 @@ app.delete('/contacts/:id', auth, async (req, res) => {
 // ══════════════════════════════════════════════════════════════
 app.get('/emails', auth, async (req, res) => {
   try {
+    const { status } = req.query;
     let query = supabase.from('emails')
-      .select(`*, contact:contacts(id,first_name,last_name,email), job:jobs(id,position,company_id), sender:users!sent_by(id,name)`)
+      .select(`*, contact:contacts(id,first_name,last_name,email,designation), job:jobs(id,position,company_id,company:companies(name,industry,location)), sender:users!sent_by(id,name,email)`)
       .order('created_at', { ascending: false });
-    if (req.user.role !== 'admin') query = query.eq('sent_by', req.user.id);
+    // scoping: bd sees only their own; ra_lead/admin see all
+    if (!['admin','ra_lead'].includes(req.user.role)) query = query.eq('sent_by', req.user.id);
+    if (status) query = query.eq('status', status);
     const { data, error } = await query;
     if (error) throw error;
     res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Pending email count for BD dashboard badge
+app.get('/emails/pending-count', auth, async (req, res) => {
+  try {
+    const { count, error } = await supabase.from('emails')
+      .select('id', { count: 'exact', head: true })
+      .eq('sent_by', req.user.id).eq('status', 'pending');
+    if (error) throw error;
+    res.json({ count: count || 0 });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -420,6 +434,113 @@ app.post('/emails', auth, async (req, res) => {
       await logActivity(job_id, contact_id || null, req.user.id, 'email_sent', `Email sent via ${platform || 'Gmail'}: ${subject || ''}`, null, null);
     }
     res.status(201).json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+
+// ── Generate emails for a list of jobs (called after bulk assign or BD import) ──
+app.post('/emails/generate', auth, async (req, res) => {
+  try {
+    if (!['admin','ra_lead','bd','bd_lead'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Not allowed' });
+    }
+    const { job_ids } = req.body;
+    if (!Array.isArray(job_ids) || !job_ids.length) return res.status(400).json({ error: 'job_ids required' });
+
+    // Fetch jobs with contacts and company info
+    const { data: jobs, error: jErr } = await supabase.from('jobs')
+      .select('id, position, assigned_to_bd, company:companies(name,industry,location), contacts(*)')
+      .in('id', job_ids);
+    if (jErr) throw jErr;
+
+    // Determine the BD sender for each job
+    const bdIds = [...new Set(jobs.map(j => j.assigned_to_bd).filter(Boolean))];
+    const bdIds2 = bdIds.length ? bdIds : [req.user.id];
+    const { data: bdUsers } = await supabase.from('users').select('id,name,email').in('id', bdIds2);
+    const bdMap = {};
+    (bdUsers || []).forEach(u => { bdMap[u.id] = u; });
+
+    const emailsToInsert = [];
+    const generated = [];
+    const failed = [];
+
+    for (const job of jobs) {
+      const bd = bdMap[job.assigned_to_bd] || bdMap[req.user.id] || { id: req.user.id, name: req.user.name, email: req.user.email };
+      const contacts = (job.contacts || []).filter(c => c.email);
+      for (const contact of contacts) {
+        try {
+          let subject, body;
+          if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== 'your_anthropic_api_key_here') {
+            const prompt = `Write a hyper-personalized cold outreach email from ${bd.name} at Fute Global LLC (a staffing/recruitment firm) to ${contact.first_name} ${contact.last_name || ''}, ${contact.designation || 'Hiring Manager'} at ${job.company?.name || ''} (${job.company?.industry || ''}, ${job.company?.location || ''}).\n\nThey are hiring for: ${job.position}\n\nEmail purpose: Introduce Fute Global as a staffing partner who can help fill this role with top candidates.\n\nInstructions: 3 short paragraphs, warm but professional tone, no fluff, end with a clear and specific call to action. Make it feel personal and relevant to their role.\n\nFormat strictly as:\nSubject: [subject line]\n\n[email body]`;
+            const aiResp = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+              body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 500, messages: [{ role: 'user', content: prompt }] })
+            });
+            const aiData = await aiResp.json();
+            const text = aiData.content?.[0]?.text || '';
+            const subjectMatch = text.match(/Subject:\s*(.+)/i);
+            subject = subjectMatch ? subjectMatch[1].trim() : `Staffing Partnership — ${job.company?.name}`;
+            body = text.replace(/^Subject:.+\n*/im, '').trim();
+          } else {
+            subject = `Staffing Partnership — ${job.company?.name || job.position}`;
+            body = `Hi ${contact.first_name},\n\nI came across ${job.company?.name || 'your company'} and noticed you're hiring for ${job.position}. At Fute Global, we specialize in placing top-tier talent for roles exactly like this.\n\nWe've helped similar companies reduce time-to-hire significantly. I'd love to share how we can support your hiring goals.\n\nWould you be open to a quick 15-minute call this week?\n\nBest regards,\n${bd.name}\nFute Global LLC`;
+          }
+          emailsToInsert.push({
+            contact_id: contact.id, job_id: job.id, to_email: contact.email,
+            subject, body, platform: 'Outlook',
+            sent_by: bd.id, from_email: bd.email,
+            status: 'pending'
+          });
+          generated.push({ contact_id: contact.id, email: contact.email });
+        } catch(e) {
+          failed.push({ contact_id: contact.id, email: contact.email, error: e.message });
+        }
+      }
+    }
+
+    if (emailsToInsert.length) {
+      const { error: insErr } = await supabase.from('emails').insert(emailsToInsert);
+      if (insErr) throw insErr;
+    }
+
+    res.json({ generated: generated.length, failed: failed.length, failDetails: failed });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Queue all pending emails for BD (mark as queued = ready to send) ──
+app.post('/emails/queue-all', auth, async (req, res) => {
+  try {
+    const { error } = await supabase.from('emails')
+      .update({ status: 'queued', updated_at: new Date() })
+      .eq('sent_by', req.user.id).eq('status', 'pending');
+    if (error) throw error;
+    // update email_sent_at on contacts that have pending emails
+    const { data: queued } = await supabase.from('emails')
+      .select('contact_id, job_id').eq('sent_by', req.user.id).eq('status', 'queued');
+    const contactIds = [...new Set((queued || []).map(e => e.contact_id).filter(Boolean))];
+    if (contactIds.length) {
+      await supabase.from('contacts').update({ email_sent_at: today(), updated_at: new Date() }).in('id', contactIds);
+    }
+    const jobIds = [...new Set((queued || []).map(e => e.job_id).filter(Boolean))];
+    for (const jid of jobIds) {
+      await logActivity(jid, null, req.user.id, 'emails_queued', 'Emails queued for sending', null, null);
+    }
+    res.json({ success: true, queued: contactIds.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Update single email body (BD preview edit) ──
+app.patch('/emails/:id', auth, async (req, res) => {
+  try {
+    const { subject, body } = req.body;
+    const updates = { updated_at: new Date() };
+    if (subject !== undefined) updates.subject = subject;
+    if (body !== undefined) updates.body = body;
+    const { data, error } = await supabase.from('emails').update(updates)
+      .eq('id', req.params.id).eq('sent_by', req.user.id).select().single();
+    if (error) throw error;
+    res.json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
