@@ -488,6 +488,8 @@ var STATE = {
   assignFilter: {ra:"",dup:"all"},
   pendingEmails: [],
   previewPendingId: null,
+  composeContactId: null,
+  showAIPanel: false,
 };
 
 // No pre-seeded reminders — users set them manually from the OOO list
@@ -1230,7 +1232,8 @@ function deleteContact(cid){
 function sendEmailToContact(cid){
   var c=STATE.contacts.find(function(x){return x.id===cid;}); if(!c) return;
   var j=jobById(c.job_id)||{};
-  STATE.manualEmail=c.email; STATE.manualEmailName=(c.first_name||"")+" "+(c.last_name||"");
+  STATE.composeContactId=cid+'|'+(j.id||'');
+  STATE.manualEmail=null;STATE.genEmail=null;STATE.emailTab='compose';STATE.showAIPanel=false;
   STATE.page="email"; STATE.modal=null; showToast("Compose email to "+c.first_name,"info"); render();
 }
 function closeModal(){ STATE.modal=null; render(); }
@@ -1242,8 +1245,8 @@ function renderEmail(){
   var isBD=(u.role==='bd'||u.role==='bd_lead'||u.role==='admin'||u.role==='ra_lead');
   var pending=STATE.pendingEmails||[];
   var sentEmails=STATE.emails||[];
-  var tabs=isBD?['pending','sent','templates']:['sent','templates'];
-  if(!STATE.emailTab||(!isBD&&STATE.emailTab==='pending'))STATE.emailTab='sent';
+  var tabs=isBD?['pending','compose','sent','templates']:['compose','sent','templates'];
+  if(!STATE.emailTab)STATE.emailTab=isBD?'pending':'compose';
 
   var tabBar=tabs.map(function(t){
     var lbl=t==='pending'?('Pending'+(pending.length?' ('+pending.length+')':'')):t.charAt(0).toUpperCase()+t.slice(1);
@@ -1353,12 +1356,115 @@ function renderEmail(){
     '<button class="btn btn-primary mt3" onclick="showToast(\'Template saved\',\'success\')">Save template</button>'+
   '</div>';
 
+  // ── COMPOSE TAB ──
+  var myJobs=getMyJobs(u);
+  var contactOpts='<option value="">— Select contact —</option>'+myJobs.reduce(function(opts,j){
+    var cs=STATE.contacts.filter(function(c){return c.job_id===j.id&&c.email;});
+    if(!cs.length)return opts;
+    return opts+cs.map(function(c){
+      return '<option value="'+c.id+'|'+j.id+'">'+
+        escHtml((c.first_name||'')+' '+(c.last_name||'')+' — '+j.company_name+' ('+j.position+')')+
+      '</option>';
+    }).join('');
+  },'');
+
+  var composeHtml='';
+  if(STATE.emailTab==='compose'){
+    var hasRecipient=!!(STATE.composeContactId||STATE.manualEmail);
+    var recipientBadge='';
+    if(STATE.composeContactId){
+      var parts=STATE.composeContactId.split('|');
+      var cc=STATE.contacts.find(function(c){return c.id===parts[0];});
+      var cj=myJobs.find(function(j){return j.id===parts[1];});
+      if(cc)recipientBadge='<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--accent-l);border-radius:var(--r);margin-top:8px">'+
+        '<div style="flex:1;font-size:13px"><strong>'+(cc.first_name||'')+' '+(cc.last_name||'')+'</strong>'+
+          (cc.designation?' · '+escHtml(cc.designation):'')+
+          '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+escHtml(cc.email||'')+(cj?' · '+escHtml(cj.company_name):'')+'</div>'+
+        '</div>'+
+        '<button class="btn-icon" onclick="STATE.composeContactId=null;STATE.genEmail=null;render()">'+ico('x',13)+'</button>'+
+      '</div>';
+    } else if(STATE.manualEmail){
+      recipientBadge='<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--green-l);border-radius:var(--r);margin-top:8px">'+
+        '<div style="flex:1;font-size:13px"><strong>'+htmlEsc(STATE.manualEmail)+'</strong></div>'+
+        '<button class="btn-icon" onclick="STATE.manualEmail=null;STATE.genEmail=null;render()">'+ico('x',13)+'</button>'+
+      '</div>';
+    }
+
+    var previewSection='';
+    if(STATE.genEmail){
+      var ge=STATE.genEmail;
+      previewSection='<div style="margin-top:14px;border:1.5px solid var(--accent);border-radius:var(--r2);overflow:hidden">'+
+        '<div style="padding:10px 14px;background:var(--accent-l);display:flex;justify-content:space-between;align-items:center">'+
+          '<div style="font-size:12px;font-weight:600;color:var(--accent)">✨ AI Preview</div>'+
+          '<button class="btn-icon" onclick="STATE.genEmail=null;render()">'+ico('x',12)+'</button>'+
+        '</div>'+
+        '<div style="padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text2)">'+
+          '<strong>Subject:</strong> '+htmlEsc(ge.subj||ge.subject||'')+'</div>'+
+        '<div style="padding:12px 14px;font-size:13px;line-height:1.7;white-space:pre-wrap;max-height:200px;overflow-y:auto">'+htmlEsc(ge.body||'')+'</div>'+
+        '<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">'+
+          '<button class="btn btn-outline btn-sm" onclick="STATE.genEmail=null;render()">Discard</button>'+
+          '<button class="btn btn-primary btn-sm" onclick="sendEmail()">'+ico('send',12)+' Send this</button>'+
+        '</div>'+
+      '</div>';
+    }
+
+    var aiSection='';
+    if(STATE.showAIPanel){
+      aiSection='<div style="margin-top:12px;padding:14px;background:var(--purple-l);border:1.5px solid rgba(124,58,237,.2);border-radius:var(--r2)">'+
+        '<div style="font-size:12px;font-weight:600;color:var(--purple);margin-bottom:8px">✨ AI instructions</div>'+
+        '<textarea class="txta w100" style="min-height:80px;font-size:12.5px;background:rgba(255,255,255,.7)" id="ai-prompt-inp" oninput="STATE.aiPrompt=this.value" placeholder="e.g. Be very concise, 3 lines only...">'+htmlEsc(STATE.aiPrompt||STATE.aiPromptDefault)+'</textarea>'+
+        '<div class="flex gap1 flex-wrap mt2">'+
+          ['Very concise (3 lines)','Formal tone','Friendly tone','Focus on urgency','Ask for referral'].map(function(s){
+            return '<span onclick="appendPrompt(\''+s+'\')" style="font-size:11px;padding:3px 8px;background:rgba(124,58,237,.1);color:var(--purple);border-radius:10px;cursor:pointer;border:1px solid rgba(124,58,237,.15)">+\u202f'+s+'</span>';
+          }).join('')+
+        '</div>'+
+        '<div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">'+
+          '<button class="btn btn-outline btn-sm" onclick="resetAIPrompt()">Reset</button>'+
+          '<button class="btn btn-sm" style="background:var(--purple);color:#fff" onclick="generateAI()">'+
+            (STATE.aiGenerating?'Generating…':'Generate email')+
+          '</button>'+
+        '</div>'+
+      '</div>';
+    }
+
+    composeHtml='<div style="max-width:640px">'+
+      '<div class="card cp mb3">'+
+        '<div class="fw6 mb1" style="font-size:13px">Recipient</div>'+
+        '<select class="sel" onchange="STATE.composeContactId=this.value;STATE.manualEmail=null;STATE.genEmail=null;render()">'+contactOpts+'</select>'+
+        '<div style="font-size:11px;color:var(--text3);margin-top:6px;margin-bottom:2px">or type an email address directly</div>'+
+        '<input class="inp" placeholder="someone@company.com" id="manual-email-inp" value="'+htmlEsc(STATE.manualEmail||'')+'" oninput="STATE.manualEmail=this.value||null;STATE.composeContactId=null;STATE.genEmail=null"/>'+
+        recipientBadge+
+      '</div>'+
+
+      '<div class="card cp mb3">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+          '<div class="fw6" style="font-size:13px">Message</div>'+
+          '<div style="display:flex;gap:8px;align-items:center">'+
+            '<button onclick="STATE.showAIPanel=!STATE.showAIPanel;render()" style="font-size:12px;padding:5px 11px;border:1px solid rgba(124,58,237,.3);background:'+(STATE.showAIPanel?'var(--purple)':'var(--purple-l)')+';color:'+(STATE.showAIPanel?'#fff':'var(--purple)')+';border-radius:7px;cursor:pointer">✨ AI</button>'+
+            '<div class="flex gap1">'+
+              '<button class="fc'+(u.plt==="Gmail"?" on":"")+'" onclick="setPlatform(\'Gmail\')">Gmail</button>'+
+              '<button class="fc'+(u.plt==="Outlook"?" on":"")+'" onclick="setPlatform(\'Outlook\')">Outlook</button>'+
+            '</div>'+
+          '</div>'+
+        '</div>'+
+        '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="email-subj" value="'+htmlEsc(STATE.emailSubj)+'" oninput="STATE.emailSubj=this.value"/></div>'+
+        '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:140px" id="email-body" oninput="STATE.emailBody=this.value">'+htmlEsc(STATE.emailBody)+'</textarea></div>'+
+        aiSection+
+        previewSection+
+        '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
+          '<button class="btn btn-primary" onclick="sendEmail()" '+(hasRecipient?'':'disabled style="opacity:.5;cursor:not-allowed"')+'>'+ico('send',13)+' Send</button>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  }
+
   return '<div class="page">'+
     '<div class="ph"><div class="ptitle">Email</div>'+
       '<div class="psub">'+(isBD?'Manage AI-generated outreach emails':'Email outreach')+' · '+u.name+'</div>'+
     '</div>'+
     '<div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:18px;overflow-x:auto">'+tabBar+'</div>'+
     (STATE.emailTab==='pending'?pendingHtml:'')+
+    (STATE.emailTab==='compose'?composeHtml:'')+
     (STATE.emailTab==='sent'?sentHtml:'')+
     (STATE.emailTab==='templates'?tmplHtml:'')+
   '</div>';
@@ -2124,6 +2230,28 @@ window.useManualEmail=function(){
 
 window.generateAI=function(){
   var customInstructions=STATE.aiPrompt||STATE.aiPromptDefault;
+  // resolve recipient from composeContactId
+  if(STATE.composeContactId&&!STATE.mergeLeadId){
+    var parts=STATE.composeContactId.split('|');
+    var cc=STATE.contacts.find(function(c){return c.id===parts[0];});
+    var cj=STATE.jobs.find(function(j){return j.id===parts[1];});
+    if(cc&&cj){
+      STATE.mergeLeadId=null;
+      STATE.manualEmail=cc.email;
+      STATE.manualEmailName=(cc.first_name||'')+' '+(cc.last_name||'');
+      // pass contact+company into AI call directly
+      STATE.aiGenerating=true;render();
+      apiPost('/ai/generate-email',{
+        contact:{first_name:cc.first_name,last_name:cc.last_name,designation:cc.designation,position:cj.position},
+        company:{name:cj.company_name,industry:cj.company_ind,location:cj.location},
+        position:cj.position
+      }).then(function(d){
+        STATE.genEmail={to:(cc.first_name||'')+' '+(cc.last_name||''),email:cc.email,subj:d.subject,body:d.body,lid:null};
+        STATE.aiGenerating=false;render();
+      }).catch(function(e){STATE.aiGenerating=false;showToast('AI error: '+e.message,'error');render();});
+      return;
+    }
+  }
   var promptEl=document.getElementById("ai-prompt-inp");
   if(promptEl&&promptEl.value)customInstructions=promptEl.value;
 
