@@ -486,6 +486,8 @@ var STATE = {
   assignSel: {},
   assignTargetBD: "",
   assignFilter: {ra:"",dup:"all"},
+  pendingEmails: [],
+  previewPendingId: null,
 };
 
 // No pre-seeded reminders — users set them manually from the OOO list
@@ -1236,235 +1238,129 @@ function closeModal(){ STATE.modal=null; render(); }
 // ── EMAIL ──────────────────────────────────────
 function renderEmail(){
   var u=STATE.user;
-  var myLeads=getMyLeads(u);
-  var myEmails=STATE.emails.filter(function(e){return e.by===u.id||u.role==="admin"});
-  var tabs=['compose','sent','templates'];
+  // BD sees pending+queued+sent; others see sent only
+  var isBD=(u.role==='bd'||u.role==='bd_lead'||u.role==='admin'||u.role==='ra_lead');
+  var pending=STATE.pendingEmails||[];
+  var sentEmails=STATE.emails||[];
+  var tabs=isBD?['pending','sent','templates']:['sent','templates'];
+  if(!STATE.emailTab||(!isBD&&STATE.emailTab==='pending'))STATE.emailTab='sent';
 
   var tabBar=tabs.map(function(t){
-    return '<div class="tab'+(STATE.emailTab===t?" active":"")+'" onclick="setEmailTab(\''+t+'\')" style="text-transform:capitalize">'+t+'</div>';
-  }).join("");
+    var lbl=t==='pending'?('Pending'+(pending.length?' ('+pending.length+')':'')):t.charAt(0).toUpperCase()+t.slice(1);
+    return '<div class="tab'+(STATE.emailTab===t?' active':'')+'" onclick="setEmailTab(\''+t+'\')">'+lbl+'</div>';
+  }).join('');
 
-  // Build recipient info — either from selected lead or manual email
-  var recipientInfo="";
-  var hasRecipient=false;
+  // ── PENDING TAB ──
+  var pendingHtml='';
+  if(STATE.emailTab==='pending'){
+    var totalRecipients=pending.length;
+    var sendAllBtn='<button onclick="openSendAllConfirm()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer'+(totalRecipients?'':';opacity:.4;cursor:not-allowed')+'"'+(totalRecipients?'':'disabled')+'>Send all pending ('+totalRecipients+')</button>';
 
-  if(STATE.mergeLeadId){
-    var ml=myLeads.find(function(l){return l.id===STATE.mergeLeadId});
-    if(ml){
-      var mlco=STATE.companies.find(function(c){return c.id===ml.coid})||{};
-      hasRecipient=true;
-      recipientInfo='<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--accent-l);border-radius:var(--r);margin-top:8px;border:1px solid rgba(37,99,235,.15)">'+
-        '<div style="flex:1">'+
-          '<div style="font-weight:500;font-size:13.5px">'+ml.fn+' '+ml.ln+(ml.desig?' · <span style="font-weight:400;color:var(--text2)">'+ml.desig+'</span>':'')+' </div>'+
-          '<div class="f12 text3">'+mlco.name+' · '+ml.email+'</div>'+
-        '</div>'+
-        '<button class="btn-icon" onclick="STATE.mergeLeadId=null;STATE.genEmail=null;render()">'+ico("x",13)+'</button>'+
-      '</div>';
-    }
-  } else if(STATE.manualEmail){
-    hasRecipient=true;
-    recipientInfo='<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--green-l);border-radius:var(--r);margin-top:8px;border:1px solid rgba(22,163,74,.15)">'+
-      '<div style="flex:1"><div style="font-weight:500;font-size:13.5px">'+htmlEsc(STATE.manualEmailName||STATE.manualEmail)+'</div>'+
-      '<div class="f12 text3">'+htmlEsc(STATE.manualEmail)+'</div></div>'+
-      '<button class="btn-icon" onclick="STATE.manualEmail=null;STATE.manualEmailName=null;STATE.genEmail=null;render()">'+ico("x",13)+'</button>'+
-    '</div>';
-  }
-
-  // Search results for email search
-  var searchResults="";
-  if(STATE.emailSearch&&STATE.emailSearch.length>1){
-    var q=STATE.emailSearch.toLowerCase();
-    var matches=myLeads.filter(function(l){
-      return [l.email,l.fn,l.ln,l.pos].some(function(v){return(v||"").toLowerCase().includes(q);});
-    }).slice(0,6);
-    if(matches.length){
-      searchResults='<div style="position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);z-index:50;max-height:220px;overflow-y:auto;margin-top:2px">';
-      searchResults+=matches.map(function(l){
-        var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
-        return '<div onclick="selectEmailRecipient(\''+l.id+'\')" style="display:flex;align-items:center;gap:10px;padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border)" onmouseenter="this.style.background=\'var(--bg)\'" onmouseleave="this.style.background=\'\'">'+
-          '<div style="flex:1">'+
-            '<div style="font-size:13.5px;font-weight:500">'+l.fn+' '+l.ln+' <span style="font-weight:400;color:var(--text3)">· '+l.pos+'</span></div>'+
-            '<div class="f12 text3">'+l.email+' · '+co.name+'</div>'+
-          '</div>'+
-        '</div>';
-      }).join("");
-      // Option to use typed email directly if it looks like an email
-      if(STATE.emailSearch.includes("@")){
-        searchResults+='<div onclick="useManualEmail()" style="display:flex;align-items:center;gap:10px;padding:9px 13px;cursor:pointer;background:var(--bg)" onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'var(--bg)\'">'+
-          '<span style="font-size:12px;padding:2px 8px;background:var(--accent);color:#fff;border-radius:10px">Send to</span>'+
-          '<div class="f13">'+htmlEsc(STATE.emailSearch)+'</div>'+
-        '</div>';
-      }
-      searchResults+='</div>';
-    } else if(STATE.emailSearch.includes("@")){
-      // No lead match but valid email — offer direct send
-      searchResults='<div style="position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);z-index:50;margin-top:2px">'+
-        '<div onclick="useManualEmail()" style="display:flex;align-items:center;gap:10px;padding:10px 13px;cursor:pointer" onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'\'">'+
-          '<span style="font-size:12px;padding:2px 8px;background:var(--accent);color:#fff;border-radius:10px">Send to</span>'+
-          '<div class="f13 fw5">'+htmlEsc(STATE.emailSearch)+'</div>'+
-          '<div class="f12 text3">· manual email (not in leads)</div>'+
-        '</div>'+
-      '</div>';
-    }
-  }
-
-  var preview="";
-  if(STATE.genEmail){
-    var ge=STATE.genEmail;
-    preview='<div>'+
-      '<div style="padding:10px 13px;background:var(--bg);border-radius:var(--r2) var(--r2) 0 0;border-bottom:1px solid var(--border)">'+
-        '<div class="f12 text3"><strong style="color:var(--text)">To:</strong> '+htmlEsc(ge.to)+' &lt;'+htmlEsc(ge.email)+'&gt;</div>'+
-        '<div class="f12 text3 mt1"><strong style="color:var(--text)">Subject:</strong> '+htmlEsc(ge.subj)+'</div>'+
-      '</div>'+
-      '<div style="padding:14px;background:var(--bg);border-radius:0 0 var(--r2) var(--r2);font-size:13px;line-height:1.7;white-space:pre-wrap">'+htmlEsc(ge.body)+'</div>'+
-    '</div>';
-  } else {
-    preview='<div style="text-align:center;padding:40px 20px;color:var(--text3);font-size:13px">'+
-      (hasRecipient?'Recipient selected. Click ✨ Generate with AI or edit the template and click Send.':'Search for a lead or type an email address to get started.')+
-    '</div>';
-  }
-
-  var sentList='<div style="display:flex;gap:16px;align-items:flex-start">'+
-    // Email list
-    '<div style="flex:1;min-width:0">'+
-    myEmails.map(function(e){
-      var lead=STATE.leads.find(function(l){return l.id===e.lid;});
-      var co=lead?STATE.companies.find(function(c){return c.id===lead.coid;})||{}:{};
-      var isSelected=STATE.previewEmail&&STATE.previewEmail.id===e.id;
-      return '<div class="email-card" onclick="previewEmail(\''+e.id+'\')" style="cursor:pointer;border:1.5px solid '+(isSelected?'var(--accent)':'transparent')+';transition:border .12s" onmouseenter="this.style.borderColor=\''+(isSelected?'var(--accent)':'var(--border2)')+'\';" onmouseleave="this.style.borderColor=\''+(isSelected?'var(--accent)':'transparent')+'\';">'+
-        '<div class="flex jb" style="align-items:flex-start">'+
-          '<div style="flex:1;min-width:0">'+
-            '<div class="email-subj" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subj)+'</div>'+
-            '<div class="f12 text3 mt1">To: '+htmlEsc(e.to)+(lead?' · '+htmlEsc(lead.fn+' '+lead.ln)+' · '+htmlEsc(co.name||''):'')+'</div>'+
-          '</div>'+
-          '<div style="text-align:right;flex-shrink:0;margin-left:12px">'+
-            '<span class="bdg bdg-green">'+e.status+'</span>'+
-            '<div class="f11 text3 mt1">'+fmtDate(e.dt)+' · '+(e.plt||"Gmail")+'</div>'+
-          '</div>'+
-        '</div>'+
-        '<div class="email-prev mt1">'+(e.body||"").slice(0,100)+'...</div>'+
-      '</div>';
-    }).join("")+
-    '</div>'+
+    var pendingRows=pending.map(function(e,idx){
+      var isSelected=STATE.previewPendingId===e.id;
+      var jname=(e.job&&e.job.position?e.job.position:'')+(e.job&&e.job.company?(' · '+e.job.company.name):'');
+      return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer;background:'+(isSelected?'var(--accent-l)':'')+'" onclick="previewPendingEmail(\''+e.id+'\')">'+
+        '<td style="padding:10px 12px;font-size:13px"><div style="font-weight:500">'+htmlEsc(e.to_email)+'</div>'+
+          '<div style="font-size:11px;color:var(--text3)">'+htmlEsc((e.contact&&e.contact.first_name?e.contact.first_name+' '+(e.contact.last_name||''):''))+'</div></td>'+
+        '<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+htmlEsc(jname)+'</td>'+
+        '<td style="padding:10px 12px;font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subject||'')+'</td>'+
+        '<td style="padding:10px 12px;white-space:nowrap">'+
+          '<span style="font-size:11px;padding:2px 8px;background:var(--amber-l);color:var(--amber);border-radius:8px;font-weight:600">'+htmlEsc(e.status)+'</span>'+
+        '</td>'+
+      '</tr>';
+    }).join('');
+    if(!pendingRows)pendingRows='<tr><td colspan="4" style="padding:40px;text-align:center;color:var(--text3)">No pending emails. Assign leads to generate emails.</td></tr>';
 
     // Preview panel
-    (STATE.previewEmail?
-      (function(){
-        var pe=STATE.previewEmail;
-        var lead=STATE.leads.find(function(l){return l.id===pe.lid;});
-        var co=lead?STATE.companies.find(function(c){return c.id===lead.coid;})||{}:{};
-        return '<div style="width:380px;flex-shrink:0;position:sticky;top:0;max-height:calc(100vh - 160px);overflow-y:auto">'+
-          '<div class="card" style="border:1.5px solid var(--accent-l)">'+
-            // Preview header
-            '<div style="padding:14px 16px;background:var(--accent-l);border-radius:var(--r2) var(--r2) 0 0;border-bottom:1px solid rgba(37,99,235,.15)">'+
-              '<div style="display:flex;justify-content:space-between;align-items:flex-start">'+
-                '<div style="font-weight:600;font-size:13.5px;color:var(--accent)">Email Preview</div>'+
-                '<button class="btn-icon" onclick="STATE.previewEmail=null;render()">'+ico("x",13)+'</button>'+
-              '</div>'+
-              '<div class="f12 text3 mt2"><strong style="color:var(--text)">To:</strong> '+htmlEsc(pe.to)+'</div>'+
-              (lead?'<div class="f12 text3 mt1"><strong style="color:var(--text)">Contact:</strong> '+htmlEsc(lead.fn+' '+lead.ln)+' · '+htmlEsc(co.name||'')+'</div>':'')+
-              '<div class="f12 text3 mt1"><strong style="color:var(--text)">Sent:</strong> '+fmtDate(pe.dt)+' via '+(pe.plt||"Gmail")+'</div>'+
-            '</div>'+
-            // Subject
-            '<div style="padding:12px 16px;border-bottom:1px solid var(--border);background:var(--card)">'+
-              '<div class="f11 text3" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Subject</div>'+
-              '<div style="font-weight:600;font-size:13.5px">'+htmlEsc(pe.subj)+'</div>'+
-            '</div>'+
-            // Body
-            '<div style="padding:14px 16px;font-size:13px;line-height:1.7;white-space:pre-wrap;overflow-y:auto;background:var(--card);border-radius:0 0 var(--r2) var(--r2)">'+htmlEsc(pe.body||"")+'</div>'+
+    var previewPanel='';
+    if(STATE.previewPendingId){
+      var pe=pending.find(function(e){return e.id===STATE.previewPendingId;});
+      if(pe){
+        previewPanel='<div style="width:380px;flex-shrink:0;background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
+          '<div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'+
+            '<div style="font-weight:600;font-size:13px">Email Preview</div>'+
+            '<button class="btn-icon" onclick="STATE.previewPendingId=null;render()">'+ico('x',13)+'</button>'+
+          '</div>'+
+          '<div style="padding:12px 14px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text2)">'+
+            '<div><strong>To:</strong> '+htmlEsc(pe.to_email)+'</div>'+
+            '<div class="mt1"><strong>Subject:</strong> '+htmlEsc(pe.subject||'')+'</div>'+
+          '</div>'+
+          '<div style="padding:14px;font-size:13px;line-height:1.7;white-space:pre-wrap;max-height:320px;overflow-y:auto">'+htmlEsc(pe.body||'')+'</div>'+
+          '<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px">'+
+            '<textarea id="edit-email-body-'+pe.id+'" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;min-height:60px;resize:vertical;font-family:inherit">'+htmlEsc(pe.body||'')+'</textarea>'+
+          '</div>'+
+          '<div style="padding:8px 14px;border-top:1px solid var(--border);display:flex;gap:8px">'+
+            '<button class="btn btn-outline btn-sm" onclick="saveEmailEdit(\''+pe.id+'\')">Save edit</button>'+
           '</div>'+
         '</div>';
-      })()
-    :
-      '<div style="width:300px;flex-shrink:0;display:flex;align-items:flex-start;padding-top:20px">'+
-        '<div style="text-align:center;width:100%;padding:30px 20px;color:var(--text3);font-size:13px;background:var(--bg);border-radius:var(--r2);border:1.5px dashed var(--border2)">'+
-          ico("email",24)+'<div style="margin-top:10px">Click any email<br>to preview it</div>'+
+      }
+    }
+
+    pendingHtml='<div>'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
+        '<div style="font-size:13px;color:var(--text2)">'+pending.length+' email'+(pending.length!==1?'s':'')+' ready · '+pending.length+' recipient'+(pending.length!==1?'s':'')+' total</div>'+
+        sendAllBtn+
+      '</div>'+
+      '<div style="display:flex;gap:14px;align-items:flex-start">'+
+        '<div style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
+          '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
+            '<thead style="background:var(--bg);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
+              '<tr><th style="padding:10px 12px;text-align:left">Recipient</th><th style="padding:10px 12px;text-align:left">Job</th><th style="padding:10px 12px;text-align:left">Subject</th><th style="padding:10px 12px;text-align:left">Status</th></tr>'+
+            '</thead>'+
+            '<tbody>'+pendingRows+'</tbody>'+
+          '</table>'+
         '</div>'+
-      '</div>'
-    )+
+        previewPanel+
+      '</div>'+
+    '</div>';
+  }
+
+  // ── SENT TAB ──
+  var sentHtml='';
+  if(STATE.emailTab==='sent'){
+    var sentRows=sentEmails.map(function(e){
+      var jname=(e.job&&e.job.position?e.job.position:'')+(e.job&&e.job.company?(' · '+e.job.company.name):'');
+      return '<tr style="border-bottom:1px solid var(--border2)">'+
+        '<td style="padding:10px 12px;font-size:13px">'+htmlEsc(e.to_email||'')+'</td>'+
+        '<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+htmlEsc(jname)+'</td>'+
+        '<td style="padding:10px 12px;font-size:12px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subject||'')+'</td>'+
+        '<td style="padding:10px 12px"><span style="font-size:11px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:8px;font-weight:600">'+htmlEsc(e.status||'sent')+'</span></td>'+
+        '<td style="padding:10px 12px;font-size:11px;color:var(--text3)">'+htmlEsc(e.sent_at||'')+'</td>'+
+      '</tr>';
+    }).join('');
+    if(!sentRows)sentRows='<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">No sent emails yet.</td></tr>';
+    sentHtml='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
+      '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
+        '<thead style="background:var(--bg);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
+          '<tr><th style="padding:10px 12px;text-align:left">To</th><th style="padding:10px 12px;text-align:left">Job</th><th style="padding:10px 12px;text-align:left">Subject</th><th style="padding:10px 12px;text-align:left">Status</th><th style="padding:10px 12px;text-align:left">Date</th></tr>'+
+        '</thead>'+
+        '<tbody>'+sentRows+'</tbody>'+
+      '</table>'+
+    '</div>';
+  }
+
+  // ── TEMPLATES TAB ──
+  var vars=[['{{fn}}','First name'],['{{company}}','Company'],['{{pos}}','Position'],['{{ind}}','Industry'],['{{desig}}','Designation'],['{{loc}}','Location'],['{{sender}}','Sender name']];
+  var varChips=vars.map(function(v){
+    return '<span onclick="insertVar(\''+v[0]+'\')" style="font-size:11.5px;padding:4px 10px;background:var(--accent-l);color:var(--accent);border-radius:6px;cursor:pointer;font-family:var(--mono);border:1px solid rgba(37,99,235,.2)">'+v[0]+'<span style="font-family:var(--font);font-size:10px;opacity:.7;margin-left:4px">'+v[1]+'</span></span>';
+  }).join(' ');
+  var tmplHtml='<div class="card cp">'+
+    '<div class="fw6 mb1">AI Email Prompt Template</div>'+
+    '<div style="font-size:13px;color:var(--text2);margin-bottom:14px">This prompt guides the AI when generating emails. Variables in {{curly braces}} are replaced automatically.</div>'+
+    '<div class="flex gap1 flex-wrap mb3">'+varChips+'</div>'+
+    '<div class="fgrp"><label class="flbl">Subject line template</label><input class="inp" id="tmpl-subj" value="'+htmlEsc(STATE.emailSubj)+'" oninput="STATE.emailSubj=this.value"/></div>'+
+    '<div class="fgrp"><label class="flbl">Body template / AI context</label><textarea class="txta w100" style="min-height:200px" id="tmpl-body" oninput="STATE.emailBody=this.value">'+htmlEsc(STATE.emailBody)+'</textarea></div>'+
+    '<button class="btn btn-primary mt3" onclick="showToast(\'Template saved\',\'success\')">Save template</button>'+
   '</div>';
 
-  var vars=[["{{fn}}","First name"],["{{company}}","Company"],["{{pos}}","Position"],["{{ind}}","Industry"],["{{desig}}","Designation"],["{{loc}}","Location"],["{{sender}}","Sender name"]];
-  var varChips=vars.map(function(v){
-    return '<button onclick="insertVar(\''+v[0]+'\')" style="font-size:11.5px;padding:4px 10px;background:var(--accent-l);color:var(--accent);border-radius:6px;cursor:pointer;font-family:var(--mono);border:1px solid rgba(37,99,235,.2);font-weight:500;transition:all .12s" onmouseenter="this.style.background=\'var(--accent)\';this.style.color=\'#fff\'" onmouseleave="this.style.background=\'var(--accent-l)\';this.style.color=\'var(--accent)\'">'+v[0]+'<span style="font-family:var(--font);font-size:10px;opacity:.7;margin-left:4px">'+v[1]+'</span></button>';
-  }).join("");
-
   return '<div class="page">'+
-    '<div class="ph"><div class="ptitle">Email</div><div class="psub">Compose, send and track outreach emails</div></div>'+
+    '<div class="ph"><div class="ptitle">Email</div>'+
+      '<div class="psub">'+(isBD?'Manage AI-generated outreach emails':'Email outreach')+' · '+u.name+'</div>'+
+    '</div>'+
     '<div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:18px;overflow-x:auto">'+tabBar+'</div>'+
-
-    (STATE.emailTab==="compose"?
-      '<div style="display:flex;gap:16px;align-items:flex-start;position:relative;flex-wrap:nowrap">'+
-
-        // ── LEFT: compose form (full width or shrunk if preview open)
-        '<div style="flex:1;min-width:0;transition:all .2s">'+
-          '<div class="card cp mb4">'+
-            '<div class="fw6 mb1">Recipient</div>'+
-            '<div class="f12 text3 mb3">Search by name, email or job title — or type any email address directly</div>'+
-            '<div style="position:relative">'+
-              '<span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text3)">'+icon("search")+'</span>'+
-              '<input class="inp" style="padding-left:34px" id="email-search-inp" placeholder="Search leads or type email address..." value="'+htmlEsc(STATE.emailSearch||"")+'" oninput="emailSearchInput(this.value)" autocomplete="off"/>'+
-              searchResults+
-            '</div>'+
-            recipientInfo+
-          '</div>'+
-          '<div class="card cp mb4">'+
-            '<div class="fw6 mb3">Email template</div>'+
-            '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="email-subj" value="'+htmlEsc(STATE.emailSubj)+'" oninput="STATE.emailSubj=this.value"/></div>'+
-            '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:150px" id="email-body" oninput="STATE.emailBody=this.value">'+htmlEsc(STATE.emailBody)+'</textarea></div>'+
-            '<div class="flex gap1 flex-wrap mt2">'+varChips+'</div>'+
-          '</div>'+
-
-          '<div class="card cp mb4" style="border:1.5px solid rgba(124,58,237,.2);background:var(--purple-l)">'+
-            '<div class="flex jb aic mb2">'+
-              '<div>'+
-                '<div class="fw6" style="color:var(--purple)">✨ AI instructions</div>'+
-                '<div class="f12" style="color:var(--purple);opacity:.7;margin-top:2px">Tell the AI how to write this email — tone, angle, what to focus on</div>'+
-              '</div>'+
-              '<button class="btn btn-xs" style="background:rgba(124,58,237,.1);color:var(--purple);border:1px solid rgba(124,58,237,.2)" onclick="resetAIPrompt()">Reset to default</button>'+
-            '</div>'+
-            '<textarea class="txta w100" style="min-height:90px;font-size:13px;background:rgba(255,255,255,.7)" id="ai-prompt-inp" oninput="STATE.aiPrompt=this.value" placeholder="e.g. Write a very short 3-line email...">'+htmlEsc(STATE.aiPrompt||STATE.aiPromptDefault)+'</textarea>'+
-            '<div class="flex gap2 mt2" style="flex-wrap:wrap">'+
-              ['Be very concise (3-4 lines only)','Formal and professional tone','Casual and friendly tone','Mention we specialise in their industry','Focus on urgency — role needs to be filled fast','Ask for referral if they are not the right contact'].map(function(s){
-                return '<span onclick="appendPrompt(\''+s+'\')" style="font-size:11px;padding:3px 8px;background:rgba(124,58,237,.1);color:var(--purple);border-radius:10px;cursor:pointer;border:1px solid rgba(124,58,237,.15)" onmouseenter="this.style.background=\'rgba(124,58,237,.2)\'" onmouseleave="this.style.background=\'rgba(124,58,237,.1)\'">+ '+s+'</span>';
-              }).join("")+
-            '</div>'+
-          '</div>'+
-
-          '<div class="flex gap2 aic flex-wrap">'+
-            '<button class="btn btn-outline" onclick="generateAI()" id="gen-btn" '+(hasRecipient?'':' disabled style="opacity:.5"')+' style="background:var(--purple-l);color:var(--purple);border-color:rgba(124,58,237,.3);min-width:160px">'+
-              (STATE.aiGenerating?
-                '<span style="display:inline-flex;align-items:center;gap:7px"><span style="width:13px;height:13px;border:2px solid rgba(124,58,237,.3);border-top-color:var(--purple);border-radius:50%;animation:spin .7s linear infinite;display:inline-block"></span>Generating...</span>'
-                :'✨ Generate with AI')+
-            '</button>'+
-            '<div class="flex gap1">'+
-              '<button class="fc'+(u.plt==="Gmail"?" on":"")+'" onclick="setPlatform(\'Gmail\')">Gmail</button>'+
-              '<button class="fc'+(u.plt==="Outlook"?" on":"")+'" onclick="setPlatform(\'Outlook\')">Outlook</button>'+
-            '</div>'+
-            (hasRecipient?
-              '<button class="btn btn-outline btn-sm" style="color:var(--accent)" onclick="openEmailPreviewModal()">'+
-                '👁 Preview email'+
-              '</button>':"")+
-            '<button class="btn btn-primary" onclick="sendEmail()" '+(hasRecipient?'':' disabled style="opacity:.5;cursor:not-allowed"')+'>'+ico("send",13)+'Send</button>'+
-          '</div>'+
-
-        '</div>'+
-
-      '</div>':"")+
-
-    (STATE.emailTab==="sent"?
-      (myEmails.length?sentList:'<div class="empty"><div class="empty-ico">'+ico("email",22)+'</div><div class="empty-t">No emails sent yet</div></div>'):"")+
-
-    (STATE.emailTab==="templates"?
-      '<div class="card cp">'+
-        '<div class="fw6 mb1">Default email template</div>'+
-        '<div class="f12 text3 mb2">Click a variable to insert it at the cursor position in the body:</div>'+
-        '<div class="flex gap1 flex-wrap mb3">'+varChips+'</div>'+
-        '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="tmpl-subj" value="'+htmlEsc(STATE.emailSubj)+'" oninput="STATE.emailSubj=this.value"/></div>'+
-        '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:200px" id="tmpl-body" oninput="STATE.emailBody=this.value">'+htmlEsc(STATE.emailBody)+'</textarea></div>'+
-        '<button class="btn btn-primary mt3" onclick="showToast(\'Template saved\',\'success\')">Save template</button>'+
-      '</div>':"")+
-
+    (STATE.emailTab==='pending'?pendingHtml:'')+
+    (STATE.emailTab==='sent'?sentHtml:'')+
+    (STATE.emailTab==='templates'?tmplHtml:'')+
   '</div>';
 }
 
@@ -2994,7 +2890,7 @@ function renderImportProgressModal(done,total,logLines,finished,summary){
         (logLines.length?logLines.map(function(l){return '<div style="padding:2px 0">'+htmlEsc(l)+'</div>';}).join(''):'<div style="color:var(--text3)">Starting\u2026</div>')+
       '</div>'+
     '</div>'+
-    (finished?'<div class="mf"><button class="btn btn-primary" onclick="closeModal();refreshJobs();">Done</button></div>':'')+
+    (finished?'<div class="mf"><button class="btn btn-primary" onclick="closeModal();refreshJobs().then(function(){if(STATE.user&&(STATE.user.role===\'bd\'||STATE.user.role===\'bd_lead\')){var myJobIds=STATE.jobs.filter(function(j){return j.assigned_to_bd===STATE.user.id&&j.stage===\'Unassigned\';}).map(function(j){return j.id;});if(myJobIds.length)apiPost(\'/emails/generate\',{job_ids:myJobIds}).then(function(r){showToast(r.generated+\' emails generated\',\'success\');apiGet(\'/emails?status=pending\').then(function(d){STATE.pendingEmails=d;render();});});}});">Done</button></div>':'')+
   '</div>';
 }
 
@@ -3129,6 +3025,54 @@ window.doImportProcess=function(toProcess,dupEmailMap){
   processNext(0);
 };
 
+
+// ════════════════════════════════════════════════
+// EMAIL ACTIONS — Drop F
+// ════════════════════════════════════════════════
+window.previewPendingEmail=function(id){STATE.previewPendingId=id;render();};
+
+window.openSendAllConfirm=function(){
+  var pending=STATE.pendingEmails||[];
+  if(!pending.length){showToast('No pending emails','warning');return;}
+  var now=new Date();
+  var dateStr=now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  var timeStr=now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  STATE.modal='<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Confirm: Send all pending</div></div>'+
+    '<div class="mb_">'+
+      '<div style="padding:16px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:12px">'+
+        '<div style="font-size:22px;font-weight:700;color:var(--accent);margin-bottom:4px">'+pending.length+' emails</div>'+
+        '<div style="font-size:14px;color:var(--text2)">→ '+pending.length+' recipients</div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:6px">'+dateStr+' · '+timeStr+'</div>'+
+      '</div>'+
+      '<div style="font-size:13px;color:var(--text2)">Emails will be marked as <strong>queued</strong> and sent automatically once your Outlook account is connected. Each email is unique — generated by AI for each contact.</div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="submitSendAll()">Confirm & Queue</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+
+window.submitSendAll=function(){
+  closeModal();
+  apiPost('/emails/queue-all',{}).then(function(res){
+    showToast(res.queued+' emails queued for sending','success');
+    STATE.pendingEmails=[];
+    return apiGet('/emails?status=queued').then(function(d){STATE.emails=d;render();});
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.saveEmailEdit=function(id){
+  var el=document.getElementById('edit-email-body-'+id);
+  if(!el)return;
+  apiPut='/emails/'+id; // using apiPatch
+  apiFetch('PATCH','/emails/'+id,{body:el.value}).then(function(updated){
+    STATE.pendingEmails=(STATE.pendingEmails||[]).map(function(e){return e.id===id?Object.assign({},e,{body:updated.body}):e;});
+    showToast('Email updated','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
 
 // ════════════════════════════════════════════════
 // ASSIGN LEADS — RA Team Lead bulk assign UI (Drop E)
@@ -3276,7 +3220,11 @@ window.submitBulkAssign=function(){
   apiPost('/jobs/bulk-assign',{job_ids:selIds,assigned_to_bd:bdId}).then(function(res){
     showToast(res.assigned+' leads assigned to '+res.bd_name,'success');
     STATE.assignSel={};STATE.assignTargetBD='';
-    return refreshJobs();
+    // Generate AI emails in background
+    return apiPost('/emails/generate',{job_ids:selIds}).then(function(genRes){
+      showToast('Generating '+genRes.generated+' emails for '+res.bd_name+'...','info');
+      return refreshJobs();
+    });
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
@@ -3316,11 +3264,20 @@ function flattenContacts(jobs){var out=[];jobs.forEach(function(j){(j.contacts||
 
 function loadAppData(){
   STATE.loading=true;render();
-  return Promise.all([apiGet('/users'),apiGet('/jobs'),apiGet('/companies')]).then(function(r){
+  var calls=[apiGet('/users'),apiGet('/jobs'),apiGet('/companies')];
+  var u=STATE.user;
+  var isBD=(u&&(u.role==='bd'||u.role==='bd_lead'||u.role==='admin'||u.role==='ra_lead'));
+  if(isBD)calls.push(apiGet('/emails?status=pending'));
+  if(isBD)calls.push(apiGet('/emails?status=queued'));
+  return Promise.all(calls).then(function(r){
     STATE.users=r[0].map(normaliseUser);
     STATE.jobs=r[1].map(normaliseJob);
     STATE.contacts=flattenContacts(r[1]);
     STATE.companies=r[2].map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});
+    if(isBD){
+      STATE.pendingEmails=(r[3]||[]);
+      STATE.emails=(r[4]||[]);
+    }
     STATE.loading=false;render();
   }).catch(function(err){
     STATE.loading=false;STATE.user=null;STATE.token=null;
