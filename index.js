@@ -37,7 +37,7 @@ async function logActivity(job_id, contact_id, user_id, action_type, description
 
 // ── HEALTH ─────────────────────────────────────────────────────
 app.use(express.static('public'));
-app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.2.0-dropF' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.3.0-dropG' }));
 
 // ══════════════════════════════════════════════════════════════
 // AUTH
@@ -185,7 +185,7 @@ app.delete('/companies/:id', auth, async (req, res) => {
 // JOBS  (the new "lead" = a job opening)
 // Scoping: admin sees all; bd/ra sees created_by=self OR assigned_to=self
 // ══════════════════════════════════════════════════════════════
-const JOB_SELECT = `*, company:companies(id,name,website,industry,location), contacts(*), creator:users!created_by(id,name,employee_id), assignee:users!assigned_to(id,name,employee_id), bd_assignee:users!assigned_to_bd(id,name,employee_id)`;
+const JOB_SELECT = `*, company:companies(id,name,website,industry,location), contacts(id,job_id,first_name,last_name,designation,email,phone,linkedin,is_primary,email_status,ooo_until,email_sent_at,email_platform), creator:users!created_by(id,name,employee_id), assignee:users!assigned_to(id,name,employee_id), bd_assignee:users!assigned_to_bd(id,name,employee_id)`;
 
 app.get('/jobs', auth, async (req, res) => {
   try {
@@ -258,7 +258,15 @@ app.put('/jobs/:id', auth, async (req, res) => {
     if (location !== undefined) updates.location = location;
     if (source !== undefined) updates.source = source;
     if (job_url !== undefined) updates.job_url = job_url;
-    if (stage !== undefined) updates.stage = stage;
+    if (stage !== undefined) {
+      const bdStages = ['Connected','Rejected','Future','In Discussion'];
+      const systemStages = ['Unassigned','Assigned'];
+      const canSetBDStage = ['admin','bd','bd_lead'].includes(req.user.role);
+      const canSetSystemStage = ['admin','ra_lead'].includes(req.user.role);
+      if (bdStages.includes(stage) && canSetBDStage) updates.stage = stage;
+      else if (systemStages.includes(stage) && canSetSystemStage) updates.stage = stage;
+      else if (req.user.role === 'admin') updates.stage = stage;
+    }
     if (notes !== undefined) updates.notes = notes;
     if (assigned_to !== undefined && ['admin','ra_lead'].includes(req.user.role)) updates.assigned_to = assigned_to || null;
     if (assigned_to_bd !== undefined && ['admin','ra_lead'].includes(req.user.role)) {
@@ -370,7 +378,7 @@ app.put('/contacts/:id', auth, async (req, res) => {
     const { data: existing } = await supabase.from('contacts').select('job_id').eq('id', req.params.id).single();
     if (!existing) return res.status(404).json({ error: 'Not found' });
     if (!(await canTouchJob(req, existing.job_id))) return res.status(403).json({ error: 'Forbidden' });
-    const fields = ['first_name','last_name','designation','email','phone','linkedin','is_primary'];
+    const fields = ['first_name','last_name','designation','email','phone','linkedin','is_primary','email_status','ooo_until'];
     const updates = { updated_at: new Date() };
     fields.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
     const { data, error } = await supabase.from('contacts').update(updates).eq('id', req.params.id).select().single();
@@ -386,6 +394,50 @@ app.delete('/contacts/:id', auth, async (req, res) => {
     if (!(await canTouchJob(req, existing.job_id))) return res.status(403).json({ error: 'Forbidden' });
     await supabase.from('contacts').delete().eq('id', req.params.id);
     res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+
+// ── Update contact email status (BD action) ──────────────
+app.patch('/contacts/:id/email-status', auth, async (req, res) => {
+  try {
+    const canChange = ['admin','bd','bd_lead'].includes(req.user.role);
+    if (!canChange) return res.status(403).json({ error: 'BD role required' });
+    const { email_status, ooo_until } = req.body;
+    const allowed = ['valid','invalid','deactivated','out_of_office'];
+    if (!allowed.includes(email_status)) return res.status(400).json({ error: 'Invalid status' });
+
+    const updates = { email_status, updated_at: new Date() };
+    if (email_status === 'out_of_office' && ooo_until) updates.ooo_until = ooo_until;
+    if (email_status !== 'out_of_office') updates.ooo_until = null;
+
+    const { data: contact, error } = await supabase.from('contacts')
+      .update(updates).eq('id', req.params.id).select('*, job:jobs(id,position,company:companies(name))').single();
+    if (error) throw error;
+
+    // Create OOO reminder automatically
+    if (email_status === 'out_of_office' && ooo_until) {
+      const contactName = `${contact.first_name || ''} ${contact.last_name || ''}`.trim();
+      const companyName = contact.job?.company?.name || '';
+      const position = contact.job?.position || '';
+      await supabase.from('reminders').insert({
+        job_id: contact.job_id,
+        user_id: req.user.id,
+        contact_name: contactName,
+        company_name: companyName,
+        email: contact.email,
+        return_date: ooo_until,
+        reminder_time: '09:00',
+        note: `${contactName} (${companyName} — ${position}) is back from Out of Office. Compose and send a follow-up email.`,
+        status: 'pending',
+        reminder_type: 'ooo_return',
+        contact_id: contact.id
+      });
+      await logActivity(contact.job_id, contact.id, req.user.id, 'ooo_set',
+        `${contactName} marked OOO until ${ooo_until}`, null, { ooo_until });
+    }
+
+    res.json(contact);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -550,7 +602,7 @@ app.patch('/emails/:id', auth, async (req, res) => {
 app.get('/reminders', auth, async (req, res) => {
   try {
     const { data, error } = await supabase.from('reminders')
-      .select(`*, job:jobs(id,position,stage,company_id)`)
+      .select(`*, job:jobs(id,position,stage,company_id,company:companies(name)), contact:contacts(id,first_name,last_name,email)`)
       .eq('user_id', req.user.id).order('return_date');
     if (error) throw error;
     res.json(data);
@@ -559,11 +611,12 @@ app.get('/reminders', auth, async (req, res) => {
 
 app.post('/reminders', auth, async (req, res) => {
   try {
-    const { job_id, contact_name, company_name, email, return_date, reminder_time, note } = req.body;
+    const { job_id, contact_name, company_name, email, return_date, reminder_time, note, contact_id, reminder_type } = req.body;
     if (!return_date) return res.status(400).json({ error: 'Return date required' });
     const { data, error } = await supabase.from('reminders').insert({
       job_id: job_id || null, user_id: req.user.id, contact_name, company_name, email,
-      return_date, reminder_time: reminder_time || '09:00', note, status: 'pending'
+      return_date, reminder_time: reminder_time || '09:00', note, status: 'pending',
+      contact_id: contact_id || null, reminder_type: reminder_type || null
     }).select().single();
     if (error) throw error;
     res.status(201).json(data);
