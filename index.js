@@ -37,7 +37,7 @@ async function logActivity(job_id, contact_id, user_id, action_type, description
 
 // ── HEALTH ─────────────────────────────────────────────────────
 app.use(express.static('public'));
-app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.0.0-jobs' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.1.0-dropeE' }));
 
 // ══════════════════════════════════════════════════════════════
 // AUTH
@@ -185,13 +185,22 @@ app.delete('/companies/:id', auth, async (req, res) => {
 // JOBS  (the new "lead" = a job opening)
 // Scoping: admin sees all; bd/ra sees created_by=self OR assigned_to=self
 // ══════════════════════════════════════════════════════════════
-const JOB_SELECT = `*, company:companies(id,name,website,industry,location), contacts(*), creator:users!created_by(id,name,employee_id), assignee:users!assigned_to(id,name,employee_id)`;
+const JOB_SELECT = `*, company:companies(id,name,website,industry,location), contacts(*), creator:users!created_by(id,name,employee_id), assignee:users!assigned_to(id,name,employee_id), bd_assignee:users!assigned_to_bd(id,name,employee_id)`;
 
 app.get('/jobs', auth, async (req, res) => {
   try {
     let query = supabase.from('jobs').select(JOB_SELECT).is('deleted_at', null).order('created_at', { ascending: false });
-    if (req.user.role !== 'admin') {
-      query = query.or(`created_by.eq.${req.user.id},assigned_to.eq.${req.user.id}`);
+    if (req.user.role === 'admin' || req.user.role === 'ra_lead') {
+      // admin and ra_lead see all jobs
+    } else if (req.user.role === 'bd_lead') {
+      // bd_lead sees all jobs assigned to any BD
+      query = query.not('assigned_to_bd', 'is', null);
+    } else if (req.user.role === 'bd') {
+      // BD sees only jobs assigned to them
+      query = query.eq('assigned_to_bd', req.user.id);
+    } else {
+      // RA sees only jobs they created
+      query = query.eq('created_by', req.user.id);
     }
     const { data, error } = await query;
     if (error) throw error;
@@ -212,13 +221,15 @@ app.get('/jobs/:id', auth, async (req, res) => {
 
 app.post('/jobs', auth, async (req, res) => {
   try {
-    const { company_id, position, location, source, job_url, stage, notes, assigned_to, contacts } = req.body;
+    const { company_id, position, location, source, job_url, stage, notes, assigned_to, is_duplicate, duplicate_of, contacts } = req.body;
     if (!company_id || !position) return res.status(400).json({ error: 'company_id and position required' });
     const { data: job, error } = await supabase.from('jobs').insert({
       company_id, position, location, source, job_url,
-      stage: stage || 'Active', notes: notes || '',
+      stage: stage || 'Unassigned', notes: notes || '',
       created_by: req.user.id,
-      assigned_to: (req.user.role === 'admin' ? (assigned_to || null) : null)
+      assigned_to: (['admin','ra_lead'].includes(req.user.role) ? (assigned_to || null) : null),
+      is_duplicate: is_duplicate || false,
+      duplicate_of: duplicate_of || null
     }).select().single();
     if (error) throw error;
 
@@ -239,10 +250,9 @@ app.put('/jobs/:id', auth, async (req, res) => {
   try {
     const { data: existing } = await supabase.from('jobs').select('*').eq('id', req.params.id).single();
     if (!existing) return res.status(404).json({ error: 'Not found' });
-    if (req.user.role !== 'admin' && existing.created_by !== req.user.id && existing.assigned_to !== req.user.id) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-    const { position, location, source, job_url, stage, notes, assigned_to } = req.body;
+    const canEdit = ['admin','ra_lead'].includes(req.user.role) || existing.created_by === req.user.id || existing.assigned_to === req.user.id || existing.assigned_to_bd === req.user.id;
+    if (!canEdit) return res.status(403).json({ error: 'Forbidden' });
+    const { position, location, source, job_url, stage, notes, assigned_to, assigned_to_bd } = req.body;
     const updates = { updated_at: new Date() };
     if (position !== undefined) updates.position = position;
     if (location !== undefined) updates.location = location;
@@ -250,7 +260,12 @@ app.put('/jobs/:id', auth, async (req, res) => {
     if (job_url !== undefined) updates.job_url = job_url;
     if (stage !== undefined) updates.stage = stage;
     if (notes !== undefined) updates.notes = notes;
-    if (assigned_to !== undefined && req.user.role === 'admin') updates.assigned_to = assigned_to || null;
+    if (assigned_to !== undefined && ['admin','ra_lead'].includes(req.user.role)) updates.assigned_to = assigned_to || null;
+    if (assigned_to_bd !== undefined && ['admin','ra_lead'].includes(req.user.role)) {
+      updates.assigned_to_bd = assigned_to_bd || null;
+      updates.assigned_at = assigned_to_bd ? new Date() : null;
+      if (assigned_to_bd && stage === undefined) updates.stage = 'Assigned';
+    }
 
     const { data, error } = await supabase.from('jobs').update(updates).eq('id', req.params.id).select().single();
     if (error) throw error;
@@ -274,6 +289,45 @@ app.delete('/jobs/:id', auth, async (req, res) => {
     await supabase.from('jobs').update({ deleted_at: new Date() }).eq('id', req.params.id);
     await logActivity(req.params.id, null, req.user.id, 'job_deleted', `Job deleted: ${existing.position}`, null, null);
     res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+
+// ══════════════════════════════════════════════════════════════
+// BULK ASSIGN — RA Team Lead assigns multiple jobs to a BD
+// ══════════════════════════════════════════════════════════════
+app.post('/jobs/bulk-assign', auth, async (req, res) => {
+  try {
+    if (!['admin','ra_lead'].includes(req.user.role)) return res.status(403).json({ error: 'ra_lead or admin only' });
+    const { job_ids, assigned_to_bd } = req.body;
+    if (!Array.isArray(job_ids) || !job_ids.length) return res.status(400).json({ error: 'job_ids array required' });
+    if (!assigned_to_bd) return res.status(400).json({ error: 'assigned_to_bd required' });
+    const { data: bd, error: bdErr } = await supabase.from('users').select('id,name,role').eq('id', assigned_to_bd).single();
+    if (bdErr || !bd) return res.status(400).json({ error: 'BD user not found' });
+    const now = new Date();
+    const { error } = await supabase.from('jobs')
+      .update({ assigned_to_bd, assigned_at: now, stage: 'Assigned', updated_at: now })
+      .in('id', job_ids);
+    if (error) throw error;
+    for (const jid of job_ids) {
+      await logActivity(jid, null, req.user.id, 'bulk_assigned', `Bulk assigned to BD: ${bd.name}`, null, { assigned_to_bd, bd_name: bd.name });
+    }
+    res.json({ success: true, assigned: job_ids.length, bd_name: bd.name });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Duplicate check endpoint ────────────────────────────────
+app.post('/jobs/check-duplicates', auth, async (req, res) => {
+  try {
+    const { emails } = req.body;
+    if (!Array.isArray(emails) || !emails.length) return res.json({ duplicates: [] });
+    const { data, error } = await supabase
+      .from('contacts')
+      .select('email, job_id, job:jobs(id,position,company_id,company:companies(name))')
+      .in('email', emails.map(e => e.toLowerCase().trim()))
+      .not('email', 'is', null);
+    if (error) throw error;
+    res.json({ duplicates: data || [] });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
