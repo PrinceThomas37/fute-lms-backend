@@ -37,7 +37,7 @@ async function logActivity(job_id, contact_id, user_id, action_type, description
 
 // ── HEALTH ─────────────────────────────────────────────────────
 app.use(express.static('public'));
-app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.5.0-dropN' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.6.0-raForm' }));
 
 // ══════════════════════════════════════════════════════════════
 // AUTH
@@ -144,6 +144,62 @@ app.get('/companies', auth, async (req, res) => {
     res.json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// ── Company search (typeahead for RA form) ──────────────────
+app.get('/companies/search', auth, async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.length < 2) return res.json([]);
+    const { data, error } = await supabase.from('companies')
+      .select('id,name,industry,location,website')
+      .ilike('name', `%${q}%`)
+      .is('deleted_at', null)
+      .limit(8);
+    if (error) throw error;
+    // For each company, get job count and assigned BD
+    const result = await Promise.all((data || []).map(async co => {
+      const { count } = await supabase.from('jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('company_id', co.id).is('deleted_at', null);
+      // Find most recent BD assigned to a job in this company
+      const { data: jobs } = await supabase.from('jobs')
+        .select('assigned_to_bd, bd:users!assigned_to_bd(name)')
+        .eq('company_id', co.id).is('deleted_at', null)
+        .not('assigned_to_bd', 'is', null).limit(1);
+      const bdName = jobs?.[0]?.bd?.name || null;
+      return { ...co, job_count: count || 0, bd_name: bdName };
+    }));
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Email duplicate check (real-time, 2-month window) ──────
+app.post('/contacts/check-email', auth, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.json({ duplicate: false });
+    const twoMonthsAgo = new Date();
+    twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
+    const { data, error } = await supabase.from('contacts')
+      .select('id,first_name,last_name,email,created_at,job:jobs(id,position,company:companies(name)),creator:jobs!inner(created_by,creator:users!created_by(name))')
+      .eq('email', email.toLowerCase().trim())
+      .gte('created_at', twoMonthsAgo.toISOString())
+      .limit(1);
+    if (error) throw error;
+    if (!data?.length) return res.json({ duplicate: false });
+    const c = data[0];
+    const daysSince = Math.floor((new Date() - new Date(c.created_at)) / 86400000);
+    res.json({
+      duplicate: true,
+      days_ago: daysSince,
+      contact_name: `${c.first_name} ${c.last_name}`.trim(),
+      company: c.job?.company?.name || '',
+      position: c.job?.position || '',
+      added_by: c.creator?.creator?.name || 'Unknown RA'
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 
 // ── Bulk create companies ──────────────────────────────────────
 app.post('/companies/bulk', auth, async (req, res) => {
@@ -513,6 +569,24 @@ app.get('/email-accounts/:id/send-count', auth, async (req, res) => {
 
 
 // ══════════════════════════════════════════════════════════════
+
+// ── Export leads as JSON (frontend builds XLSX) ─────────────
+app.get('/jobs/export', auth, async (req, res) => {
+  try {
+    if (!['admin','ra_lead'].includes(req.user.role)) return res.status(403).json({ error: 'RA Lead only' });
+    const { from, to, stage } = req.query;
+    let query = supabase.from('jobs')
+      .select('id,position,stage,location,industry,timezone,freshness,salary_range,job_created_date,job_opened_date,bdm_assigned_name,source,created_at,company:companies(name,website,industry,location),contacts(first_name,last_name,designation,email,phone,linkedin),creator:users!created_by(name)')
+      .is('deleted_at', null).order('created_at', { ascending: false });
+    if (from) query = query.gte('created_at', from);
+    if (to) query = query.lte('created_at', to + 'T23:59:59Z');
+    if (stage) query = query.eq('stage', stage);
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // SMART LEAD DISTRIBUTION — RA Team Lead assigns pool to a Manager
 // ══════════════════════════════════════════════════════════════
 
