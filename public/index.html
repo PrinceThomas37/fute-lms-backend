@@ -490,6 +490,8 @@ var STATE = {
   _assignManagerId: null,
   _assignRatio: null,
   todaySummary: null,
+  insightsData: null,
+  insightsSelectedRA: null,
   assignFilter: {ra:"",dup:"all"},
   pendingEmails: [],
   previewPendingId: null,
@@ -714,7 +716,7 @@ function renderApp(){
     {id:"dashboard",lbl:"Dashboard",ic:"dashboard"},
     {id:"leads",lbl:"Leads",ic:"leads",badge:todayCnt},
     ...(u.role!=="ra"?[{id:"email",lbl:"Email",ic:"email"}]:[]),
-    {id:"reminders",lbl:"Reminders",ic:"star",badge:STATE.reminders.filter(function(r){return r.user_id===u.id&&r.status==="pending"}).length||null},
+    ...(u.role==='ra'?[{id:"insights",lbl:"Insights",ic:"dashboard"}]:[{id:"reminders",lbl:"Reminders",ic:"star",badge:STATE.reminders.filter(function(r){return r.user_id===u.id&&r.status==="pending"}).length||null}]),
     {id:"profile",lbl:"My Profile",ic:"profile"}
   ];
   if(u.role==="admin"||u.role==="ra_lead"||u.role==="bd_lead")navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
@@ -729,7 +731,7 @@ function renderApp(){
 
   var switchers=""; // removed — use team list to switch views
 
-  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",emailaccounts:"Email Accounts",profile:"My Profile",reminders:"Reminders"};
+  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",emailaccounts:"Email Accounts",insights:"Insights",profile:"My Profile",reminders:"Reminders"};
   var viewingName=STATE.viewingUser&&STATE.viewingUser.id!==u.id?" · Viewing: "+STATE.viewingUser.name:"";
 
   return '<div id="sidebar">'+
@@ -769,6 +771,7 @@ function renderPage(){
   if(STATE.page==="leads"){var html=renderJobs();setTimeout(bindJobsControls,0);return html;}
   if(STATE.page==="assign"){return renderAssignLeads();}
   if(STATE.page==="emailaccounts"){return renderEmailAccounts();}
+  if(STATE.page==="insights"){if(STATE.user&&STATE.user.role==='ra'&&!STATE.insightsData){loadMyInsights();}return renderInsights();}
   if(STATE.page==="email")return renderEmail();
   if(STATE.page==="reminders")return renderReminders();
   if(STATE.page==="admin")return renderAdmin();
@@ -1191,6 +1194,7 @@ function renderJobDetailModal(){
         (canEdit?'<button onclick="openAddContact(\''+j.id+'\')" style="background:var(--accent);color:#fff;border:0;padding:6px 12px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer">+ Add Contact</button>':'')+
       '</div>'+
       contactRows+
+      renderResearchSection(j, u.role==='ra'&&j.created_by===u.id)+
       (canEdit?'<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border2);display:flex;justify-content:flex-end;gap:8px"><button onclick="deleteJob(\''+j.id+'\')" style="background:transparent;color:#ef4444;border:1px solid #ef4444;padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer">Delete Job</button></div>':'')+
     '</div>'+
   '</div>';
@@ -3783,6 +3787,284 @@ window.submitExportLeads=function(){
 };
 
 // ════════════════════════════════════════════════
+// INSIGHTS TAB — RA activity + RA Lead team view
+// ════════════════════════════════════════════════
+function renderInsights(){
+  var u=STATE.user;
+  var isRALead=(u.role==='ra_lead'||u.role==='admin');
+  var selectedRA=STATE.insightsSelectedRA;
+  var data=STATE.insightsData;
+
+  // If RA Lead and no RA selected, show RA list
+  if(isRALead&&!selectedRA){
+    var ras=STATE.users.filter(function(x){return x.role==='ra';});
+    var raCards=ras.map(function(ra){
+      // Quick stats from STATE.jobs (last 30 days approx)
+      var raJobs=STATE.jobs.filter(function(j){return j.created_by===ra.id;});
+      return '<div onclick="loadRAInsights(\''+ra.id+'\')" style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px 16px;display:flex;align-items:center;gap:14px;margin-bottom:10px;cursor:pointer;transition:background .1s" onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'\'">'+
+        av(ra,'36')+
+        '<div style="flex:1">'+
+          '<div style="font-weight:600;font-size:13.5px">'+htmlEsc(ra.name)+'</div>'+
+          '<div style="font-size:11.5px;color:var(--text3);margin-top:2px">'+htmlEsc(ra.email)+'</div>'+
+        '</div>'+
+        '<div style="text-align:center;min-width:60px">'+
+          '<div style="font-size:20px;font-weight:700;color:var(--accent)">'+raJobs.length+'</div>'+
+          '<div style="font-size:10px;color:var(--text3)">leads</div>'+
+        '</div>'+
+        '<div style="color:var(--text3);font-size:18px">\u203a</div>'+
+      '</div>';
+    }).join('');
+    return '<div class="page">'+
+      '<div class="ph"><div class="ptitle">Insights</div><div class="psub">Team activity \u00b7 '+ras.length+' RAs</div></div>'+
+      (raCards||'<div style="padding:40px;text-align:center;color:var(--text3)">No RAs in the system yet.</div>')+
+    '</div>';
+  }
+
+  // Show individual RA insights
+  var raUser=isRALead?STATE.users.find(function(x){return x.id===selectedRA;}):u;
+  var d=data||{total_month:0,total_week:0,total_today:0,duplicates:0,last_7_days:{},by_industry:{},by_timezone:{},by_freshness:{},by_stage:{}};
+
+  // Bar chart for last 7 days
+  var l7=d.last_7_days||{};
+  var l7keys=Object.keys(l7);
+  var l7max=Math.max(1,Math.max.apply(null,l7keys.map(function(k){return l7[k];})));
+  var barChart=l7keys.map(function(k){
+    var val=l7[k];
+    var pct=Math.round(val/l7max*100);
+    var day=new Date(k).toLocaleDateString('en-US',{weekday:'short'});
+    return '<div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1">'+
+      '<div style="font-size:11px;font-weight:600;color:var(--accent)">'+val+'</div>'+
+      '<div style="width:100%;background:var(--border);border-radius:4px;height:48px;display:flex;align-items:flex-end">'+
+        '<div style="width:100%;background:var(--accent);border-radius:4px;height:'+pct+'%;min-height:'+(val>0?'4px':'0')+'"></div>'+
+      '</div>'+
+      '<div style="font-size:10px;color:var(--text3)">'+day+'</div>'+
+    '</div>';
+  }).join('');
+
+  function categoryRows(obj){
+    var entries=Object.keys(obj).map(function(k){return{k:k,v:obj[k]};}).sort(function(a,b){return b.v-a.v;});
+    var total=entries.reduce(function(s,e){return s+e.v;},0)||1;
+    return entries.map(function(e){
+      var pct=Math.round(e.v/total*100);
+      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'+
+        '<div style="width:90px;font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+htmlEsc(e.k)+'</div>'+
+        '<div style="flex:1;background:var(--border);border-radius:99px;height:6px">'+
+          '<div style="width:'+pct+'%;background:var(--accent);border-radius:99px;height:6px"></div>'+
+        '</div>'+
+        '<div style="width:36px;text-align:right;font-size:12px;font-weight:600">'+e.v+'</div>'+
+      '</div>';
+    }).join('');
+  }
+
+  return '<div class="page">'+
+    '<div class="ph"><div class="flex aic gap3">'+
+      (isRALead?'<button onclick="STATE.insightsSelectedRA=null;STATE.insightsData=null;render()" style="background:transparent;border:0;color:var(--text3);font-size:22px;cursor:pointer">\u2190</button>':'')+
+      (raUser?av(raUser,'40'):'')+
+      '<div><div class="ptitle" style="margin:0">'+(raUser?htmlEsc(raUser.name):'My')+' Insights</div>'+
+        '<div class="psub" style="margin:0">Last 30 days activity</div></div>'+
+    '</div></div>'+
+
+    // ── Top stats ──
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:18px">'+
+      [['Today',d.total_today,'var(--accent)'],['This Week',d.total_week,'var(--teal)'],['This Month',d.total_month,'var(--purple)'],['Duplicates',d.duplicates,'var(--amber)']].map(function(s){
+        return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;text-align:center">'+
+          '<div style="font-size:28px;font-weight:700;color:'+s[2]+'">'+s[1]+'</div>'+
+          '<div style="font-size:12px;color:var(--text3);margin-top:3px">'+s[0]+'</div>'+
+        '</div>';
+      }).join('')+
+    '</div>'+
+
+    // ── Last 7 days bar chart ──
+    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:16px;margin-bottom:14px">'+
+      '<div style="font-weight:600;font-size:13px;margin-bottom:12px">Last 7 days</div>'+
+      '<div style="display:flex;gap:6px;align-items:flex-end">'+barChart+'</div>'+
+    '</div>'+
+
+    // ── Category breakdowns ──
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px">'+
+        '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Industry</div>'+
+        categoryRows(d.by_industry)+
+      '</div>'+
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px">'+
+        '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Timezone</div>'+
+        categoryRows(d.by_timezone)+
+      '</div>'+
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px">'+
+        '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Freshness</div>'+
+        categoryRows(d.by_freshness)+
+      '</div>'+
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px">'+
+        '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Stage</div>'+
+        categoryRows(d.by_stage)+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+
+window.loadRAInsights=function(raId){
+  STATE.insightsSelectedRA=raId;
+  STATE.insightsData=null;
+  render();
+  apiGet('/insights/ra/'+raId).then(function(d){
+    STATE.insightsData=d;render();
+  }).catch(function(e){showToast('Could not load insights: '+e.message,'error');});
+};
+
+// Auto-load insights for RA on page visit
+function loadMyInsights(){
+  var u=STATE.user;
+  if(u&&u.role==='ra'){
+    apiGet('/insights/ra/'+u.id).then(function(d){STATE.insightsData=d;render();}).catch(function(){});
+  }
+}
+
+// ════════════════════════════════════════════════
+// RESEARCH SECTION — inside job detail modal
+// ════════════════════════════════════════════════
+function renderResearchSection(j, canEdit){
+  var r=j.research||{};
+  var company=r.company||{};
+  var outreach=r.outreach||{};
+
+  var fundingOpts=['','Unknown','Pre-seed','Seed','Series A','Series B','Series C','Series D+','Public','Private/Bootstrapped'].map(function(v){
+    return '<option value="'+v+'"'+(company.funding===v?' selected':'')+'>'+( v||'— Select —')+'</option>';
+  }).join('');
+  var headcountOpts=['','1-10','11-50','51-200','201-500','500+'].map(function(v){
+    return '<option value="'+v+'"'+(company.headcount===v?' selected':'')+'>'+( v||'— Select —')+'</option>';
+  }).join('');
+  var hiringOpts=['','Low','Medium','High'].map(function(v){
+    return '<option value="'+v+'"'+(company.hiring_volume===v?' selected':'')+'>'+( v||'— Select —')+'</option>';
+  }).join('');
+
+  // Contact intel rows
+  var cs=(j.contacts||[]);
+  var contactIntel=cs.map(function(c,idx){
+    var ci=(r.contacts||[])[idx]||{};
+    var senOpts=['','Junior','Mid','Senior','Director','VP','C-Level'].map(function(v){
+      return '<option value="'+v+'"'+(ci.seniority===v?' selected':'')+'>'+( v||'— Select —')+'</option>';
+    }).join('');
+    var dmOpts=['','Yes','No','Unknown'].map(function(v){
+      return '<option value="'+v+'"'+(ci.decision_maker===v?' selected':'')+'>'+( v||'— Select —')+'</option>';
+    }).join('');
+    var timeOpts=['','Morning','Afternoon','Evening'].map(function(v){
+      return '<option value="'+v+'"'+(ci.best_time===v?' selected':'')+'>'+( v||'— Select —')+'</option>';
+    }).join('');
+    var cName=escHtml((c.first_name||'')+' '+(c.last_name||'')).trim();
+
+    if(!canEdit){
+      // Read-only for BD
+      if(!ci.seniority&&!ci.decision_maker&&!ci.best_time&&!ci.notes)return '';
+      return '<div style="padding:8px 0;border-bottom:1px solid var(--border)">'+
+        '<div style="font-weight:500;font-size:12px;margin-bottom:4px">'+cName+'</div>'+
+        '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--text2)">'+
+          (ci.seniority?'<span>\ud83d\udcbc '+htmlEsc(ci.seniority)+'</span>':'')+
+          (ci.decision_maker?'<span>\ud83d\udd11 Decision maker: '+htmlEsc(ci.decision_maker)+'</span>':'')+
+          (ci.best_time?'<span>\u23f0 Best time: '+htmlEsc(ci.best_time)+'</span>':'')+
+          (ci.notes?'<div style="width:100%;margin-top:3px;color:var(--text3)">'+htmlEsc(ci.notes)+'</div>':'')+
+        '</div>'+
+      '</div>';
+    }
+
+    return '<div style="padding:10px 0;border-bottom:1px solid var(--border)">'+
+      '<div style="font-weight:500;font-size:12px;margin-bottom:8px;color:var(--text2)">'+cName+'</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:6px">'+
+        '<div><label style="font-size:10px;color:var(--text3)">Seniority</label><select class="sel" style="font-size:12px;padding:5px 8px" onchange="researchUpdateContact(\''+j.id+'\','+idx+',\'seniority\',this.value)">'+senOpts+'</select></div>'+
+        '<div><label style="font-size:10px;color:var(--text3)">Decision maker?</label><select class="sel" style="font-size:12px;padding:5px 8px" onchange="researchUpdateContact(\''+j.id+'\','+idx+',\'decision_maker\',this.value)">'+dmOpts+'</select></div>'+
+        '<div><label style="font-size:10px;color:var(--text3)">Best time</label><select class="sel" style="font-size:12px;padding:5px 8px" onchange="researchUpdateContact(\''+j.id+'\','+idx+',\'best_time\',this.value)">'+timeOpts+'</select></div>'+
+      '</div>'+
+      '<input class="inp" style="font-size:12px" placeholder="Notes about this contact..." value="'+htmlEsc(ci.notes||'')+'" oninput="researchUpdateContact(\''+j.id+'\','+idx+',\'notes\',this.value)"/>'+
+    '</div>';
+  }).join('');
+
+  if(!canEdit){
+    // BD read-only view
+    var hasData=company.funding||company.headcount||company.notes||company.tech_stack||outreach.angle||outreach.avoid;
+    if(!hasData&&!contactIntel.trim())return '';
+    return '<div style="background:var(--bg);border:1px solid var(--border2);border-radius:var(--r2);padding:14px;margin-top:14px">'+
+      '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">\ud83d\udd2c RA Research</div>'+
+      (company.funding||company.headcount||company.hiring_volume||company.tech_stack||company.notes?
+        '<div style="margin-bottom:10px">'+
+          '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Company</div>'+
+          '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--text2)">'+
+            (company.funding?'<span style="background:var(--accent-l);color:var(--accent);padding:2px 8px;border-radius:6px">'+htmlEsc(company.funding)+'</span>':'')+
+            (company.headcount?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">'+htmlEsc(company.headcount)+' employees</span>':'')+
+            (company.hiring_volume?'<span style="background:var(--green-l);color:var(--green);padding:2px 8px;border-radius:6px">Hiring: '+htmlEsc(company.hiring_volume)+'</span>':'')+
+          '</div>'+
+          (company.tech_stack?'<div style="font-size:12px;color:var(--text2);margin-top:6px">Tech: '+htmlEsc(company.tech_stack)+'</div>':'')+
+          (company.notes?'<div style="font-size:12px;color:var(--text2);margin-top:6px;padding:8px;background:var(--card);border-radius:var(--r)">'+htmlEsc(company.notes)+'</div>':'')+
+        '</div>':'')+
+      (contactIntel?'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Contacts</div>'+contactIntel+'</div>':'')+
+      (outreach.angle||outreach.avoid?
+        '<div>'+
+          '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Outreach notes</div>'+
+          (outreach.angle?'<div style="font-size:12px;color:var(--text2);margin-bottom:4px">\ud83c\udfaf Angle: '+htmlEsc(outreach.angle)+'</div>':'')+
+          (outreach.avoid?'<div style="font-size:12px;color:var(--red)">\u26d4 Avoid: '+htmlEsc(outreach.avoid)+'</div>':'')+
+        '</div>':'')+
+    '</div>';
+  }
+
+  // RA editable view
+  return '<div style="border-top:2px solid var(--border2);margin-top:18px;padding-top:16px">'+
+    '<div style="font-weight:700;font-size:13px;margin-bottom:14px">\ud83d\udd2c Research Notes</div>'+
+
+    '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Company Intel</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'+
+      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Funding stage</label><select class="sel" style="font-size:12px" id="res-funding" onchange="researchUpdate(\''+j.id+'\',\'company\',\'funding\',this.value)">'+fundingOpts+'</select></div>'+
+      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Headcount</label><select class="sel" style="font-size:12px" id="res-headcount" onchange="researchUpdate(\''+j.id+'\',\'company\',\'headcount\',this.value)">'+headcountOpts+'</select></div>'+
+      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Hiring volume</label><select class="sel" style="font-size:12px" id="res-hiring" onchange="researchUpdate(\''+j.id+'\',\'company\',\'hiring_volume\',this.value)">'+hiringOpts+'</select></div>'+
+    '</div>'+
+    '<div class="fgrp mb3"><label class="flbl">Tech stack (comma separated)</label><input class="inp" style="font-size:12px" id="res-tech" placeholder="e.g. Salesforce, SAP, Oracle" value="'+htmlEsc(company.tech_stack||'')+'" oninput="researchUpdate(\''+j.id+'\',\'company\',\'tech_stack\',this.value)"/></div>'+
+    '<div class="fgrp mb4"><label class="flbl">Company notes / recent news</label><textarea class="txta w100" style="min-height:60px;font-size:12px" id="res-notes" oninput="researchUpdate(\''+j.id+'\',\'company\',\'notes\',this.value)" placeholder="Any relevant company news, context...">'+htmlEsc(company.notes||'')+'</textarea></div>'+
+
+    (cs.length?
+      '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Contact Intel</div>'+
+      contactIntel:'') +
+
+    '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 10px">Outreach Notes</div>'+
+    '<div class="fgrp mb2"><label class="flbl">Recommended angle</label><input class="inp" style="font-size:12px" placeholder="What angle to use in outreach..." value="'+htmlEsc(outreach.angle||'')+'" oninput="researchUpdate(\''+j.id+'\',\'outreach\',\'angle\',this.value)"/></div>'+
+    '<div class="fgrp mb3"><label class="flbl">What to avoid</label><input class="inp" style="font-size:12px" placeholder="Topics or approaches to avoid..." value="'+htmlEsc(outreach.avoid||'')+'" oninput="researchUpdate(\''+j.id+'\',\'outreach\',\'avoid\',this.value)"/></div>'+
+
+    '<div style="display:flex;justify-content:flex-end;padding-top:10px;border-top:1px solid var(--border2)">'+
+      '<button onclick="saveResearch(\''+j.id+'\')" class="btn btn-primary btn-sm">\ud83d\udcbe Save research</button>'+
+    '</div>'+
+  '</div>';
+}
+
+// ── Research state management ──────────────────
+if(!window._researchDraft)window._researchDraft={};
+
+window.researchUpdate=function(jobId,section,field,val){
+  if(!window._researchDraft[jobId])window._researchDraft[jobId]=JSON.parse(JSON.stringify(STATE.jobs.find(function(j){return j.id===jobId;})||{}).research||'{}');
+  if(!window._researchDraft[jobId][section])window._researchDraft[jobId][section]={};
+  window._researchDraft[jobId][section][field]=val;
+};
+
+window.researchUpdateContact=function(jobId,idx,field,val){
+  if(!window._researchDraft[jobId])window._researchDraft[jobId]={};
+  if(!window._researchDraft[jobId].contacts)window._researchDraft[jobId].contacts=[];
+  while(window._researchDraft[jobId].contacts.length<=idx)window._researchDraft[jobId].contacts.push({});
+  window._researchDraft[jobId].contacts[idx][field]=val;
+};
+
+window.saveResearch=function(jobId){
+  var draft=window._researchDraft[jobId];
+  if(!draft){showToast('Nothing to save','warning');return;}
+  // Merge with existing research
+  var j=STATE.jobs.find(function(x){return x.id===jobId;})||{};
+  var merged=Object.assign({},j.research||{},draft);
+  if(draft.company)merged.company=Object.assign({},( j.research&&j.research.company)||{},draft.company);
+  if(draft.outreach)merged.outreach=Object.assign({},(j.research&&j.research.outreach)||{},draft.outreach);
+  if(draft.contacts)merged.contacts=draft.contacts;
+  apiFetch('PATCH','/jobs/'+jobId+'/research',{research:merged}).then(function(res){
+    // Update STATE
+    STATE.jobs=STATE.jobs.map(function(x){return x.id===jobId?Object.assign({},x,{research:merged}):x;});
+    delete window._researchDraft[jobId];
+    showToast('Research saved','success');
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+// ════════════════════════════════════════════════
 // DROP G — Email status + OOO + Reminder actions
 // ════════════════════════════════════════════════
 window.changeEmailStatus=function(cid, newStatus, email, contactName){
@@ -4546,6 +4828,7 @@ function normaliseJob(j){
     timezone:j.timezone||'',freshness:j.freshness||'',industry:j.industry||'',
     bdm_assigned_name:j.bdm_assigned_name||'',
     sending_email_id:j.sending_email_id||null,sending_email:sa.email_address||'',sending_display:sa.display_name||'',
+    research:j.research||null,
     created_date:j.created_date,created_at:j.created_at};
 }
 function flattenContacts(jobs){var out=[];jobs.forEach(function(j){(j.contacts||[]).forEach(function(c){out.push({id:c.id,job_id:c.job_id,first_name:c.first_name,last_name:c.last_name||'',designation:c.designation||'',email:c.email||'',phone:c.phone||'',linkedin:c.linkedin||'',is_primary:!!c.is_primary,email_status:c.email_status||'valid',ooo_until:c.ooo_until||null});});});return out;}
