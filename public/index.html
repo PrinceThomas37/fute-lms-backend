@@ -3166,44 +3166,32 @@ function renderDuplicateWarningModal(groups,dupEmailMap){
 window.doImportProcess=function(toProcess,dupEmailMap){
   STATE.modal=null;
   var total=toProcess.length;
-  var done=0;var succeeded=0;var failed=0;
-  var logLines=[];var failDetails=[];
+  STATE.modal=renderImportProgressModal(0,total,['Preparing batch\u2026 '+total+' jobs'],false,'');
+  render();
 
-  function updateProgress(fin,summary){
-    STATE.modal=renderImportProgressModal(done,total,logLines,fin,summary);
-    render();
-    setTimeout(function(){var el=document.getElementById('import-log');if(el)el.scrollTop=el.scrollHeight;},20);
-  }
-  updateProgress(false,'');
-
-  var coCache={};
-  STATE.companies.forEach(function(c){coCache[c.name.toLowerCase()]=c.id;});
-
-  function ensureCompany(g){
+  // ── Step 1: resolve all companies in bulk ──
+  var newCoNames={};
+  toProcess.forEach(function(g){
     var key=g.coName.toLowerCase();
-    if(coCache[key])return Promise.resolve(coCache[key]);
-    var payload={name:g.coName};
-    if(g.website)payload.website=g.website;
-    if(g.industry)payload.industry=g.industry;
-    if(g.location)payload.location=g.location;
-    return apiPost('/companies',payload).then(function(co){
-      coCache[key]=co.id;
-      STATE.companies.push({id:co.id,name:co.name,web:co.website||'',ind:co.industry||'',loc:co.location||''});
-      return co.id;
-    });
-  }
-
-  function processNext(idx){
-    if(idx>=toProcess.length){
-      var summary=succeeded+' job'+(succeeded!==1?'s':'')+' imported'+(failed>0?', '+failed+' failed \u2014 see log.':'. Tap Done to refresh.');
-      if(failed>0){logLines.push('');logLines.push('\u2500\u2500 Failed \u2500\u2500');failDetails.forEach(function(f){logLines.push('\u2717 '+f);});}
-      updateProgress(true,summary);
-      return;
+    if(!STATE.companies.find(function(c){return c.name.toLowerCase()===key;})){
+      newCoNames[key]=g;
     }
-    var g=toProcess[idx];
-    var groupIsDup=g.contacts.some(function(c){return c.email&&dupEmailMap[c.email.toLowerCase().trim()];});
-    ensureCompany(g).then(function(coId){
-      var payload={company_id:coId,position:g.position||'(unknown)',stage:'Unassigned',contacts:g.contacts,is_duplicate:groupIsDup};
+  });
+  var newCoList=Object.values(newCoNames);
+
+  function buildAndSend(coCache){
+    // Build job payloads
+    var jobPayloads=toProcess.map(function(g){
+      var key=g.coName.toLowerCase();
+      var coId=coCache[key];
+      if(!coId)return null; // skip if company resolution failed
+      var groupIsDup=g.contacts.some(function(c){return c.email&&dupEmailMap[c.email.toLowerCase().trim()];});
+      var payload={
+        company_id:coId,
+        position:g.position||'(unknown)',
+        contacts:g.contacts,
+        is_duplicate:groupIsDup
+      };
       if(g.location)payload.location=g.location;
       if(g.source)payload.source=g.source;
       if(g.industry)payload.industry=g.industry;
@@ -3211,23 +3199,71 @@ window.doImportProcess=function(toProcess,dupEmailMap){
       if(g.jobCreatedDate)payload.job_created_date=parseExcelDateToISO(g.jobCreatedDate);
       if(g.jobOpenedDate)payload.job_opened_date=parseExcelDateToISO(g.jobOpenedDate);
       if(g.bdmAssigned)payload.bdm_assigned_name=g.bdmAssigned;
-      return apiPost('/jobs',payload);
-    }).then(function(){
-      succeeded++;
-      logLines.push('\u2713 '+g.coName+' \u2014 '+g.position+' ('+g.contacts.length+' contact'+(g.contacts.length!==1?'s':'')+')'+(groupIsDup?' [DUP]':''));
+      return payload;
+    }).filter(Boolean);
+
+    if(!jobPayloads.length){
+      STATE.modal=renderImportProgressModal(total,total,['No valid jobs to import.'],true,'0 jobs imported.');
+      render();return;
+    }
+
+    STATE.modal=renderImportProgressModal(0,total,['Uploading '+jobPayloads.length+' jobs in one batch\u2026'],false,'');
+    render();
+
+    // Single bulk API call
+    apiPost('/jobs/bulk',{jobs:jobPayloads}).then(function(res){
+      var summary=res.imported+' job'+(res.imported!==1?'s':'')+' imported, '+res.contacts+' contacts created.';
+      var logs=[
+        '\u2713 Batch complete',
+        'Jobs imported: '+res.imported,
+        'Contacts created: '+res.contacts,
+        (Object.keys(dupEmailMap).length?' Flagged as duplicates: '+toProcess.filter(function(g){return g.contacts.some(function(c){return c.email&&dupEmailMap[c.email.toLowerCase().trim()];});}).length:'')
+      ].filter(Boolean);
+      STATE.modal=renderImportProgressModal(res.imported,res.imported,logs,true,summary);
+      render();
     }).catch(function(err){
-      failed++;
-      var msg=g.coName+' \u2014 '+g.position+': '+err.message;
-      logLines.push('\u2717 '+msg);
-      failDetails.push(msg);
-    }).then(function(){
-      done++;
-      updateProgress(false,'');
-      setTimeout(function(){processNext(idx+1);},80);
+      var logs=['\u2717 Batch failed: '+err.message,'Check your data and try again.'];
+      STATE.modal=renderImportProgressModal(0,total,logs,true,'Import failed: '+err.message);
+      render();
     });
   }
-  processNext(0);
+
+  // Build company cache from existing
+  var coCache={};
+  STATE.companies.forEach(function(c){coCache[c.name.toLowerCase()]=c.id;});
+
+  if(newCoList.length){
+    STATE.modal=renderImportProgressModal(0,total,['Creating '+newCoList.length+' new companies\u2026'],false,'');
+    render();
+    // Bulk create new companies
+    var coPayloads=newCoList.map(function(g){
+      var p={name:g.coName};
+      if(g.website)p.website=g.website;
+      if(g.industry)p.industry=g.industry;
+      if(g.location)p.location=g.location;
+      return p;
+    });
+    apiPost('/companies/bulk',{companies:coPayloads}).then(function(created){
+      created.forEach(function(c){
+        coCache[c.name.toLowerCase()]=c.id;
+        STATE.companies.push({id:c.id,name:c.name,web:'',ind:'',loc:''});
+      });
+      buildAndSend(coCache);
+    }).catch(function(err){
+      // If bulk company creation fails, fall back to individual
+      var promises=coPayloads.map(function(p){
+        return apiPost('/companies',p).then(function(c){
+          coCache[c.name.toLowerCase()]=c.id;
+          STATE.companies.push({id:c.id,name:c.name,web:'',ind:'',loc:''});
+        }).catch(function(){});
+      });
+      Promise.all(promises).then(function(){buildAndSend(coCache);});
+    });
+  } else {
+    buildAndSend(coCache);
+  }
 };
+
 
 
 // ════════════════════════════════════════════════
