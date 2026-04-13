@@ -37,7 +37,7 @@ async function logActivity(job_id, contact_id, user_id, action_type, description
 
 // ── HEALTH ─────────────────────────────────────────────────────
 app.use(express.static('public'));
-app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.6.0-raForm' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.7.0-insights' }));
 
 // ══════════════════════════════════════════════════════════════
 // AUTH
@@ -279,7 +279,7 @@ app.delete('/companies/:id', auth, async (req, res) => {
 // JOBS  (the new "lead" = a job opening)
 // Scoping: admin sees all; bd/ra sees created_by=self OR assigned_to=self
 // ══════════════════════════════════════════════════════════════
-const JOB_SELECT = `*, company:companies(id,name,website,industry,location), contacts(id,job_id,first_name,last_name,designation,email,phone,linkedin,is_primary,email_status,ooo_until,email_sent_at,email_platform), creator:users!created_by(id,name,employee_id), assignee:users!assigned_to(id,name,employee_id), bd_assignee:users!assigned_to_bd(id,name,employee_id), sending_account:email_accounts!sending_email_id(id,email_address,display_name)`;
+const JOB_SELECT = `*, research, company:companies(id,name,website,industry,location), contacts(id,job_id,first_name,last_name,designation,email,phone,linkedin,is_primary,email_status,ooo_until,email_sent_at,email_platform), creator:users!created_by(id,name,employee_id), assignee:users!assigned_to(id,name,employee_id), bd_assignee:users!assigned_to_bd(id,name,employee_id), sending_account:email_accounts!sending_email_id(id,email_address,display_name)`;
 
 app.get('/jobs', auth, async (req, res) => {
   try {
@@ -610,6 +610,64 @@ app.get('/jobs/export', auth, async (req, res) => {
     const { data, error } = await query;
     if (error) throw error;
     res.json(data || []);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════
+// RESEARCH — save research data for a job
+// ══════════════════════════════════════════════════════════════
+app.patch('/jobs/:id/research', auth, async (req, res) => {
+  try {
+    const { research } = req.body;
+    if (!research) return res.status(400).json({ error: 'research object required' });
+    const { data: job } = await supabase.from('jobs').select('created_by').eq('id', req.params.id).single();
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (!['admin','ra_lead'].includes(req.user.role) && job.created_by !== req.user.id) {
+      return res.status(403).json({ error: 'Only the RA who created this lead can add research' });
+    }
+    const { data, error } = await supabase.from('jobs')
+      .update({ research, updated_at: new Date() }).eq('id', req.params.id).select('id,research').single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════
+// INSIGHTS — RA activity stats
+// ══════════════════════════════════════════════════════════════
+app.get('/insights/ra/:userId', auth, async (req, res) => {
+  try {
+    const targetId = req.params.userId;
+    if (req.user.role === 'ra' && req.user.id !== targetId) return res.status(403).json({ error: 'Forbidden' });
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7);
+    const monthAgo = new Date(now); monthAgo.setDate(monthAgo.getDate() - 30);
+    const { data: jobs, error } = await supabase.from('jobs')
+      .select('id,stage,freshness,industry,timezone,is_duplicate,created_at,created_date')
+      .eq('created_by', targetId).is('deleted_at', null).gte('created_at', monthAgo.toISOString());
+    if (error) throw error;
+    const all = jobs || [];
+    const todayJobs = all.filter(j => j.created_date === todayStr);
+    const weekJobs = all.filter(j => new Date(j.created_at) >= weekAgo);
+    const last7 = {};
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now); d.setDate(d.getDate() - i);
+      const key = d.toISOString().split('T')[0];
+      last7[key] = all.filter(j => j.created_date === key).length;
+    }
+    function breakdown(arr, field) {
+      const map = {};
+      arr.forEach(j => { const v = j[field] || 'Unknown'; map[v] = (map[v] || 0) + 1; });
+      return map;
+    }
+    res.json({
+      total_month: all.length, total_week: weekJobs.length, total_today: todayJobs.length,
+      duplicates: all.filter(j => j.is_duplicate).length,
+      last_7_days: last7, by_industry: breakdown(all,'industry'),
+      by_timezone: breakdown(all,'timezone'), by_freshness: breakdown(all,'freshness'),
+      by_stage: breakdown(all,'stage')
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
