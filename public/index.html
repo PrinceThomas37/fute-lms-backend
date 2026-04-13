@@ -495,6 +495,7 @@ var STATE = {
   previewPendingId: null,
   emailAccounts: [],
   composeContactId: null,
+  composeCompanyId: null,
   showAIPanel: false,
   raForm: {
     coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',
@@ -1318,6 +1319,7 @@ function sendEmailToContact(cid){
   var c=STATE.contacts.find(function(x){return x.id===cid;}); if(!c) return;
   var j=jobById(c.job_id)||{};
   STATE.composeContactId=cid+'|'+(j.id||'');
+  STATE.composeCompanyId=j.company_id||null;
   STATE.manualEmail=null;STATE.genEmail=null;STATE.emailTab='compose';STATE.showAIPanel=false;
   STATE.page="email"; STATE.modal=null; showToast("Compose email to "+c.first_name,"info"); render();
 }
@@ -1443,60 +1445,84 @@ function renderEmail(){
 
   // ── COMPOSE TAB ──
   var myJobs=getMyJobs(u);
-  var contactOpts='<option value="">— Select contact —</option>'+myJobs.reduce(function(opts,j){
-    var cs=STATE.contacts.filter(function(c){return c.job_id===j.id&&c.email;});
-    if(!cs.length)return opts;
-    return opts+cs.map(function(c){
-      return '<option value="'+c.id+'|'+j.id+'">'+
-        escHtml((c.first_name||'')+' '+(c.last_name||'')+' — '+j.company_name+' ('+j.position+')')+
-      '</option>';
+
+  // Build company list for step-1 picker
+  var companyIds={};
+  myJobs.forEach(function(j){
+    if(j.company_id&&!companyIds[j.company_id])companyIds[j.company_id]={id:j.company_id,name:j.company_name};
+  });
+  var companyList=Object.values(companyIds).sort(function(a,b){return a.name.localeCompare(b.name);});
+  var coOpts='<option value="">— Select company —</option>'+companyList.map(function(c){
+    return '<option value="'+c.id+'"'+(STATE.composeCompanyId===c.id?' selected':'')+'>'+escHtml(c.name)+'</option>';
+  }).join('');
+
+  // Step-2: contacts for selected company
+  var pocOpts='';
+  if(STATE.composeCompanyId){
+    var coJobs=myJobs.filter(function(j){return j.company_id===STATE.composeCompanyId;});
+    var pocList=[];
+    coJobs.forEach(function(j){
+      STATE.contacts.filter(function(c){return c.job_id===j.id&&c.email;}).forEach(function(c){
+        pocList.push({cid:c.id,jid:j.id,label:(c.first_name||'')+' '+(c.last_name||'')+(c.designation?' · '+c.designation:'')+' ('+j.position+')',email:c.email});
+      });
+    });
+    pocOpts='<option value="">— Select contact —</option>'+pocList.map(function(p){
+      return '<option value="'+p.cid+'|'+p.jid+'"'+(STATE.composeContactId===p.cid+'|'+p.jid?' selected':'')+'>'+escHtml(p.label)+'</option>';
     }).join('');
-  },'');
+  }
 
   var composeHtml='';
   if(STATE.emailTab==='compose'){
     var hasRecipient=!!(STATE.composeContactId||STATE.manualEmail);
+
+    // Recipient badge
     var recipientBadge='';
     if(STATE.composeContactId){
       var parts=STATE.composeContactId.split('|');
       var cc=STATE.contacts.find(function(c){return c.id===parts[0];});
       var cj=myJobs.find(function(j){return j.id===parts[1];});
       if(cc)recipientBadge='<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--accent-l);border-radius:var(--r);margin-top:8px">'+
-        '<div style="flex:1;font-size:13px"><strong>'+(cc.first_name||'')+' '+(cc.last_name||'')+'</strong>'+
-          (cc.designation?' · '+escHtml(cc.designation):'')+
-          '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+escHtml(cc.email||'')+(cj?' · '+escHtml(cj.company_name):'')+'</div>'+
+        '<div style="flex:1;font-size:13px"><strong>'+escHtml((cc.first_name||'')+' '+(cc.last_name||''))+'</strong>'+(cc.designation?' \u00b7 '+escHtml(cc.designation):'')+
+          '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+escHtml(cc.email||'')+(cj?' \u00b7 '+escHtml(cj.company_name):'')+'</div>'+
         '</div>'+
-        '<button class="btn-icon" onclick="STATE.composeContactId=null;STATE.genEmail=null;render()">'+ico('x',13)+'</button>'+
+        '<button class="btn-icon" onclick="STATE.composeContactId=null;STATE.composeCompanyId=null;STATE.genEmail=null;render()">'+ico('x',13)+'</button>'+
       '</div>';
     } else if(STATE.manualEmail){
       recipientBadge='<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--green-l);border-radius:var(--r);margin-top:8px">'+
-        '<div style="flex:1;font-size:13px"><strong>'+htmlEsc(STATE.manualEmail)+'</strong></div>'+
+        '<div style="flex:1;font-size:13px"><strong>'+htmlEsc(STATE.manualEmail)+'</strong><div style="font-size:11px;color:var(--text3)">Manual entry</div></div>'+
         '<button class="btn-icon" onclick="STATE.manualEmail=null;STATE.genEmail=null;render()">'+ico('x',13)+'</button>'+
       '</div>';
     }
 
+    // Preview section — shows genEmail with editable subject/body
     var previewSection='';
     if(STATE.genEmail){
       var ge=STATE.genEmail;
       previewSection='<div style="margin-top:14px;border:1.5px solid var(--accent);border-radius:var(--r2);overflow:hidden">'+
         '<div style="padding:10px 14px;background:var(--accent-l);display:flex;justify-content:space-between;align-items:center">'+
-          '<div style="font-size:12px;font-weight:600;color:var(--accent)">✨ AI Preview</div>'+
+          '<div style="font-size:12px;font-weight:600;color:var(--accent)">\u2728 AI Preview \u2014 edit before sending</div>'+
           '<button class="btn-icon" onclick="STATE.genEmail=null;render()">'+ico('x',12)+'</button>'+
         '</div>'+
-        '<div style="padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text2)">'+
-          '<strong>Subject:</strong> '+htmlEsc(ge.subj||ge.subject||'')+'</div>'+
-        '<div style="padding:12px 14px;font-size:13px;line-height:1.7;white-space:pre-wrap;max-height:200px;overflow-y:auto">'+htmlEsc(ge.body||'')+'</div>'+
-        '<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">'+
+        '<div style="padding:12px 14px;border-bottom:1px solid var(--border)">'+
+          '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Subject</label>'+
+          '<input class="inp" id="preview-subj" value="'+htmlEsc(ge.subj||ge.subject||'')+'" oninput="STATE.genEmail.subj=this.value;STATE.genEmail.subject=this.value" style="font-size:13px"/>'+
+        '</div>'+
+        '<div style="padding:12px 14px;border-bottom:1px solid var(--border)">'+
+          '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Body</label>'+
+          '<textarea id="preview-body" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;line-height:1.7;min-height:160px;resize:vertical;font-family:inherit" oninput="STATE.genEmail.body=this.value">'+htmlEsc(ge.body||'')+'</textarea>'+
+        '</div>'+
+        '<div style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center">'+
           '<button class="btn btn-outline btn-sm" onclick="STATE.genEmail=null;render()">Discard</button>'+
-          '<button class="btn btn-primary btn-sm" onclick="sendEmail()">'+ico('send',12)+' Send this</button>'+
+          '<button class="btn btn-primary btn-sm" onclick="sendEmail()">'+ico('send',12)+' Send this email</button>'+
         '</div>'+
       '</div>';
     }
 
+    // AI panel
     var aiSection='';
     if(STATE.showAIPanel){
       aiSection='<div style="margin-top:12px;padding:14px;background:var(--purple-l);border:1.5px solid rgba(124,58,237,.2);border-radius:var(--r2)">'+
-        '<div style="font-size:12px;font-weight:600;color:var(--purple);margin-bottom:8px">✨ AI instructions</div>'+
+        '<div style="font-size:12px;font-weight:600;color:var(--purple);margin-bottom:8px">\u2728 AI instructions</div>'+
         '<textarea class="txta w100" style="min-height:80px;font-size:12.5px;background:rgba(255,255,255,.7)" id="ai-prompt-inp" oninput="STATE.aiPrompt=this.value" placeholder="e.g. Be very concise, 3 lines only...">'+htmlEsc(STATE.aiPrompt||STATE.aiPromptDefault)+'</textarea>'+
         '<div class="flex gap1 flex-wrap mt2">'+
           ['Very concise (3 lines)','Formal tone','Friendly tone','Focus on urgency','Ask for referral'].map(function(s){
@@ -1506,7 +1532,7 @@ function renderEmail(){
         '<div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">'+
           '<button class="btn btn-outline btn-sm" onclick="resetAIPrompt()">Reset</button>'+
           '<button class="btn btn-sm" style="background:var(--purple);color:#fff" onclick="generateAI()">'+
-            (STATE.aiGenerating?'Generating…':'Generate email')+
+            (STATE.aiGenerating?'Generating\u2026':'Generate email')+
           '</button>'+
         '</div>'+
       '</div>';
@@ -1514,10 +1540,28 @@ function renderEmail(){
 
     composeHtml='<div style="max-width:640px">'+
       '<div class="card cp mb3">'+
-        '<div class="fw6 mb1" style="font-size:13px">Recipient</div>'+
-        '<select class="sel" onchange="STATE.composeContactId=this.value;STATE.manualEmail=null;STATE.genEmail=null;render()">'+contactOpts+'</select>'+
-        '<div style="font-size:11px;color:var(--text3);margin-top:6px;margin-bottom:2px">or type an email address directly</div>'+
-        '<input class="inp" placeholder="someone@company.com" id="manual-email-inp" value="'+htmlEsc(STATE.manualEmail||'')+'" oninput="STATE.manualEmail=this.value||null;STATE.composeContactId=null;STATE.genEmail=null"/>'+
+        '<div class="fw6 mb2" style="font-size:13px">Recipient</div>'+
+
+        // Step 1 — pick company
+        '<div style="margin-bottom:10px">'+
+          '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Step 1 \u2014 Select company</label>'+
+          '<select class="sel" onchange="STATE.composeCompanyId=this.value;STATE.composeContactId=null;STATE.genEmail=null;render()">'+coOpts+'</select>'+
+        '</div>'+
+
+        // Step 2 — pick contact (only shown if company selected)
+        (STATE.composeCompanyId?
+          '<div style="margin-bottom:10px">'+
+            '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Step 2 \u2014 Select contact / POC</label>'+
+            '<select class="sel" onchange="STATE.composeContactId=this.value;STATE.manualEmail=null;STATE.genEmail=null;render()">'+pocOpts+'</select>'+
+          '</div>':'')+
+
+        // Divider
+        '<div style="display:flex;align-items:center;gap:8px;margin:10px 0">'+
+          '<div style="flex:1;height:1px;background:var(--border)"></div>'+
+          '<span style="font-size:11px;color:var(--text3)">or type email directly</span>'+
+          '<div style="flex:1;height:1px;background:var(--border)"></div>'+
+        '</div>'+
+        '<input class="inp" placeholder="someone@company.com" id="manual-email-inp" value="'+htmlEsc(STATE.manualEmail||'')+'" oninput="STATE.manualEmail=this.value||null;STATE.composeContactId=null;STATE.composeCompanyId=null;STATE.genEmail=null"/>'+
         recipientBadge+
       '</div>'+
 
@@ -1525,23 +1569,29 @@ function renderEmail(){
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
           '<div class="fw6" style="font-size:13px">Message</div>'+
           '<div style="display:flex;gap:8px;align-items:center">'+
-            '<button onclick="STATE.showAIPanel=!STATE.showAIPanel;render()" style="font-size:12px;padding:5px 11px;border:1px solid rgba(124,58,237,.3);background:'+(STATE.showAIPanel?'var(--purple)':'var(--purple-l)')+';color:'+(STATE.showAIPanel?'#fff':'var(--purple)')+';border-radius:7px;cursor:pointer">✨ AI</button>'+
+            '<button onclick="STATE.showAIPanel=!STATE.showAIPanel;render()" style="font-size:12px;padding:5px 11px;border:1px solid rgba(124,58,237,.3);background:'+(STATE.showAIPanel?'var(--purple)':'var(--purple-l)')+';color:'+(STATE.showAIPanel?'#fff':'var(--purple)')+';border-radius:7px;cursor:pointer">\u2728 AI</button>'+
             '<div class="flex gap1">'+
-              '<button class="fc'+(u.plt==="Gmail"?" on":"")+'" onclick="setPlatform(\'Gmail\')">Gmail</button>'+
-              '<button class="fc'+(u.plt==="Outlook"?" on":"")+'" onclick="setPlatform(\'Outlook\')">Outlook</button>'+
+              '<button class="fc'+(u.plt==='Gmail'?' on':'')+'" onclick="setPlatform(\'Gmail\')">Gmail</button>'+
+              '<button class="fc'+(u.plt==='Outlook'?' on':'')+'" onclick="setPlatform(\'Outlook\')">Outlook</button>'+
             '</div>'+
           '</div>'+
         '</div>'+
         '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="email-subj" value="'+htmlEsc(STATE.emailSubj)+'" oninput="STATE.emailSubj=this.value"/></div>'+
         '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:140px" id="email-body" oninput="STATE.emailBody=this.value">'+htmlEsc(STATE.emailBody)+'</textarea></div>'+
         aiSection+
+        (hasRecipient&&!STATE.genEmail?
+          '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
+            '<button class="btn btn-outline" onclick="openEmailPreviewModal()">\ud83d\udc41 Preview</button>'+
+            '<button class="btn btn-primary" onclick="sendEmail()">'+ico('send',13)+' Send</button>'+
+          '</div>':
+          '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
+            '<button class="btn btn-primary" '+(hasRecipient?'':'disabled style="opacity:.5;cursor:not-allowed"')+' onclick="sendEmail()">'+ico('send',13)+' Send</button>'+
+          '</div>')+
         previewSection+
-        '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
-          '<button class="btn btn-primary" onclick="sendEmail()" '+(hasRecipient?'':'disabled style="opacity:.5;cursor:not-allowed"')+'>'+ico('send',13)+' Send</button>'+
-        '</div>'+
       '</div>'+
     '</div>';
   }
+
 
 
   // OOO reminder cards for dashboard
