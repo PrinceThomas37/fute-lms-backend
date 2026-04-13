@@ -3402,23 +3402,112 @@ function renderEmailAccounts(){
 }
 
 window.openAddEmailAccount=function(managerId,fromDetail){
-  var managers=STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead'||x.role==='admin';});
-  var mOpts='<option value="">— Unassigned —</option>'+managers.map(function(m){
-    return '<option value="'+m.id+'"'+(managerId===m.id?' selected':'')+'>'+htmlEsc(m.name)+'</option>';
-  }).join('');
-  STATE.modal='<div class="modal modal-w480">'+
-    '<div class="mh"><div class="mt">Add Email ID</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+  // Split email accounts into unassigned vs assigned
+  var unassigned=(STATE.emailAccounts||[]).filter(function(a){return !a.assigned_to&&a.is_active;});
+  var managerUser=managerId?STATE.users.find(function(u){return u.id===managerId;}):null;
+
+  var unassignedRows=unassigned.length?
+    unassigned.map(function(a){
+      return '<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s" onclick="selectEmailAccountToAssign(\''+a.id+'\',\''+managerId+'\')" onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'\'">'+
+        '<div style="flex:1">'+
+          '<div style="font-weight:500;font-size:13px">'+htmlEsc(a.display_name)+'</div>'+
+          '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(a.email_address)+'</div>'+
+        '</div>'+
+        '<div style="font-size:12px;color:var(--text3)">'+htmlEsc(String(a.daily_send_limit||150))+'/day</div>'+
+        '<div style="font-size:18px;color:var(--accent)">\u203a</div>'+
+      '</div>';
+    }).join('')
+  :'<div style="padding:16px;text-align:center;font-size:13px;color:var(--text3)">No unassigned email IDs. Create a new one below.</div>';
+
+  STATE.modal='<div class="modal modal-w540">'+
+    '<div class="mh">'+
+      '<div>'+
+        '<div class="mt">Add Email ID'+(managerUser?' \u2014 '+htmlEsc(managerUser.name):'')+'</div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:3px">Pick an existing unassigned ID or create a new one</div>'+
+      '</div>'+
+      '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button>'+
+    '</div>'+
     '<div class="mb_">'+
+
+      // ── Unassigned email IDs ──
+      (unassigned.length?
+        '<div style="margin-bottom:16px">'+
+          '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Unassigned email IDs ('+unassigned.length+')</div>'+
+          '<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
+            unassignedRows+
+          '</div>'+
+        '</div>':'')+
+
+      // ── Divider ──
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">'+
+        '<div style="flex:1;height:1px;background:var(--border)"></div>'+
+        '<div style="font-size:12px;color:var(--text3)">or create new</div>'+
+        '<div style="flex:1;height:1px;background:var(--border)"></div>'+
+      '</div>'+
+
+      // ── Create new form ──
       '<div class="fgrp"><label class="flbl">Email address <span style="color:var(--red)">*</span></label><input class="inp" id="ea-email" placeholder="name@futeglobal.com"/></div>'+
       '<div class="fgrp"><label class="flbl">Display name <span style="color:var(--red)">*</span></label><input class="inp" id="ea-name" placeholder="John Smith"/></div>'+
-      '<div class="fgrp"><label class="flbl">Assign to Manager</label><select class="sel" id="ea-manager">'+mOpts+'</select></div>'+
-      '<div class="fgrp"><label class="flbl">Daily send limit</label><input class="inp" type="number" id="ea-limit" value="150" min="1" max="500"/></div>'+
+      '<div class="fgrp"><label class="flbl">Daily outreach limit</label>'+
+        '<div style="display:flex;align-items:center;gap:10px">'+
+          '<input class="inp" type="number" id="ea-limit" value="150" min="1" max="500" style="width:120px"/>'+
+          '<span style="font-size:12px;color:var(--text3)">emails per day from this ID</span>'+
+        '</div>'+
+      '</div>'+
     '</div>'+
-    '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
-      '<button class="btn btn-primary" onclick="submitAddEmailAccount()">Add Email ID</button></div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="submitCreateAndAssignEmailAccount(\''+managerId+'\')">Create & Assign</button>'+
+    '</div>'+
   '</div>';
   render();
 };
+
+window.selectEmailAccountToAssign=function(accountId, managerId){
+  // Show limit picker before assigning
+  var a=STATE.emailAccounts.find(function(x){return x.id===accountId;});
+  if(!a)return;
+  STATE.modal='<div class="modal modal-w400">'+
+    '<div class="mh"><div class="mt">Assign '+htmlEsc(a.display_name)+'</div>'+
+    '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div style="padding:12px 14px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:14px">'+
+        '<div style="font-weight:600;font-size:13px">'+htmlEsc(a.display_name)+'</div>'+
+        '<div style="font-size:12px;color:var(--text3)">'+htmlEsc(a.email_address)+'</div>'+
+      '</div>'+
+      '<div class="fgrp"><label class="flbl">Daily outreach limit</label>'+
+        '<div style="display:flex;align-items:center;gap:10px">'+
+          '<input class="inp" type="number" id="ea-assign-limit" value="'+htmlEsc(String(a.daily_send_limit||150))+'" min="1" max="500" style="width:120px"/>'+
+          '<span style="font-size:12px;color:var(--text3)">emails per day</span>'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="submitAssignExistingEmailAccount(\''+accountId+'\',\''+managerId+'\')">Assign to Manager</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+
+window.submitAssignExistingEmailAccount=function(accountId, managerId){
+  var limit=parseInt((document.getElementById('ea-assign-limit')||{}).value||'150');
+  apiPut('/email-accounts/'+accountId,{assigned_to:managerId,daily_send_limit:limit}).then(function(a){
+    STATE.emailAccounts=STATE.emailAccounts.map(function(x){return x.id===accountId?a:x;});
+    closeModal();showToast('Email ID assigned','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.submitCreateAndAssignEmailAccount=function(managerId){
+  var email=(document.getElementById('ea-email')||{}).value||'';
+  var name=(document.getElementById('ea-name')||{}).value||'';
+  var limit=parseInt((document.getElementById('ea-limit')||{}).value||'150');
+  if(!email||!name){showToast('Email address and display name required','warning');return;}
+  apiPost('/email-accounts',{email_address:email,display_name:name,assigned_to:managerId||undefined,daily_send_limit:limit}).then(function(a){
+    STATE.emailAccounts.push(a);
+    closeModal();showToast('Email ID created and assigned','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};;
 
 window.openEditEmailAccount=function(id){
   var a=STATE.emailAccounts.find(function(x){return x.id===id;});
@@ -3441,17 +3530,7 @@ window.openEditEmailAccount=function(id){
   render();
 };
 
-window.submitAddEmailAccount=function(){
-  var email=(document.getElementById('ea-email')||{}).value||'';
-  var name=(document.getElementById('ea-name')||{}).value||'';
-  var manager=(document.getElementById('ea-manager')||{}).value||null;
-  var limit=parseInt((document.getElementById('ea-limit')||{}).value||'150');
-  if(!email||!name){showToast('Email and display name required','warning');return;}
-  apiPost('/email-accounts',{email_address:email,display_name:name,assigned_to:manager||undefined,daily_send_limit:limit}).then(function(a){
-    STATE.emailAccounts.push(a);
-    closeModal();showToast('Email ID added','success');render();
-  }).catch(function(e){showToast('Failed: '+e.message,'error');});
-};
+;
 
 window.submitEditEmailAccount=function(id){
   var email=(document.getElementById('ea-email')||{}).value||'';
