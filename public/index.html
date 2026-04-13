@@ -713,7 +713,7 @@ function renderApp(){
   var navItems=[
     {id:"dashboard",lbl:"Dashboard",ic:"dashboard"},
     {id:"leads",lbl:"Leads",ic:"leads",badge:todayCnt},
-    {id:"email",lbl:"Email",ic:"email"},
+    ...(u.role!=="ra"?[{id:"email",lbl:"Email",ic:"email"}]:[]),
     {id:"reminders",lbl:"Reminders",ic:"star",badge:STATE.reminders.filter(function(r){return r.user_id===u.id&&r.status==="pending"}).length||null},
     {id:"profile",lbl:"My Profile",ic:"profile"}
   ];
