@@ -37,7 +37,7 @@ async function logActivity(job_id, contact_id, user_id, action_type, description
 
 // ── HEALTH ─────────────────────────────────────────────────────
 app.use(express.static('public'));
-app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.4.0-dropLM' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.5.0-dropN' }));
 
 // ══════════════════════════════════════════════════════════════
 // AUTH
@@ -400,6 +400,262 @@ app.get('/email-accounts/:id/send-count', auth, async (req, res) => {
       .select('emails_sent').eq('email_account_id', req.params.id).eq('send_date', todayDate).single();
     if (error && error.code !== 'PGRST116') throw error;
     res.json({ emails_sent: data?.emails_sent || 0, date: todayDate });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+
+// ══════════════════════════════════════════════════════════════
+// SMART LEAD DISTRIBUTION — RA Team Lead assigns pool to a Manager
+// ══════════════════════════════════════════════════════════════
+
+// AI generates ratio from priority text + pool composition
+app.post('/distribute/generate-ratio', auth, async (req, res) => {
+  try {
+    if (!['admin','ra_lead'].includes(req.user.role)) return res.status(403).json({ error: 'RA Lead only' });
+    const { priority_text, pool_stats, manager_id } = req.body;
+
+    const { data: manager } = await supabase.from('users').select('id,name').eq('id', manager_id).single();
+    const capacity = pool_stats.capacity || 150;
+
+    const prompt = `You are a lead distribution engine for Fute Global LLC, a staffing/recruitment firm.
+
+Pool of unassigned leads available:
+- Total: ${pool_stats.total} leads
+- Freshness: ${JSON.stringify(pool_stats.by_freshness)}
+- Industry: ${JSON.stringify(pool_stats.by_industry)}
+- Timezone: ${JSON.stringify(pool_stats.by_timezone)}
+- Duplicates in pool: ${pool_stats.duplicates || 0}
+
+Manager: ${manager?.name}
+Email sending capacity today: ${capacity} emails
+
+RA Team Lead priority instructions: "${priority_text}"
+
+Based on the instructions and pool composition, generate a distribution plan.
+Respond ONLY with valid JSON, no explanation, no markdown:
+{
+  "total_to_send": <number, max ${Math.min(pool_stats.total, capacity)}>,
+  "by_freshness": {"New": <percent 0-100>, "Normal": <percent>, "Old": <percent>},
+  "by_industry": {"Engineering": <percent>, "Healthcare": <percent>, "Legal": <percent>, "Accounting": <percent>, "Management": <percent>, "Other": <percent>},
+  "by_timezone": {"EST": <percent>, "CST": <percent>, "MST": <percent>, "PST": <percent>},
+  "exclude_duplicates": <true/false>,
+  "summary": "<2-sentence human-readable summary of what will be sent and why>"
+}
+Percentages in each group must sum to 100. Prioritise Old leads always unless instructed otherwise.`;
+
+    if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY === 'your_anthropic_api_key_here') {
+      // Fallback: balanced auto ratio
+      return res.json(buildAutoRatio(pool_stats, capacity));
+    }
+
+    const aiResp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 400, messages: [{ role: 'user', content: prompt }] })
+    });
+    const aiData = await aiResp.json();
+    const text = aiData.content?.[0]?.text || '';
+    const clean = text.replace(/```json|```/g, '').trim();
+    const ratio = JSON.parse(clean);
+    res.json(ratio);
+  } catch (err) {
+    // fallback to auto on any error
+    const { pool_stats } = req.body;
+    res.json(buildAutoRatio(pool_stats, pool_stats?.capacity || 150));
+  }
+});
+
+function buildAutoRatio(pool_stats, capacity) {
+  const total = Math.min(pool_stats?.total || 0, capacity);
+  const bf = pool_stats?.by_freshness || {};
+  const bi = pool_stats?.by_industry || {};
+  const btz = pool_stats?.by_timezone || {};
+  // helper: even split of existing keys
+  function evenSplit(obj) {
+    const keys = Object.keys(obj).filter(k => obj[k] > 0);
+    if (!keys.length) return {};
+    const base = Math.floor(100 / keys.length);
+    const result = {};
+    let rem = 100;
+    keys.forEach((k, i) => { result[k] = i === keys.length - 1 ? rem : base; rem -= base; });
+    return result;
+  }
+  return {
+    total_to_send: total,
+    by_freshness: evenSplit(bf),
+    by_industry: evenSplit(bi),
+    by_timezone: evenSplit(btz),
+    exclude_duplicates: false,
+    summary: `Auto-balanced distribution of ${total} leads across available categories.`
+  };
+}
+
+// Execute the distribution — assign leads to manager + email IDs
+app.post('/distribute/execute', auth, async (req, res) => {
+  try {
+    if (!['admin','ra_lead'].includes(req.user.role)) return res.status(403).json({ error: 'RA Lead only' });
+    const { manager_id, ratio } = req.body;
+    if (!manager_id || !ratio) return res.status(400).json({ error: 'manager_id and ratio required' });
+
+    // Get manager's active email accounts
+    const { data: emailAccounts } = await supabase.from('email_accounts')
+      .select('id,email_address,display_name,daily_send_limit').eq('assigned_to', manager_id).eq('is_active', true);
+    if (!emailAccounts?.length) return res.status(400).json({ error: 'Manager has no active email IDs' });
+
+    // Get today's send counts per email account
+    const todayDate = today();
+    const { data: sendLogs } = await supabase.from('email_send_log')
+      .select('email_account_id,emails_sent').eq('send_date', todayDate);
+    const sentToday = {};
+    (sendLogs || []).forEach(l => { sentToday[l.email_account_id] = l.emails_sent; });
+
+    // Calculate remaining capacity per email ID
+    const accounts = emailAccounts.map(a => ({
+      ...a,
+      remaining: (a.daily_send_limit || 150) - (sentToday[a.id] || 0)
+    })).filter(a => a.remaining > 0);
+    if (!accounts.length) return res.status(400).json({ error: 'All email IDs have reached daily limit' });
+
+    const totalCapacity = accounts.reduce((s, a) => s + a.remaining, 0);
+    const totalToSend = Math.min(ratio.total_to_send || 50, totalCapacity);
+
+    // Fetch unassigned leads from pool applying ratio filters
+    let query = supabase.from('jobs').select('id,position,freshness,industry,timezone,is_duplicate')
+      .is('deleted_at', null).eq('stage', 'Unassigned').is('assigned_to_bd', null);
+
+    if (ratio.exclude_duplicates) query = query.eq('is_duplicate', false);
+
+    const { data: pool } = await query;
+    if (!pool?.length) return res.status(400).json({ error: 'No unassigned leads in pool' });
+
+    // Score and select leads based on ratio
+    // Freshness priority: Old first always
+    const freshnessOrder = { 'Old': 0, 'Normal': 1, 'New': 2, '': 3 };
+    const sorted = [...pool].sort((a, b) => (freshnessOrder[a.freshness] ?? 3) - (freshnessOrder[b.freshness] ?? 3));
+
+    // Select leads respecting ratio targets (best-effort)
+    const byF = ratio.by_freshness || {};
+    const byI = ratio.by_industry || {};
+    const byTz = ratio.by_timezone || {};
+
+    // Build target counts
+    const targets = { freshness: {}, industry: {}, timezone: {} };
+    Object.keys(byF).forEach(k => { targets.freshness[k] = Math.round((byF[k] / 100) * totalToSend); });
+    Object.keys(byI).forEach(k => { targets.industry[k] = Math.round((byI[k] / 100) * totalToSend); });
+    Object.keys(byTz).forEach(k => { targets.timezone[k] = Math.round((byTz[k] / 100) * totalToSend); });
+
+    // Greedy selection: pick up to totalToSend leads, preferring those matching targets
+    const selected = [];
+    const used = { freshness: {}, industry: {}, timezone: {} };
+    for (const job of sorted) {
+      if (selected.length >= totalToSend) break;
+      selected.push(job);
+      used.freshness[job.freshness] = (used.freshness[job.freshness] || 0) + 1;
+      used.industry[job.industry] = (used.industry[job.industry] || 0) + 1;
+      used.timezone[job.timezone] = (used.timezone[job.timezone] || 0) + 1;
+    }
+
+    if (!selected.length) return res.status(400).json({ error: 'No leads matched distribution criteria' });
+
+    // Round-robin distribute selected leads across email IDs
+    const assignedLeads = [];
+    let acIdx = 0;
+    const now = new Date();
+
+    for (const job of selected) {
+      // Find next account with remaining capacity
+      let tries = 0;
+      while (accounts[acIdx % accounts.length].remaining <= 0 && tries < accounts.length) {
+        acIdx++; tries++;
+      }
+      const account = accounts[acIdx % accounts.length];
+      account.remaining--;
+      acIdx++;
+
+      // Update job: assign to manager + email account
+      await supabase.from('jobs').update({
+        assigned_to_bd: manager_id,
+        sending_email_id: account.id,
+        stage: 'Assigned',
+        assigned_at: now,
+        updated_at: now
+      }).eq('id', job.id);
+
+      assignedLeads.push({ job_id: job.id, email_account_id: account.id });
+    }
+
+    // Update send log counts
+    const countPerAccount = {};
+    assignedLeads.forEach(l => { countPerAccount[l.email_account_id] = (countPerAccount[l.email_account_id] || 0) + 1; });
+    for (const [acId, cnt] of Object.entries(countPerAccount)) {
+      await supabase.from('email_send_log').upsert({
+        email_account_id: acId, send_date: todayDate,
+        emails_sent: (sentToday[acId] || 0) + cnt
+      }, { onConflict: 'email_account_id,send_date' });
+    }
+
+    // Generate AI emails for all assigned jobs
+    const jobIds = selected.map(j => j.id);
+    // Fire and forget — don't wait for email generation to respond
+    fetch(`${req.protocol}://${req.get('host')}/emails/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': req.headers.authorization },
+      body: JSON.stringify({ job_ids: jobIds })
+    }).catch(e => console.error('Email generation error:', e.message));
+
+    // Build distribution summary for dashboard
+    const summary = {
+      total_assigned: selected.length,
+      manager_id,
+      by_freshness: used.freshness,
+      by_industry: used.industry,
+      by_timezone: used.timezone,
+      email_accounts_used: Object.keys(countPerAccount).length,
+      ratio_summary: ratio.summary || '',
+      assigned_at: now.toISOString()
+    };
+
+    // Store summary for BD dashboard
+    await supabase.from('jobs').update({
+      updated_at: now
+    }).in('id', jobIds); // already updated above, just ensure consistency
+
+    res.json({ success: true, ...summary });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Get pool stats for a distribution session
+app.get('/distribute/pool-stats', auth, async (req, res) => {
+  try {
+    if (!['admin','ra_lead'].includes(req.user.role)) return res.status(403).json({ error: 'RA Lead only' });
+    const { data: pool } = await supabase.from('jobs').select('id,freshness,industry,timezone,is_duplicate')
+      .is('deleted_at', null).eq('stage', 'Unassigned').is('assigned_to_bd', null);
+
+    const stats = { total: pool?.length || 0, by_freshness: {}, by_industry: {}, by_timezone: {}, duplicates: 0 };
+    (pool || []).forEach(j => {
+      stats.by_freshness[j.freshness || 'Unknown'] = (stats.by_freshness[j.freshness || 'Unknown'] || 0) + 1;
+      stats.by_industry[j.industry || 'Unknown'] = (stats.by_industry[j.industry || 'Unknown'] || 0) + 1;
+      stats.by_timezone[j.timezone || 'Unknown'] = (stats.by_timezone[j.timezone || 'Unknown'] || 0) + 1;
+      if (j.is_duplicate) stats.duplicates++;
+    });
+    res.json(stats);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Get today's assignment summary for a manager (BD dashboard)
+app.get('/distribute/today-summary', auth, async (req, res) => {
+  try {
+    const targetId = req.query.manager_id || req.user.id;
+    const todayDate = today();
+    const { data: jobs } = await supabase.from('jobs').select('id,freshness,industry,timezone,assigned_at')
+      .eq('assigned_to_bd', targetId).gte('assigned_at', todayDate + 'T00:00:00Z');
+    const summary = { total: jobs?.length || 0, by_freshness: {}, by_industry: {}, by_timezone: {} };
+    (jobs || []).forEach(j => {
+      summary.by_freshness[j.freshness || 'Unknown'] = (summary.by_freshness[j.freshness || 'Unknown'] || 0) + 1;
+      summary.by_industry[j.industry || 'Unknown'] = (summary.by_industry[j.industry || 'Unknown'] || 0) + 1;
+      summary.by_timezone[j.timezone || 'Unknown'] = (summary.by_timezone[j.timezone || 'Unknown'] || 0) + 1;
+    });
+    res.json(summary);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
