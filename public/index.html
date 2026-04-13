@@ -3505,28 +3505,34 @@ window.submitAssignExistingEmailAccount=function(accountId, managerId){
 
 window.emailAccountTypeahead=function(val){
   var sugBox=document.getElementById('ea-suggestions');
-  var nameEl=document.getElementById('ea-name');
   if(!sugBox)return;
   if(!val||val.length<2){sugBox.style.display='none';return;}
   var q=val.toLowerCase();
-  // Search all email accounts (unassigned) by email or display name
-  var unassigned=(STATE.emailAccounts||[]).filter(function(a){return !a.assigned_to&&a.is_active;});
-  var matches=unassigned.filter(function(a){
-    return a.email_address.toLowerCase().includes(q)||a.display_name.toLowerCase().includes(q);
+  var raUsers=(STATE.users||[]).filter(function(u){return u.role==='ra';});
+  var matches=raUsers.filter(function(u){
+    return (u.email||'').toLowerCase().indexOf(q)>-1||(u.name||'').toLowerCase().indexOf(q)>-1;
   }).slice(0,6);
   if(!matches.length){sugBox.style.display='none';return;}
-  sugBox.innerHTML=matches.map(function(a){
-    return '<div onclick="pickEmailAccountSuggestion(\''+htmlEsc(a.email_address)+'\',\''+htmlEsc(a.display_name)+'\','+a.daily_send_limit+')" '+
-      'style="padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px" '+
-      'onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'\'">'+
+  var html='';
+  matches.forEach(function(u){
+    html+='<div class="_ea-sug" data-email="'+htmlEsc(u.email)+'" data-name="'+htmlEsc(u.name)+'" style="padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">'+
       '<div style="flex:1">'+
-        '<div style="font-size:13px;font-weight:500">'+htmlEsc(a.display_name)+'</div>'+
-        '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(a.email_address)+'</div>'+
+        '<div style="font-size:13px;font-weight:500">'+htmlEsc(u.name)+'</div>'+
+        '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(u.email)+'</div>'+
       '</div>'+
-      '<span style="font-size:11px;color:var(--text3)">'+htmlEsc(String(a.daily_send_limit||150))+'/day</span>'+
+      '<span style="font-size:11px;padding:2px 6px;background:var(--green-l);color:var(--green);border-radius:6px">RA</span>'+
     '</div>';
-  }).join('');
+  });
+  sugBox.innerHTML=html;
   sugBox.style.display='block';
+  // bind click and hover on each suggestion
+  Array.prototype.forEach.call(sugBox.querySelectorAll('._ea-sug'),function(el){
+    el.addEventListener('mouseenter',function(){this.style.background='var(--accent-l)';});
+    el.addEventListener('mouseleave',function(){this.style.background='';});
+    el.addEventListener('click',function(){
+      pickEmailAccountSuggestion(this.getAttribute('data-email'),this.getAttribute('data-name'),150);
+    });
+  });
 };
 
 window.pickEmailAccountSuggestion=function(email,name,limit){
