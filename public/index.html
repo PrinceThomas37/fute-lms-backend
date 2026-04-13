@@ -486,6 +486,10 @@ var STATE = {
   jobsFilter: {search:"",stage:"all"},
   assignSel: {},
   assignTargetBD: "",
+  distributePoolStats: null,
+  _assignManagerId: null,
+  _assignRatio: null,
+  todaySummary: null,
   assignFilter: {ra:"",dup:"all"},
   pendingEmails: [],
   previewPendingId: null,
@@ -1518,8 +1522,15 @@ function renderEmail(){
     '</div>';
   }
 
+  // BD today summary card
+  var bdSummaryCard='';
+  if((u.role==='bd'||u.role==='bd_lead')&&STATE.todaySummary&&STATE.todaySummary.total>0){
+    bdSummaryCard=renderTodaySummaryCard(STATE.todaySummary);
+  }
+
   return '<div class="page">'+
     (oooCards?'<div style="padding:0 24px;padding-top:16px">'+oooCards+'</div>':'')+
+    (bdSummaryCard?'<div style="padding:0 24px;padding-top:16px">'+bdSummaryCard+'</div>':'')+
     '<div class="ph"><div class="ptitle">Email</div>'+
       '<div class="psub">'+(isBD?'Manage AI-generated outreach emails':'Email outreach')+' · '+u.name+'</div>'+
     '</div>'+
@@ -3317,6 +3328,207 @@ window.saveEmailEdit=function(id){
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
+function renderTodaySummaryCard(ts){
+  var bf=ts.by_freshness||{};
+  var bi=ts.by_industry||{};
+  var btz=ts.by_timezone||{};
+  function rows(obj){
+    return Object.keys(obj).map(function(k){
+      return '<div style="display:flex;justify-content:space-between;padding:1px 0">'+
+        '<span>'+htmlEsc(k)+'</span><span style="font-weight:600">'+obj[k]+'</span></div>';
+    }).join('');
+  }
+  return '<div style="background:var(--accent-l);border:1.5px solid var(--accent);border-radius:var(--r2);padding:14px 18px">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+      '<div style="font-weight:700;font-size:14px;color:var(--accent)">Today\'s assignment summary</div>'+
+      '<div style="font-size:24px;font-weight:700;color:var(--accent)">'+ts.total+' leads</div>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:12px">'+
+      '<div><div style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Freshness</div>'+rows(bf)+'</div>'+
+      '<div><div style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Industry</div>'+rows(bi)+'</div>'+
+      '<div><div style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Timezone</div>'+rows(btz)+'</div>'+
+    '</div>'+
+  '</div>';
+}
+
+// ════════════════════════════════════════════════
+// DISTRIBUTION ACTIONS — Drop N
+// ════════════════════════════════════════════════
+
+function refreshPoolStats(){
+  apiGet('/distribute/pool-stats').then(function(d){
+    STATE.distributePoolStats=d;render();
+  }).catch(function(){});
+}
+
+window.openAssignToManager=function(managerId){
+  var m=STATE.users.find(function(u){return u.id===managerId;})||{name:'Manager'};
+  var pool=STATE.distributePoolStats||{total:0};
+  var emailAccounts=(STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===managerId&&a.is_active;});
+  var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
+  STATE._assignManagerId=managerId;
+  STATE._assignRatio=null;
+  STATE._assignGenerating=false;
+
+  STATE.modal='<div class="modal modal-w540">'+
+    '<div class="mh">'+
+      '<div><div class="mt">Assign leads \u2014 '+htmlEsc(m.name)+'</div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:3px">'+pool.total+' unassigned leads \u00b7 '+capacity+' email capacity today</div>'+
+      '</div>'+
+      '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button>'+
+    '</div>'+
+    '<div class="mb_">'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">'+
+        '<div onclick="setAssignMode(\'auto\')" id="mode-auto" style="padding:14px;border:2px solid var(--accent);border-radius:var(--r2);cursor:pointer;background:var(--accent-l);text-align:center">'+
+          '<div style="font-size:18px;margin-bottom:4px">\u26a1</div>'+
+          '<div style="font-weight:600;font-size:13px;color:var(--accent)">Auto</div>'+
+          '<div style="font-size:11px;color:var(--text3);margin-top:3px">System picks balanced ratio</div>'+
+        '</div>'+
+        '<div onclick="setAssignMode(\'text\')" id="mode-text" style="padding:14px;border:2px solid var(--border);border-radius:var(--r2);cursor:pointer;text-align:center">'+
+          '<div style="font-size:18px;margin-bottom:4px">\u270f\ufe0f</div>'+
+          '<div style="font-weight:600;font-size:13px">Priority text</div>'+
+          '<div style="font-size:11px;color:var(--text3);margin-top:3px">Tell AI what to prioritise</div>'+
+        '</div>'+
+      '</div>'+
+      '<div id="assign-text-panel" style="display:none;margin-bottom:12px">'+
+        '<label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:6px">Describe your priorities</label>'+
+        '<textarea id="assign-priority-text" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:13px;min-height:80px;resize:vertical;font-family:inherit" placeholder="e.g. Focus on old leads first, prioritise healthcare and legal, send mostly to EST timezone, exclude duplicates..."></textarea>'+
+        '<button onclick="generateAssignRatio()" style="margin-top:8px;background:var(--purple);color:#fff;border:0;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer" id="gen-ratio-btn">\u2728 Generate ratio with AI</button>'+
+      '</div>'+
+      '<div id="assign-ratio-preview" style="display:none"></div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" id="assign-confirm-btn" onclick="confirmAssignToManager()" disabled style="opacity:.5;cursor:not-allowed">Preview assignment</button>'+
+    '</div>'+
+  '</div>';
+  render();
+  // Auto mode selected by default — trigger auto ratio generation
+  setTimeout(function(){generateAutoRatio();},100);
+};
+
+window.setAssignMode=function(mode){
+  var autoEl=document.getElementById('mode-auto');
+  var textEl=document.getElementById('mode-text');
+  var textPanel=document.getElementById('assign-text-panel');
+  if(!autoEl||!textEl)return;
+  if(mode==='auto'){
+    autoEl.style.border='2px solid var(--accent)';autoEl.style.background='var(--accent-l)';
+    textEl.style.border='2px solid var(--border)';textEl.style.background='';
+    if(textPanel)textPanel.style.display='none';
+    generateAutoRatio();
+  } else {
+    textEl.style.border='2px solid var(--accent)';textEl.style.background='var(--accent-l)';
+    autoEl.style.border='2px solid var(--border)';autoEl.style.background='';
+    if(textPanel)textPanel.style.display='block';
+    STATE._assignRatio=null;
+    var btn=document.getElementById('assign-confirm-btn');
+    if(btn){btn.disabled=true;btn.style.opacity='.5';btn.style.cursor='not-allowed';}
+    var prev=document.getElementById('assign-ratio-preview');
+    if(prev)prev.style.display='none';
+  }
+};
+
+function showRatioPreview(ratio){
+  STATE._assignRatio=ratio;
+  var prev=document.getElementById('assign-ratio-preview');
+  var btn=document.getElementById('assign-confirm-btn');
+  if(!prev)return;
+  var bf=ratio.by_freshness||{};
+  var bi=ratio.by_industry||{};
+  var btz=ratio.by_timezone||{};
+  prev.style.display='block';
+  prev.innerHTML='<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r2);padding:12px 14px">'+
+    '<div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px">Distribution preview \u2014 '+ratio.total_to_send+' leads</div>'+
+    '<div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:8px">'+htmlEsc(ratio.summary||'')+'</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:11.5px">'+
+      '<div><div style="color:var(--text3);margin-bottom:3px">Freshness</div>'+Object.keys(bf).map(function(k){return '<div>'+k+': <strong>'+bf[k]+'%</strong></div>';}).join('')+'</div>'+
+      '<div><div style="color:var(--text3);margin-bottom:3px">Industry</div>'+Object.keys(bi).filter(function(k){return bi[k]>0;}).map(function(k){return '<div>'+k+': <strong>'+bi[k]+'%</strong></div>';}).join('')+'</div>'+
+      '<div><div style="color:var(--text3);margin-bottom:3px">Timezone</div>'+Object.keys(btz).map(function(k){return '<div>'+k+': <strong>'+btz[k]+'%</strong></div>';}).join('')+'</div>'+
+    '</div>'+
+  '</div>';
+  if(btn){btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';}
+}
+
+function generateAutoRatio(){
+  var pool=STATE.distributePoolStats||{total:0};
+  var managerId=STATE._assignManagerId;
+  var emailAccounts=(STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===managerId&&a.is_active;});
+  var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
+  var ps=Object.assign({},pool,{capacity:capacity});
+  var prev=document.getElementById('assign-ratio-preview');
+  if(prev){prev.style.display='block';prev.innerHTML='<div style="font-size:12px;color:var(--text3);padding:10px">Calculating balanced ratio\u2026</div>';}
+  apiPost('/distribute/generate-ratio',{priority_text:'balanced auto distribution',pool_stats:ps,manager_id:managerId}).then(function(ratio){
+    showRatioPreview(ratio);
+  }).catch(function(e){
+    if(prev){prev.style.display='block';prev.innerHTML='<div style="font-size:12px;color:var(--red);padding:10px">Could not generate ratio: '+htmlEsc(e.message)+'</div>';}
+  });
+}
+
+window.generateAssignRatio=function(){
+  var text=(document.getElementById('assign-priority-text')||{}).value||'';
+  if(!text.trim()){showToast('Enter priority instructions first','warning');return;}
+  var pool=STATE.distributePoolStats||{total:0};
+  var managerId=STATE._assignManagerId;
+  var emailAccounts=(STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===managerId&&a.is_active;});
+  var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
+  var ps=Object.assign({},pool,{capacity:capacity});
+  var btn=document.getElementById('gen-ratio-btn');
+  if(btn){btn.textContent='Generating\u2026';btn.disabled=true;}
+  var prev=document.getElementById('assign-ratio-preview');
+  if(prev){prev.style.display='block';prev.innerHTML='<div style="font-size:12px;color:var(--text3);padding:10px">\u2728 AI is generating your ratio\u2026</div>';}
+  apiPost('/distribute/generate-ratio',{priority_text:text,pool_stats:ps,manager_id:managerId}).then(function(ratio){
+    showRatioPreview(ratio);
+    if(btn){btn.textContent='\u2728 Regenerate';btn.disabled=false;}
+  }).catch(function(e){
+    if(prev){prev.style.display='block';prev.innerHTML='<div style="font-size:12px;color:var(--red);padding:10px">AI error: '+htmlEsc(e.message)+'</div>';}
+    if(btn){btn.textContent='\u2728 Generate ratio with AI';btn.disabled=false;}
+  });
+};
+
+window.confirmAssignToManager=function(){
+  var ratio=STATE._assignRatio;
+  var managerId=STATE._assignManagerId;
+  if(!ratio||!managerId)return;
+  var m=STATE.users.find(function(u){return u.id===managerId;})||{name:'Manager'};
+  var emailAccounts=(STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===managerId&&a.is_active;});
+  var now=new Date();
+  var dateStr=now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  var timeStr=now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+
+  STATE.modal='<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Confirm assignment</div>'+
+    '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div style="padding:16px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:12px">'+
+        '<div style="font-size:24px;font-weight:700;color:var(--accent);margin-bottom:2px">'+ratio.total_to_send+' leads</div>'+
+        '<div style="font-size:14px;color:var(--text2)">\u2192 <strong>'+htmlEsc(m.name)+'</strong></div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:4px">'+dateStr+' \u00b7 '+timeStr+'</div>'+
+      '</div>'+
+      '<div style="font-size:13px;color:var(--text2);margin-bottom:10px">'+htmlEsc(ratio.summary||'')+'</div>'+
+      '<div style="font-size:12px;color:var(--text3)">Emails will be distributed across <strong>'+emailAccounts.length+' email ID'+(emailAccounts.length!==1?'s':'')+'</strong> and generated automatically by AI.</div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="submitAssignToManager()">Confirm & Assign</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+
+window.submitAssignToManager=function(){
+  var ratio=STATE._assignRatio;
+  var managerId=STATE._assignManagerId;
+  if(!ratio||!managerId)return;
+  closeModal();
+  apiPost('/distribute/execute',{manager_id:managerId,ratio:ratio}).then(function(res){
+    var msg=res.total_assigned+' leads assigned to '+STATE.users.find(function(u){return u.id===managerId;}).name;
+    showToast(msg,'success');
+    STATE._assignRatio=null;STATE._assignManagerId=null;
+    return Promise.all([refreshPoolStats(),refreshJobs()]);
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
 // ════════════════════════════════════════════════
 // EMAIL ACCOUNTS PAGE — Drop M
 // ════════════════════════════════════════════════
@@ -3603,88 +3815,83 @@ window.toggleEmailAccount=function(id,active){
 // ════════════════════════════════════════════════
 function renderAssignLeads(){
   var u=STATE.user;
-  var unassigned=STATE.jobs.filter(function(j){return j.stage==='Unassigned';});
-  var bds=STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead';});
-  var sel=STATE.assignSel||{};
-  var selIds=Object.keys(sel).filter(function(k){return sel[k];});
-  var targetBD=STATE.assignTargetBD||'';
-  var f=STATE.assignFilter||{ra:'',dup:'all'};
+  var poolStats=STATE.distributePoolStats||{total:0,by_freshness:{},by_industry:{},by_timezone:{},duplicates:0};
+  var managers=STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead';});
 
-  // Filter by RA and dup flag
-  var filtered=unassigned.filter(function(j){
-    if(f.ra&&j.created_by!==f.ra)return false;
-    if(f.dup==='dup'&&!j.is_duplicate)return false;
-    if(f.dup==='clean'&&j.is_duplicate)return false;
-    return true;
-  });
-
-  var ras=STATE.users.filter(function(x){return x.role==='ra';});
-  var raOpts='<option value="">All RAs</option>'+ras.map(function(r){return'<option value="'+r.id+'"'+(f.ra===r.id?' selected':'')+'>'+r.name+'</option>';}).join('');
-  var bdOpts='<option value="">— Select BD —</option>'+bds.map(function(b){return'<option value="'+b.id+'"'+(targetBD===b.id?' selected':'')+'>'+b.name+'</option>';}).join('');
-
-  var allVisibleIds=filtered.map(function(j){return j.id;});
-  var allSelected=allVisibleIds.length>0&&allVisibleIds.every(function(id){return sel[id];});
-
-  var rows=filtered.map(function(j){
-    var cs=STATE.contacts.filter(function(c){return c.job_id===j.id;});
-    var primary=cs.find(function(c){return c.is_primary;})||cs[0]||{};
-    var creator=STATE.users.find(function(u){return u.id===j.created_by;})||{};
-    var checked=!!sel[j.id];
-    return '<tr style="border-bottom:1px solid var(--border2);background:'+(checked?'var(--accent-l)':'')+'">'+
-      '<td style="padding:10px 12px;width:36px"><input type="checkbox" '+(checked?'checked':'')+' onchange="toggleAssignSel(\''+j.id+'\',this.checked)" style="width:16px;height:16px;cursor:pointer"/></td>'+
-      '<td style="padding:10px 12px">'+
-        '<div style="font-weight:600;font-size:13px">'+escHtml(j.company_name)+(j.is_duplicate?' <span style="background:#fef9c3;color:#b45309;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">DUP</span>':'')+'</div>'+
-        '<div style="font-size:11px;color:var(--text3)">'+escHtml(j.company_ind)+'</div>'+
-      '</td>'+
-      '<td style="padding:10px 12px;font-size:13px">'+escHtml(j.position)+'</td>'+
-      '<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+escHtml((primary.first_name||'')+(primary.last_name?' '+primary.last_name:''))+'<div style="font-size:11px;color:var(--text3)">'+escHtml(primary.email||'')+'</div></td>'+
-      '<td style="padding:10px 12px;font-size:12px;color:var(--text3)">'+escHtml(creator.name||'')+'</td>'+
-      '<td style="padding:10px 12px;font-size:11px;color:var(--text3)">'+escHtml(j.created_date||'')+'</td>'+
-    '</tr>';
+  // Show manager cards
+  var managerCards=managers.map(function(m){
+    var emailAccounts=(STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===m.id&&a.is_active;});
+    var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
+    var hasCapacity=emailAccounts.length>0;
+    return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:16px;display:flex;align-items:center;gap:14px;margin-bottom:12px">'+
+      av(m,'40')+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-weight:600;font-size:14px">'+htmlEsc(m.name)+'</div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:3px">'+
+          emailAccounts.length+' email ID'+(emailAccounts.length!==1?'s':'')+
+          ' \u00b7 '+capacity+' emails/day capacity'+
+        '</div>'+
+        (emailAccounts.length?
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">'+
+            emailAccounts.map(function(a){
+              return '<span style="font-size:11px;padding:2px 8px;background:var(--accent-l);color:var(--accent);border-radius:6px">'+htmlEsc(a.display_name)+'</span>';
+            }).join('')+
+          '</div>':
+          '<div style="font-size:12px;color:var(--red);margin-top:4px">No email IDs assigned</div>')+
+      '</div>'+
+      (hasCapacity&&poolStats.total>0?
+        '<button onclick="openAssignToManager(\''+m.id+'\')" style="background:var(--accent);color:#fff;border:0;padding:10px 20px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap">Assign leads</button>':
+        '<span style="font-size:12px;color:var(--text3);padding:8px 12px">'+(!hasCapacity?'No email IDs':'No leads')+'</span>')+
+    '</div>';
   }).join('');
 
-  if(!rows)rows='<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No unassigned leads.</td></tr>';
+  // Pool summary bar
+  var poolBar='';
+  if(poolStats.total>0){
+    var bf=poolStats.by_freshness||{};
+    var bi=poolStats.by_industry||{};
+    var btz=poolStats.by_timezone||{};
+    poolBar='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px 16px;margin-bottom:18px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+        '<div style="font-weight:600;font-size:13px">Unassigned lead pool</div>'+
+        '<div style="font-size:22px;font-weight:700;color:var(--accent)">'+poolStats.total+'</div>'+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;font-size:12px">'+
+        '<div>'+
+          '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Freshness</div>'+
+          Object.keys(bf).map(function(k){
+            var col=k==='Old'?'var(--red)':k==='New'?'var(--green)':'var(--accent)';
+            return '<div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:'+col+';font-weight:500">'+k+'</span><span>'+bf[k]+'</span></div>';
+          }).join('')+
+        '</div>'+
+        '<div>'+
+          '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Industry</div>'+
+          Object.keys(bi).slice(0,5).map(function(k){
+            return '<div style="display:flex;justify-content:space-between;padding:2px 0"><span>'+htmlEsc(k)+'</span><span>'+bi[k]+'</span></div>';
+          }).join('')+
+        '</div>'+
+        '<div>'+
+          '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Timezone</div>'+
+          Object.keys(btz).map(function(k){
+            return '<div style="display:flex;justify-content:space-between;padding:2px 0"><span>'+htmlEsc(k)+'</span><span>'+btz[k]+'</span></div>';
+          }).join('')+
+        '</div>'+
+      '</div>'+
+      (poolStats.duplicates?'<div style="margin-top:8px;font-size:12px;color:var(--amber)">\u26a0 '+poolStats.duplicates+' duplicate leads in pool</div>':'')+
+    '</div>';
+  } else {
+    poolBar='<div style="background:var(--green-l);border:1px solid var(--green);border-radius:var(--r2);padding:14px 16px;margin-bottom:18px;font-size:13px;color:var(--green);font-weight:600">\u2713 No unassigned leads — pool is clear for today.</div>';
+  }
 
   return '<div class="page">'+
     '<div class="ph"><div class="flex jb aic">'+
-      '<div><div class="ptitle">Assign Leads</div><div class="psub">'+unassigned.length+' unassigned · '+selIds.length+' selected</div></div>'+
+      '<div><div class="ptitle">Assign Leads</div>'+
+        '<div class="psub">'+poolStats.total+' unassigned leads in pool \u00b7 '+managers.length+' managers</div></div>'+
+      '<button onclick="refreshPoolStats()" style="background:transparent;border:1px solid var(--border);color:var(--text2);padding:7px 13px;border-radius:8px;font-size:12px;cursor:pointer">\u21bb Refresh pool</button>'+
     '</div></div>'+
-
-    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px 16px;margin-bottom:14px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'+
-      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Filter by RA</label>'+
-        '<select style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px" onchange="setAssignFilter(\'ra\',this.value)">'+raOpts+'</select>'+
-      '</div>'+
-      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Filter</label>'+
-        '<select style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px" onchange="setAssignFilter(\'dup\',this.value)">'+
-          '<option value="all"'+(f.dup==='all'?' selected':'')+'>All leads</option>'+
-          '<option value="clean"'+(f.dup==='clean'?' selected':'')+'>Clean only</option>'+
-          '<option value="dup"'+(f.dup==='dup'?' selected':'')+'>Duplicates only</option>'+
-        '</select>'+
-      '</div>'+
-      '<div style="margin-left:auto;display:flex;gap:10px;align-items:flex-end">'+
-        '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Assign to BD</label>'+
-          '<select id="assign-bd-sel" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px" onchange="STATE.assignTargetBD=this.value;render()">'+bdOpts+'</select>'+
-        '</div>'+
-        '<button onclick="openAssignConfirm()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer'+(selIds.length&&targetBD?'':';opacity:.4;cursor:not-allowed')+'" '+(selIds.length&&targetBD?'':'disabled')+'>Assign '+selIds.length+' leads</button>'+
-      '</div>'+
-    '</div>'+
-
-    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
-      '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
-        '<thead style="background:var(--bg);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
-          '<tr>'+
-            '<th style="padding:10px 12px;width:36px"><input type="checkbox" '+(allSelected?'checked':'')+' onchange="toggleAllAssign(this.checked)" style="width:16px;height:16px;cursor:pointer"/></th>'+
-            '<th style="padding:10px 12px;text-align:left">Company</th>'+
-            '<th style="padding:10px 12px;text-align:left">Position</th>'+
-            '<th style="padding:10px 12px;text-align:left">Primary Contact</th>'+
-            '<th style="padding:10px 12px;text-align:left">Added by RA</th>'+
-            '<th style="padding:10px 12px;text-align:left">Date</th>'+
-          '</tr>'+
-        '</thead>'+
-        '<tbody>'+rows+'</tbody>'+
-      '</table>'+
-    '</div>'+
-    '<div style="margin-top:10px;font-size:12px;color:var(--text3)">'+filtered.length+' leads shown</div>'+
+    poolBar+
+    '<div style="font-weight:600;font-size:13px;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Managers</div>'+
+    managerCards+
   '</div>';
 }
 
@@ -3805,6 +4012,14 @@ function loadAppData(){
     STATE.companies=r[2].map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});
     STATE.reminders=r[3]||[];
     STATE.emailAccounts=r[4]||[];
+    // Load pool stats for ra_lead/admin
+    if(STATE.user&&(STATE.user.role==='ra_lead'||STATE.user.role==='admin')){
+      apiGet('/distribute/pool-stats').then(function(d){STATE.distributePoolStats=d;render();}).catch(function(){});
+    }
+    // Load today's summary for BD
+    if(STATE.user&&(STATE.user.role==='bd'||STATE.user.role==='bd_lead')){
+      apiGet('/distribute/today-summary').then(function(d){STATE.todaySummary=d;render();}).catch(function(){});
+    }
     if(isBD){
       STATE.pendingEmails=(r[3]||[]);
       STATE.emails=(r[4]||[]);
