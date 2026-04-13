@@ -37,7 +37,7 @@ async function logActivity(job_id, contact_id, user_id, action_type, description
 
 // ── HEALTH ─────────────────────────────────────────────────────
 app.use(express.static('public'));
-app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.3.0-dropG' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '2.4.0-dropLM' }));
 
 // ══════════════════════════════════════════════════════════════
 // AUTH
@@ -185,7 +185,7 @@ app.delete('/companies/:id', auth, async (req, res) => {
 // JOBS  (the new "lead" = a job opening)
 // Scoping: admin sees all; bd/ra sees created_by=self OR assigned_to=self
 // ══════════════════════════════════════════════════════════════
-const JOB_SELECT = `*, company:companies(id,name,website,industry,location), contacts(id,job_id,first_name,last_name,designation,email,phone,linkedin,is_primary,email_status,ooo_until,email_sent_at,email_platform), creator:users!created_by(id,name,employee_id), assignee:users!assigned_to(id,name,employee_id), bd_assignee:users!assigned_to_bd(id,name,employee_id)`;
+const JOB_SELECT = `*, company:companies(id,name,website,industry,location), contacts(id,job_id,first_name,last_name,designation,email,phone,linkedin,is_primary,email_status,ooo_until,email_sent_at,email_platform), creator:users!created_by(id,name,employee_id), assignee:users!assigned_to(id,name,employee_id), bd_assignee:users!assigned_to_bd(id,name,employee_id), sending_account:email_accounts!sending_email_id(id,email_address,display_name)`;
 
 app.get('/jobs', auth, async (req, res) => {
   try {
@@ -221,15 +221,44 @@ app.get('/jobs/:id', auth, async (req, res) => {
 
 app.post('/jobs', auth, async (req, res) => {
   try {
-    const { company_id, position, location, source, job_url, stage, notes, assigned_to, is_duplicate, duplicate_of, contacts } = req.body;
+    const { company_id, position, location, source, job_url, stage, notes, assigned_to, is_duplicate, duplicate_of, contacts, salary_range, job_created_date, job_opened_date, bdm_assigned_name, industry: jobIndustry } = req.body;
     if (!company_id || !position) return res.status(400).json({ error: 'company_id and position required' });
+    // Auto-calculate timezone from location
+    const tzMap = {
+      'ny':'EST','nj':'EST','fl':'EST','ma':'EST','pa':'EST','ga':'EST','nc':'EST','sc':'EST','va':'EST','ct':'EST','me':'EST','nh':'EST','vt':'EST','ri':'EST','de':'EST','md':'EST','dc':'EST','oh':'EST','mi':'EST','in':'EST','ky':'EST','wv':'EST','tn':'EST',
+      'tx':'CST','il':'CST','mn':'CST','wi':'CST','mo':'CST','ia':'CST','ks':'CST','ne':'CST','sd':'CST','nd':'CST','ok':'CST','la':'CST','ar':'CST','ms':'CST','al':'CST',
+      'co':'MST','az':'MST','nm':'MST','ut':'MST','wy':'MST','mt':'MST','id':'MST',
+      'ca':'PST','wa':'PST','or':'PST','nv':'PST','ak':'PST','hi':'PST'
+    };
+    let timezone = 'EST';
+    if (location) {
+      const loc = location.toLowerCase();
+      for (const [state, tz] of Object.entries(tzMap)) {
+        if (loc.includes(state)) { timezone = tz; break; }
+      }
+    }
+    // Auto-calculate freshness
+    let freshness = 'Normal';
+    const refDate = job_opened_date || job_created_date;
+    if (refDate) {
+      const days = Math.floor((new Date() - new Date(refDate)) / 86400000);
+      if (days <= 3) freshness = 'New';
+      else if (days <= 10) freshness = 'Normal';
+      else freshness = 'Old';
+    }
     const { data: job, error } = await supabase.from('jobs').insert({
       company_id, position, location, source, job_url,
       stage: stage || 'Unassigned', notes: notes || '',
       created_by: req.user.id,
       assigned_to: (['admin','ra_lead'].includes(req.user.role) ? (assigned_to || null) : null),
       is_duplicate: is_duplicate || false,
-      duplicate_of: duplicate_of || null
+      duplicate_of: duplicate_of || null,
+      salary_range: salary_range || null,
+      job_created_date: job_created_date || null,
+      job_opened_date: job_opened_date || null,
+      timezone, freshness,
+      bdm_assigned_name: bdm_assigned_name || null,
+      industry: jobIndustry || null
     }).select().single();
     if (error) throw error;
 
@@ -252,7 +281,7 @@ app.put('/jobs/:id', auth, async (req, res) => {
     if (!existing) return res.status(404).json({ error: 'Not found' });
     const canEdit = ['admin','ra_lead'].includes(req.user.role) || existing.created_by === req.user.id || existing.assigned_to === req.user.id || existing.assigned_to_bd === req.user.id;
     if (!canEdit) return res.status(403).json({ error: 'Forbidden' });
-    const { position, location, source, job_url, stage, notes, assigned_to, assigned_to_bd } = req.body;
+    const { position, location, source, job_url, stage, notes, assigned_to, assigned_to_bd, sending_email_id } = req.body;
     const updates = { updated_at: new Date() };
     if (position !== undefined) updates.position = position;
     if (location !== undefined) updates.location = location;
@@ -273,6 +302,9 @@ app.put('/jobs/:id', auth, async (req, res) => {
       updates.assigned_to_bd = assigned_to_bd || null;
       updates.assigned_at = assigned_to_bd ? new Date() : null;
       if (assigned_to_bd && stage === undefined) updates.stage = 'Assigned';
+    }
+    if (sending_email_id !== undefined && ['admin','ra_lead'].includes(req.user.role)) {
+      updates.sending_email_id = sending_email_id || null;
     }
 
     const { data, error } = await supabase.from('jobs').update(updates).eq('id', req.params.id).select().single();
@@ -300,6 +332,76 @@ app.delete('/jobs/:id', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+
+
+// ══════════════════════════════════════════════════════════════
+// EMAIL ACCOUNTS (sending identities)
+// ══════════════════════════════════════════════════════════════
+app.get('/email-accounts', auth, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('email_accounts')
+      .select('*, assigned_user:users!assigned_to(id,name,email,role), assigner:users!assigned_by(id,name)')
+      .order('created_at');
+    if (error) throw error;
+    // non-admins see only their own
+    const filtered = ['admin','ra_lead','bd_lead'].includes(req.user.role)
+      ? data
+      : data.filter(a => a.assigned_to === req.user.id);
+    res.json(filtered);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/email-accounts', auth, async (req, res) => {
+  try {
+    if (!['admin','bd_lead'].includes(req.user.role)) return res.status(403).json({ error: 'Admin only' });
+    const { email_address, display_name, assigned_to, daily_send_limit } = req.body;
+    if (!email_address || !display_name) return res.status(400).json({ error: 'email_address and display_name required' });
+    const { data, error } = await supabase.from('email_accounts').insert({
+      email_address: email_address.toLowerCase().trim(),
+      display_name, assigned_to: assigned_to || null,
+      assigned_by: req.user.id,
+      daily_send_limit: daily_send_limit || 150
+    }).select('*, assigned_user:users!assigned_to(id,name,email,role)').single();
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/email-accounts/:id', auth, async (req, res) => {
+  try {
+    if (!['admin','bd_lead'].includes(req.user.role)) return res.status(403).json({ error: 'Admin only' });
+    const { email_address, display_name, assigned_to, daily_send_limit, is_active } = req.body;
+    const updates = { updated_at: new Date() };
+    if (email_address) updates.email_address = email_address.toLowerCase().trim();
+    if (display_name) updates.display_name = display_name;
+    if (assigned_to !== undefined) { updates.assigned_to = assigned_to || null; updates.assigned_by = req.user.id; }
+    if (daily_send_limit !== undefined) updates.daily_send_limit = daily_send_limit;
+    if (is_active !== undefined) updates.is_active = is_active;
+    const { data, error } = await supabase.from('email_accounts').update(updates)
+      .eq('id', req.params.id).select('*, assigned_user:users!assigned_to(id,name,email,role)').single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/email-accounts/:id', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    await supabase.from('email_accounts').update({ is_active: false, updated_at: new Date() }).eq('id', req.params.id);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Get send count for today per email account
+app.get('/email-accounts/:id/send-count', auth, async (req, res) => {
+  try {
+    const todayDate = today();
+    const { data, error } = await supabase.from('email_send_log')
+      .select('emails_sent').eq('email_account_id', req.params.id).eq('send_date', todayDate).single();
+    if (error && error.code !== 'PGRST116') throw error;
+    res.json({ emails_sent: data?.emails_sent || 0, date: todayDate });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // ══════════════════════════════════════════════════════════════
 // BULK ASSIGN — RA Team Lead assigns multiple jobs to a BD
