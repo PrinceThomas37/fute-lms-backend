@@ -145,6 +145,23 @@ app.get('/companies', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Bulk create companies ──────────────────────────────────────
+app.post('/companies/bulk', auth, async (req, res) => {
+  try {
+    const { companies } = req.body;
+    if (!Array.isArray(companies) || !companies.length) return res.status(400).json({ error: 'companies array required' });
+    const rows = companies.map(c => ({
+      name: c.name, website: c.website || null,
+      industry: c.industry || null, location: c.location || null,
+      created_by: req.user.id
+    }));
+    const { data, error } = await supabase.from('companies').insert(rows).select('id,name');
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+
 app.post('/companies', auth, async (req, res) => {
   try {
     const { name, website, industry, location, size, notes } = req.body;
@@ -218,6 +235,97 @@ app.get('/jobs/:id', auth, async (req, res) => {
     res.json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// ── Bulk import jobs (fast batch insert) ──────────────────────
+app.post('/jobs/bulk', auth, async (req, res) => {
+  try {
+    const { jobs } = req.body; // array of job objects each with optional contacts[]
+    if (!Array.isArray(jobs) || !jobs.length) return res.status(400).json({ error: 'jobs array required' });
+
+    const tzMap = {
+      'ny':'EST','nj':'EST','fl':'EST','ma':'EST','pa':'EST','ga':'EST','nc':'EST','sc':'EST','va':'EST','ct':'EST','me':'EST','nh':'EST','vt':'EST','ri':'EST','de':'EST','md':'EST','dc':'EST','oh':'EST','mi':'EST','in':'EST','ky':'EST','wv':'EST','tn':'EST',
+      'tx':'CST','il':'CST','mn':'CST','wi':'CST','mo':'CST','ia':'CST','ks':'CST','ne':'CST','sd':'CST','nd':'CST','ok':'CST','la':'CST','ar':'CST','ms':'CST','al':'CST',
+      'co':'MST','az':'MST','nm':'MST','ut':'MST','wy':'MST','mt':'MST','id':'MST',
+      'ca':'PST','wa':'PST','or':'PST','nv':'PST','ak':'PST','hi':'PST'
+    };
+
+    function getTimezone(location) {
+      if (!location) return 'EST';
+      const loc = location.toLowerCase();
+      for (const [state, tz] of Object.entries(tzMap)) {
+        if (loc.includes(state)) return tz;
+      }
+      return 'EST';
+    }
+
+    function getFreshness(openedDate, createdDate) {
+      const ref = openedDate || createdDate;
+      if (!ref) return 'Normal';
+      const days = Math.floor((new Date() - new Date(ref)) / 86400000);
+      if (days <= 3) return 'New';
+      if (days <= 10) return 'Normal';
+      return 'Old';
+    }
+
+    // Build job rows for batch insert
+    const jobRows = jobs.map(j => ({
+      company_id: j.company_id,
+      position: j.position || '(unknown)',
+      location: j.location || null,
+      source: j.source || 'Import',
+      job_url: j.job_url || null,
+      stage: 'Unassigned',
+      notes: '',
+      created_by: req.user.id,
+      assigned_to: null,
+      is_duplicate: j.is_duplicate || false,
+      duplicate_of: j.duplicate_of || null,
+      salary_range: j.salary_range || null,
+      job_created_date: j.job_created_date || null,
+      job_opened_date: j.job_opened_date || null,
+      timezone: getTimezone(j.location),
+      freshness: getFreshness(j.job_opened_date, j.job_created_date),
+      bdm_assigned_name: j.bdm_assigned_name || null,
+      industry: j.industry || null
+    }));
+
+    // Batch insert all jobs at once
+    const { data: insertedJobs, error: jobErr } = await supabase
+      .from('jobs').insert(jobRows).select('id');
+    if (jobErr) throw jobErr;
+
+    // Build contacts rows for all jobs
+    const contactRows = [];
+    insertedJobs.forEach((job, idx) => {
+      const contacts = jobs[idx].contacts || [];
+      contacts.forEach((c, ci) => {
+        if (!c.first_name && !c.email) return; // skip empty
+        contactRows.push({
+          job_id: job.id,
+          first_name: c.first_name || '',
+          last_name: c.last_name || '',
+          designation: c.designation || null,
+          email: c.email || null,
+          phone: c.phone || null,
+          linkedin: c.linkedin || null,
+          is_primary: ci === 0
+        });
+      });
+    });
+
+    // Batch insert all contacts at once
+    if (contactRows.length) {
+      const { error: cErr } = await supabase.from('contacts').insert(contactRows);
+      if (cErr) console.error('Contact batch insert error:', cErr.message);
+    }
+
+    res.status(201).json({
+      imported: insertedJobs.length,
+      contacts: contactRows.length
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 
 app.post('/jobs', auth, async (req, res) => {
   try {
