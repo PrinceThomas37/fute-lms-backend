@@ -656,9 +656,34 @@ app.get('/insights/ra/:userId', auth, async (req, res) => {
       const key = d.toISOString().split('T')[0];
       last7[key] = all.filter(j => j.created_date === key).length;
     }
+    function normalizeIndustry(raw) {
+      if (!raw) return 'Other';
+      const r = raw.toLowerCase();
+      if (r.includes('engineer') || r.includes('manufactur') || r.includes('machinery') ||
+          r.includes('automation') || r.includes('aerospace') || r.includes('defense') ||
+          r.includes('construction') || r.includes('civil') || r.includes('mechanical') ||
+          r.includes('architecture') || r.includes('industrial') || r.includes('oil') ||
+          r.includes('gas') || r.includes('aviation') || r.includes('transportation') ||
+          r.includes('logistics') || r.includes('real estate') || r.includes('planning')) return 'Engineering';
+      if (r.includes('health') || r.includes('medical') || r.includes('pharma') ||
+          r.includes('hospital') || r.includes('wellness') || r.includes('fitness') ||
+          r.includes('biotech') || r.includes('dental') || r.includes('clinical')) return 'Healthcare';
+      if (r.includes('legal') || r.includes('law') || r.includes('attorney') ||
+          r.includes('compliance') || r.includes('litigation')) return 'Legal';
+      if (r.includes('account') || r.includes('financ') || r.includes('audit') ||
+          r.includes('tax') || r.includes('bookkeep') || r.includes('cpa')) return 'Accounting';
+      if (r.includes('manag') || r.includes('consult') || r.includes('staffing') ||
+          r.includes('recruit') || r.includes('hr') || r.includes('human resource') ||
+          r.includes('executive') || r.includes('leadership') || r.includes('strategy')) return 'Management';
+      return 'Other';
+    }
     function breakdown(arr, field) {
       const map = {};
-      arr.forEach(j => { const v = j[field] || 'Unknown'; map[v] = (map[v] || 0) + 1; });
+      arr.forEach(j => {
+        const raw = j[field] || '';
+        const v = field === 'industry' ? normalizeIndustry(raw) : (raw || 'Unknown');
+        map[v] = (map[v] || 0) + 1;
+      });
       return map;
     }
     res.json({
@@ -915,10 +940,21 @@ app.get('/distribute/today-summary', auth, async (req, res) => {
     const todayDate = today();
     const { data: jobs } = await supabase.from('jobs').select('id,freshness,industry,timezone,assigned_at')
       .eq('assigned_to_bd', targetId).gte('assigned_at', todayDate + 'T00:00:00Z');
+    function normInd(raw) {
+      if (!raw) return 'Other';
+      const r = raw.toLowerCase();
+      if (r.includes('engineer')||r.includes('manufactur')||r.includes('construction')||r.includes('civil')||r.includes('mechanical')||r.includes('oil')||r.includes('gas')||r.includes('aerospace')||r.includes('aviation')||r.includes('transportation')||r.includes('logistics')||r.includes('real estate')||r.includes('architecture')||r.includes('industrial')||r.includes('defense')||r.includes('machinery')||r.includes('automation')) return 'Engineering';
+      if (r.includes('health')||r.includes('medical')||r.includes('pharma')||r.includes('hospital')||r.includes('wellness')||r.includes('fitness')||r.includes('biotech')||r.includes('dental')||r.includes('clinical')) return 'Healthcare';
+      if (r.includes('legal')||r.includes('law')||r.includes('attorney')||r.includes('compliance')||r.includes('litigation')) return 'Legal';
+      if (r.includes('account')||r.includes('financ')||r.includes('audit')||r.includes('tax')||r.includes('bookkeep')||r.includes('cpa')) return 'Accounting';
+      if (r.includes('manag')||r.includes('consult')||r.includes('staffing')||r.includes('recruit')||r.includes('hr')||r.includes('human resource')||r.includes('executive')||r.includes('strategy')) return 'Management';
+      return 'Other';
+    }
     const summary = { total: jobs?.length || 0, by_freshness: {}, by_industry: {}, by_timezone: {} };
     (jobs || []).forEach(j => {
       summary.by_freshness[j.freshness || 'Unknown'] = (summary.by_freshness[j.freshness || 'Unknown'] || 0) + 1;
-      summary.by_industry[j.industry || 'Unknown'] = (summary.by_industry[j.industry || 'Unknown'] || 0) + 1;
+      const ind = normInd(j.industry || '');
+      summary.by_industry[ind] = (summary.by_industry[ind] || 0) + 1;
       summary.by_timezone[j.timezone || 'Unknown'] = (summary.by_timezone[j.timezone || 'Unknown'] || 0) + 1;
     });
     res.json(summary);
