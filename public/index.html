@@ -488,6 +488,7 @@ var STATE = {
   assignFilter: {ra:"",dup:"all"},
   pendingEmails: [],
   previewPendingId: null,
+  emailAccounts: [],
   composeContactId: null,
   showAIPanel: false,
 };
@@ -703,6 +704,7 @@ function renderApp(){
     {id:"profile",lbl:"My Profile",ic:"profile"}
   ];
   if(u.role==="admin"||u.role==="ra_lead"||u.role==="bd_lead")navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
+  if(u.role==="admin"||u.role==="bd_lead")navItems.splice(5,0,{id:"emailaccounts",lbl:"Email Accounts",ic:"email"});
   if(u.role==="ra_lead"||u.role==="admin")navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
 
   var nav=navItems.map(function(n){
@@ -713,7 +715,7 @@ function renderApp(){
 
   var switchers=""; // removed — use team list to switch views
 
-  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",profile:"My Profile",reminders:"Reminders"};
+  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",emailaccounts:"Email Accounts",profile:"My Profile",reminders:"Reminders"};
   var viewingName=STATE.viewingUser&&STATE.viewingUser.id!==u.id?" · Viewing: "+STATE.viewingUser.name:"";
 
   return '<div id="sidebar">'+
@@ -752,6 +754,7 @@ function renderPage(){
   if(STATE.page==="dashboard")return renderDashboard();
   if(STATE.page==="leads"){var html=renderJobs();setTimeout(bindJobsControls,0);return html;}
   if(STATE.page==="assign"){return renderAssignLeads();}
+  if(STATE.page==="emailaccounts"){return renderEmailAccounts();}
   if(STATE.page==="email")return renderEmail();
   if(STATE.page==="reminders")return renderReminders();
   if(STATE.page==="admin")return renderAdmin();
@@ -1017,7 +1020,7 @@ function renderJobs(){
     var primary=cs[0]||{};
     var stageColor={Unassigned:"#94a3b8",Assigned:"#3b82f6",Connected:"#8b5cf6",Rejected:"#ef4444",Future:"#f59e0b",Qualified:"#10b981"}[j.stage]||"#64748b";
     return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer" onclick="openJob(\''+j.id+'\')">'+
-      '<td style="padding:12px"><div style="font-weight:600;color:var(--text)">'+escHtml(j.company_name)+(j.is_duplicate?'<span style="margin-left:6px;background:#fef9c3;color:#b45309;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">DUP</span>':'')+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.company_ind)+'</div></td>'+
+      '<td style="padding:12px"><div style="font-weight:600;color:var(--text)">'+escHtml(j.company_name)+(j.is_duplicate?'<span style="margin-left:6px;background:#fef9c3;color:#b45309;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">DUP</span>':'')+(j.freshness==='Old'?'<span style="margin-left:6px;background:#fef2f2;color:#dc2626;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">OLD</span>':'')+(j.freshness==='New'?'<span style="margin-left:6px;background:#f0fdf4;color:#16a34a;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">NEW</span>':'')+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.company_ind)+'</div></td>'+
       '<td style="padding:12px"><div style="font-weight:500">'+escHtml(j.position)+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.location||"—")+'</div></td>'+
       '<td style="padding:12px"><div>'+escHtml((primary.first_name||"")+" "+(primary.last_name||""))+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(primary.email||"—")+'</div></td>'+
       '<td style="padding:12px;text-align:center"><span style="background:rgba(99,102,241,.1);color:var(--accent);padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600">'+cs.length+'</span></td>'+
@@ -2778,6 +2781,13 @@ window.bulkSendEmail=function(){
   openMailMerge(ids);
 };
 // Parse date from Excel — handles dd/mm/yyyy, yyyy-mm-dd, Excel serial numbers
+function parseExcelDateToISO(v){
+  if(!v)return null;
+  if(!isNaN(v)){var d=new Date(Math.round((Number(v)-25569)*86400000));return d.toISOString().split('T')[0];}
+  var d2=new Date(v);
+  if(!isNaN(d2))return d2.toISOString().split('T')[0];
+  return null;
+}
 function parseExcelDate(val){
   if(!val)return todayIST();
   if(typeof val==="number"){var d=new Date((val-25569)*86400000);return d.toISOString().split("T")[0];}
@@ -2882,6 +2892,10 @@ var COL_MAP=[
   [["date","leaddate","dateadded","createdon"],"date"],
   [["notes","note","comments","remarks"],"notes"],
   [["analystname","analyst","raname","researchanalyst"],"analystName"],
+  [["bdmassigned","bdm","bdmanager","managername","assignedto"],"bdmAssigned"],
+  [["salaryrange","salary","compensation","pay","salaryband"],"salaryRange"],
+  [["jobcreateddate","jobcreated","datecreated","createdate"],"jobCreatedDate"],
+  [["jobopeneddate","jobopened","dateopened","opendate","posteddate","jobposted"],"jobOpenedDate"],
 ];
 
 function renderImportModal(rows, sheetName){
@@ -2984,6 +2998,11 @@ function groupImportRows(mapped){
         location:(r.location||"").trim(),
         position:(r.position||"").trim(),
         source:(r.source||"Import").trim(),
+        salaryRange:(r.salaryRange||"").trim(),
+        jobCreatedDate:(r.jobCreatedDate||"").trim(),
+        jobOpenedDate:(r.jobOpenedDate||"").trim(),
+        bdmAssigned:(r.bdmAssigned||"").trim(),
+        analystName:(r.analystName||"").trim(),
         contacts:[]
       };
       order.push(key);
@@ -3138,6 +3157,11 @@ window.doImportProcess=function(toProcess,dupEmailMap){
       var payload={company_id:coId,position:g.position||'(unknown)',stage:'Unassigned',contacts:g.contacts,is_duplicate:groupIsDup};
       if(g.location)payload.location=g.location;
       if(g.source)payload.source=g.source;
+      if(g.industry)payload.industry=g.industry;
+      if(g.salaryRange)payload.salary_range=g.salaryRange;
+      if(g.jobCreatedDate)payload.job_created_date=parseExcelDateToISO(g.jobCreatedDate);
+      if(g.jobOpenedDate)payload.job_opened_date=parseExcelDateToISO(g.jobOpenedDate);
+      if(g.bdmAssigned)payload.bdm_assigned_name=g.bdmAssigned;
       return apiPost('/jobs',payload);
     }).then(function(){
       succeeded++;
@@ -3252,6 +3276,160 @@ window.saveEmailEdit=function(id){
   apiFetch('PATCH','/emails/'+id,{body:el.value}).then(function(updated){
     STATE.pendingEmails=(STATE.pendingEmails||[]).map(function(e){return e.id===id?Object.assign({},e,{body:updated.body}):e;});
     showToast('Email updated','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+// ════════════════════════════════════════════════
+// EMAIL ACCOUNTS PAGE — Drop M
+// ════════════════════════════════════════════════
+function renderEmailAccounts(){
+  var u=STATE.user;
+  var accounts=STATE.emailAccounts||[];
+  var managers=STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead'||x.role==='admin';});
+
+  // Group accounts by assigned manager
+  var byManager={};
+  var unassigned=[];
+  accounts.forEach(function(a){
+    if(a.assigned_to){
+      if(!byManager[a.assigned_to])byManager[a.assigned_to]=[];
+      byManager[a.assigned_to].push(a);
+    } else {
+      unassigned.push(a);
+    }
+  });
+
+  var managerBlocks=managers.map(function(m){
+    var mAccounts=byManager[m.id]||[];
+    var rows=mAccounts.map(function(a){
+      return '<tr style="border-bottom:1px solid var(--border2)">'+
+        '<td style="padding:10px 12px;font-size:13px"><div style="font-weight:500">'+htmlEsc(a.display_name)+'</div>'+
+          '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(a.email_address)+'</div></td>'+
+        '<td style="padding:10px 12px;text-align:center">'+
+          '<span style="font-size:12px;padding:3px 8px;background:'+(a.is_active?'var(--green-l)':'var(--red-l)')+';color:'+(a.is_active?'var(--green)':'var(--red)')+';border-radius:8px;font-weight:600">'+(a.is_active?'Active':'Inactive')+'</span>'+
+        '</td>'+
+        '<td style="padding:10px 12px;text-align:center;font-size:13px;color:var(--text2)">'+htmlEsc(String(a.daily_send_limit||150))+'</td>'+
+        '<td style="padding:10px 12px;white-space:nowrap">'+
+          '<button class="btn-icon" onclick="openEditEmailAccount(\''+a.id+'\')">'+ico('edit',13)+'</button>'+
+          '<button class="btn-icon" style="color:var(--red)" onclick="toggleEmailAccount(\''+a.id+'\','+(!a.is_active)+')">'+(a.is_active?ico('trash',13):'\u21a9')+'</button>'+
+        '</td>'+
+      '</tr>';
+    }).join('');
+
+    return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);margin-bottom:14px;overflow:hidden">'+
+      '<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:var(--bg)">'+
+        '<div style="display:flex;align-items:center;gap:10px">'+
+          av(m,'32')+
+          '<div><div style="font-weight:600;font-size:13px">'+htmlEsc(m.name)+'</div>'+
+          '<div style="font-size:11px;color:var(--text3)">'+roleLabel(m.role)+'</div></div>'+
+        '</div>'+
+        '<div style="display:flex;align-items:center;gap:10px">'+
+          '<span style="font-size:12px;color:var(--text3)">'+mAccounts.length+' / 4 email IDs</span>'+
+          (mAccounts.length<4?'<button onclick="openAddEmailAccount(\''+m.id+'\')" style="font-size:12px;padding:5px 11px;background:var(--accent);color:#fff;border:0;border-radius:7px;cursor:pointer">+ Add Email ID</button>':
+          '<span style="font-size:11px;color:var(--text3);padding:4px 8px;background:var(--bg);border-radius:6px">Max reached</span>')+
+        '</div>'+
+      '</div>'+
+      (rows?
+        '<table style="width:100%;border-collapse:collapse">'+
+          '<thead style="background:var(--bg);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
+            '<tr><th style="padding:8px 12px;text-align:left">Email ID</th><th style="padding:8px 12px;text-align:center">Status</th><th style="padding:8px 12px;text-align:center">Daily Limit</th><th style="padding:8px 12px"></th></tr>'+
+          '</thead>'+
+          '<tbody>'+rows+'</tbody>'+
+        '</table>'
+      :'<div style="padding:20px;text-align:center;font-size:13px;color:var(--text3)">No email IDs assigned yet.</div>')+
+    '</div>';
+  }).join('');
+
+  var unassignedBlock=unassigned.length?
+    '<div style="background:var(--card);border:1.5px dashed var(--border2);border-radius:var(--r2);margin-bottom:14px;padding:14px 16px">'+
+      '<div style="font-weight:600;font-size:13px;margin-bottom:10px;color:var(--text3)">Unassigned Email IDs ('+unassigned.length+')</div>'+
+      unassigned.map(function(a){
+        return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">'+
+          '<div><div style="font-size:13px;font-weight:500">'+htmlEsc(a.display_name)+'</div>'+
+            '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(a.email_address)+'</div></div>'+
+          '<button onclick="openEditEmailAccount(\''+a.id+'\')" class="btn btn-outline btn-sm">Assign</button>'+
+        '</div>';
+      }).join('')+
+    '</div>':'';
+
+  return '<div class="page">'+
+    '<div class="ph"><div class="flex jb aic">'+
+      '<div><div class="ptitle">Email Accounts</div>'+
+        '<div class="psub">'+accounts.length+' email IDs · '+managers.length+' managers</div></div>'+
+      '<button class="btn btn-primary btn-sm" onclick="openAddEmailAccount(null)">'+ico('plus',13)+'Add Email ID</button>'+
+    '</div></div>'+
+    unassignedBlock+
+    managerBlocks+
+  '</div>';
+}
+
+window.openAddEmailAccount=function(managerId){
+  var managers=STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead'||x.role==='admin';});
+  var mOpts='<option value="">— Unassigned —</option>'+managers.map(function(m){
+    return '<option value="'+m.id+'"'+(managerId===m.id?' selected':'')+'>'+htmlEsc(m.name)+'</option>';
+  }).join('');
+  STATE.modal='<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Add Email ID</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div class="fgrp"><label class="flbl">Email address <span style="color:var(--red)">*</span></label><input class="inp" id="ea-email" placeholder="name@futeglobal.com"/></div>'+
+      '<div class="fgrp"><label class="flbl">Display name <span style="color:var(--red)">*</span></label><input class="inp" id="ea-name" placeholder="John Smith"/></div>'+
+      '<div class="fgrp"><label class="flbl">Assign to Manager</label><select class="sel" id="ea-manager">'+mOpts+'</select></div>'+
+      '<div class="fgrp"><label class="flbl">Daily send limit</label><input class="inp" type="number" id="ea-limit" value="150" min="1" max="500"/></div>'+
+    '</div>'+
+    '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="submitAddEmailAccount()">Add Email ID</button></div>'+
+  '</div>';
+  render();
+};
+
+window.openEditEmailAccount=function(id){
+  var a=STATE.emailAccounts.find(function(x){return x.id===id;});
+  if(!a)return;
+  var managers=STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead'||x.role==='admin';});
+  var mOpts='<option value="">— Unassigned —</option>'+managers.map(function(m){
+    return '<option value="'+m.id+'"'+(a.assigned_to===m.id?' selected':'')+'>'+htmlEsc(m.name)+'</option>';
+  }).join('');
+  STATE.modal='<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Edit Email ID</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div class="fgrp"><label class="flbl">Email address</label><input class="inp" id="ea-email" value="'+htmlEsc(a.email_address)+'"/></div>'+
+      '<div class="fgrp"><label class="flbl">Display name</label><input class="inp" id="ea-name" value="'+htmlEsc(a.display_name)+'"/></div>'+
+      '<div class="fgrp"><label class="flbl">Assign to Manager</label><select class="sel" id="ea-manager">'+mOpts+'</select></div>'+
+      '<div class="fgrp"><label class="flbl">Daily send limit</label><input class="inp" type="number" id="ea-limit" value="'+htmlEsc(String(a.daily_send_limit||150))+'" min="1" max="500"/></div>'+
+    '</div>'+
+    '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="submitEditEmailAccount(\''+id+'\')">Save changes</button></div>'+
+  '</div>';
+  render();
+};
+
+window.submitAddEmailAccount=function(){
+  var email=(document.getElementById('ea-email')||{}).value||'';
+  var name=(document.getElementById('ea-name')||{}).value||'';
+  var manager=(document.getElementById('ea-manager')||{}).value||null;
+  var limit=parseInt((document.getElementById('ea-limit')||{}).value||'150');
+  if(!email||!name){showToast('Email and display name required','warning');return;}
+  apiPost('/email-accounts',{email_address:email,display_name:name,assigned_to:manager||undefined,daily_send_limit:limit}).then(function(a){
+    STATE.emailAccounts.push(a);
+    closeModal();showToast('Email ID added','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.submitEditEmailAccount=function(id){
+  var email=(document.getElementById('ea-email')||{}).value||'';
+  var name=(document.getElementById('ea-name')||{}).value||'';
+  var manager=(document.getElementById('ea-manager')||{}).value||null;
+  var limit=parseInt((document.getElementById('ea-limit')||{}).value||'150');
+  apiPut('/email-accounts/'+id,{email_address:email,display_name:name,assigned_to:manager||null,daily_send_limit:limit}).then(function(a){
+    STATE.emailAccounts=STATE.emailAccounts.map(function(x){return x.id===id?a:x;});
+    closeModal();showToast('Email ID updated','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.toggleEmailAccount=function(id,active){
+  apiPut('/email-accounts/'+id,{is_active:active}).then(function(a){
+    STATE.emailAccounts=STATE.emailAccounts.map(function(x){return x.id===id?a:x;});
+    showToast(active?'Email ID activated':'Email ID deactivated','success');render();
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
@@ -3434,18 +3612,23 @@ function normaliseUser(u){var nm=u.name||'';var parts=nm.trim().split(/\s+/);var
 function normaliseJob(j){
   var co=j.company||{};
   var bd=j.bd_assignee||{};
+  var sa=j.sending_account||{};
   return{id:j.id,company_id:j.company_id,company_name:co.name||'',company_ind:co.industry||'',company_web:co.website||'',
     position:j.position,location:j.location||'',source:j.source||'',job_url:j.job_url||'',
     stage:j.stage||'Unassigned',notes:j.notes||'',created_by:j.created_by,assigned_to:j.assigned_to,
     assigned_to_bd:j.assigned_to_bd||null,assigned_bd_name:bd.name||'',assigned_at:j.assigned_at||null,
     is_duplicate:!!j.is_duplicate,duplicate_of:j.duplicate_of||null,
+    salary_range:j.salary_range||'',job_created_date:j.job_created_date||'',job_opened_date:j.job_opened_date||'',
+    timezone:j.timezone||'',freshness:j.freshness||'',industry:j.industry||'',
+    bdm_assigned_name:j.bdm_assigned_name||'',
+    sending_email_id:j.sending_email_id||null,sending_email:sa.email_address||'',sending_display:sa.display_name||'',
     created_date:j.created_date,created_at:j.created_at};
 }
 function flattenContacts(jobs){var out=[];jobs.forEach(function(j){(j.contacts||[]).forEach(function(c){out.push({id:c.id,job_id:c.job_id,first_name:c.first_name,last_name:c.last_name||'',designation:c.designation||'',email:c.email||'',phone:c.phone||'',linkedin:c.linkedin||'',is_primary:!!c.is_primary,email_status:c.email_status||'valid',ooo_until:c.ooo_until||null});});});return out;}
 
 function loadAppData(){
   STATE.loading=true;render();
-  var calls=[apiGet('/users'),apiGet('/jobs'),apiGet('/companies'),apiGet('/reminders')];
+  var calls=[apiGet('/users'),apiGet('/jobs'),apiGet('/companies'),apiGet('/reminders'),apiGet('/email-accounts')];
   var u=STATE.user;
   var isBD=(u&&(u.role==='bd'||u.role==='bd_lead'||u.role==='admin'||u.role==='ra_lead'));
   if(isBD)calls.push(apiGet('/emails?status=pending'));
@@ -3456,6 +3639,7 @@ function loadAppData(){
     STATE.contacts=flattenContacts(r[1]);
     STATE.companies=r[2].map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});
     STATE.reminders=r[3]||[];
+    STATE.emailAccounts=r[4]||[];
     if(isBD){
       STATE.pendingEmails=(r[3]||[]);
       STATE.emails=(r[4]||[]);
