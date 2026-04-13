@@ -2126,6 +2126,16 @@ function renderModal(){
   return'<div class="overlay" onclick="overlayClick(event)">'+STATE.modal+'</div>';
 }
 
+function normalizeIndustry(raw){
+  if(!raw)return'Other';
+  var r=raw.toLowerCase();
+  if(r.indexOf('engineer')>-1||r.indexOf('manufactur')>-1||r.indexOf('construction')>-1||r.indexOf('civil')>-1||r.indexOf('mechanical')>-1||r.indexOf('oil')>-1||r.indexOf('gas')>-1||r.indexOf('aerospace')>-1||r.indexOf('aviation')>-1||r.indexOf('transportation')>-1||r.indexOf('logistics')>-1||r.indexOf('real estate')>-1||r.indexOf('architecture')>-1||r.indexOf('industrial')>-1||r.indexOf('defense')>-1||r.indexOf('machinery')>-1||r.indexOf('automation')>-1)return'Engineering';
+  if(r.indexOf('health')>-1||r.indexOf('medical')>-1||r.indexOf('pharma')>-1||r.indexOf('hospital')>-1||r.indexOf('wellness')>-1||r.indexOf('fitness')>-1||r.indexOf('biotech')>-1||r.indexOf('dental')>-1||r.indexOf('clinical')>-1)return'Healthcare';
+  if(r.indexOf('legal')>-1||r.indexOf('law')>-1||r.indexOf('attorney')>-1||r.indexOf('compliance')>-1||r.indexOf('litigation')>-1)return'Legal';
+  if(r.indexOf('account')>-1||r.indexOf('financ')>-1||r.indexOf('audit')>-1||r.indexOf('tax')>-1||r.indexOf('bookkeep')>-1||r.indexOf('cpa')>-1)return'Accounting';
+  if(r.indexOf('manag')>-1||r.indexOf('consult')>-1||r.indexOf('staffing')>-1||r.indexOf('recruit')>-1||r.indexOf('human resource')>-1||r.indexOf('executive')>-1||r.indexOf('strategy')>-1)return'Management';
+  return'Other';
+}
 function htmlEsc(s){
   return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
@@ -3841,8 +3851,9 @@ function renderInsights(){
     '</div>';
   }).join('');
 
-  function categoryRows(obj){
-    var entries=Object.keys(obj).map(function(k){return{k:k,v:obj[k]};}).sort(function(a,b){return b.v-a.v;});
+  function categoryRows(obj,isIndustry){
+    var src=isIndustry?normalizeIndustryMap(obj):obj;
+    var entries=Object.keys(src).map(function(k){return{k:k,v:src[k]};}).sort(function(a,b){return b.v-a.v;});
     var total=entries.reduce(function(s,e){return s+e.v;},0)||1;
     return entries.map(function(e){
       var pct=Math.round(e.v/total*100);
@@ -3884,7 +3895,7 @@ function renderInsights(){
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+
       '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px">'+
         '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Industry</div>'+
-        categoryRows(d.by_industry)+
+        categoryRows(d.by_industry,true)+
       '</div>'+
       '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px">'+
         '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Timezone</div>'+
@@ -4162,12 +4173,20 @@ window.saveEmailEdit=function(id){
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
+function normalizeIndustryMap(obj){
+  var out={};
+  Object.keys(obj).forEach(function(k){
+    var norm=normalizeIndustry(k);
+    out[norm]=(out[norm]||0)+obj[k];
+  });
+  return out;
+}
 function renderTodaySummaryCard(ts){
   var bf=ts.by_freshness||{};
-  var bi=ts.by_industry||{};
+  var bi=normalizeIndustryMap(ts.by_industry||{});
   var btz=ts.by_timezone||{};
   function rows(obj){
-    return Object.keys(obj).map(function(k){
+    return Object.keys(obj).sort().map(function(k){
       return '<div style="display:flex;justify-content:space-between;padding:1px 0">'+
         '<span>'+htmlEsc(k)+'</span><span style="font-weight:600">'+obj[k]+'</span></div>';
     }).join('');
