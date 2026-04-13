@@ -3445,8 +3445,13 @@ window.openAddEmailAccount=function(managerId,fromDetail){
         '<div style="flex:1;height:1px;background:var(--border)"></div>'+
       '</div>'+
 
-      // ── Create new form ──
-      '<div class="fgrp"><label class="flbl">Email address <span style="color:var(--red)">*</span></label><input class="inp" id="ea-email" placeholder="name@futeglobal.com"/></div>'+
+      // ── Create new form with typeahead ──
+      '<div class="fgrp"><label class="flbl">Email address <span style="color:var(--red)">*</span></label>'+
+        '<div style="position:relative" id="ea-email-wrap">'+
+          '<input class="inp" id="ea-email" placeholder="Start typing..." autocomplete="off" oninput="emailAccountTypeahead(this.value)"/>'+
+          '<div id="ea-suggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);z-index:100;max-height:180px;overflow-y:auto;margin-top:2px"></div>'+
+        '</div>'+
+      '</div>'+
       '<div class="fgrp"><label class="flbl">Display name <span style="color:var(--red)">*</span></label><input class="inp" id="ea-name" placeholder="John Smith"/></div>'+
       '<div class="fgrp"><label class="flbl">Daily outreach limit</label>'+
         '<div style="display:flex;align-items:center;gap:10px">'+
@@ -3496,6 +3501,43 @@ window.submitAssignExistingEmailAccount=function(accountId, managerId){
     STATE.emailAccounts=STATE.emailAccounts.map(function(x){return x.id===accountId?a:x;});
     closeModal();showToast('Email ID assigned','success');render();
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.emailAccountTypeahead=function(val){
+  var sugBox=document.getElementById('ea-suggestions');
+  var nameEl=document.getElementById('ea-name');
+  if(!sugBox)return;
+  if(!val||val.length<2){sugBox.style.display='none';return;}
+  var q=val.toLowerCase();
+  // Search all email accounts (unassigned) by email or display name
+  var unassigned=(STATE.emailAccounts||[]).filter(function(a){return !a.assigned_to&&a.is_active;});
+  var matches=unassigned.filter(function(a){
+    return a.email_address.toLowerCase().includes(q)||a.display_name.toLowerCase().includes(q);
+  }).slice(0,6);
+  if(!matches.length){sugBox.style.display='none';return;}
+  sugBox.innerHTML=matches.map(function(a){
+    return '<div onclick="pickEmailAccountSuggestion(\''+htmlEsc(a.email_address)+'\',\''+htmlEsc(a.display_name)+'\','+a.daily_send_limit+')" '+
+      'style="padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px" '+
+      'onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'\'">'+
+      '<div style="flex:1">'+
+        '<div style="font-size:13px;font-weight:500">'+htmlEsc(a.display_name)+'</div>'+
+        '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(a.email_address)+'</div>'+
+      '</div>'+
+      '<span style="font-size:11px;color:var(--text3)">'+htmlEsc(String(a.daily_send_limit||150))+'/day</span>'+
+    '</div>';
+  }).join('');
+  sugBox.style.display='block';
+};
+
+window.pickEmailAccountSuggestion=function(email,name,limit){
+  var emailEl=document.getElementById('ea-email');
+  var nameEl=document.getElementById('ea-name');
+  var limitEl=document.getElementById('ea-limit');
+  var sugBox=document.getElementById('ea-suggestions');
+  if(emailEl)emailEl.value=email;
+  if(nameEl)nameEl.value=name;
+  if(limitEl)limitEl.value=limit||150;
+  if(sugBox)sugBox.style.display='none';
 };
 
 window.submitCreateAndAssignEmailAccount=function(managerId){
