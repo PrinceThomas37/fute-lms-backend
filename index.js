@@ -145,6 +145,27 @@ app.get('/companies', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+
+// ── Zip code lookup (US) ────────────────────────────────────
+app.get('/lookup/zipcode', auth, async (req, res) => {
+  try {
+    const { zip } = req.query;
+    if (!zip || zip.length < 3) return res.json([]);
+    // Use zippopotam.us free API
+    const resp = await fetch(`https://api.zippopotam.us/us/${zip.trim()}`);
+    if (!resp.ok) return res.json([]);
+    const data = await resp.json();
+    const places = (data.places || []).map(p => ({
+      zip: data['post code'],
+      city: p['place name'],
+      state: p['state'],
+      state_abbr: p['state abbreviation'],
+      display: `${p['place name']}, ${p['state abbreviation']} ${data['post code']}`
+    }));
+    res.json(places);
+  } catch (err) { res.json([]); }
+});
+
 // ── Company search (typeahead for RA form) ──────────────────
 app.get('/companies/search', auth, async (req, res) => {
   try {
@@ -443,8 +464,13 @@ app.put('/jobs/:id', auth, async (req, res) => {
   try {
     const { data: existing } = await supabase.from('jobs').select('*').eq('id', req.params.id).single();
     if (!existing) return res.status(404).json({ error: 'Not found' });
-    const canEdit = ['admin','ra_lead'].includes(req.user.role) || existing.created_by === req.user.id || existing.assigned_to === req.user.id || existing.assigned_to_bd === req.user.id;
+    const isRA = req.user.role === 'ra';
+    const hoursSinceCreation = (new Date() - new Date(existing.created_at)) / 3600000;
+    const raCanEdit = isRA && existing.created_by === req.user.id && hoursSinceCreation <= 24;
+    const canEdit = ['admin','ra_lead','bd','bd_lead'].includes(req.user.role) || existing.created_by === req.user.id || existing.assigned_to === req.user.id || existing.assigned_to_bd === req.user.id || raCanEdit;
     if (!canEdit) return res.status(403).json({ error: 'Forbidden' });
+    // RA can only edit within 24 hours and only certain fields
+    if (isRA && !raCanEdit) return res.status(403).json({ error: 'Edit window has expired (24 hours)' });
     const { position, location, source, job_url, stage, notes, assigned_to, assigned_to_bd, sending_email_id } = req.body;
     const updates = { updated_at: new Date() };
     if (position !== undefined) updates.position = position;
