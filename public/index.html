@@ -1344,7 +1344,7 @@ function renderEmail(){
   // BD sees pending+queued+sent; others see sent only
   var isBD=(u.role==='bd'||u.role==='bd_lead'||u.role==='admin'||u.role==='ra_lead');
   var pending=STATE.pendingEmails||[];
-  var sentEmails=STATE.emails||[];
+  var sentEmails=STATE.sentEmails||[];
   var tabs=isBD?['pending','compose','sent','templates']:['compose','sent','templates'];
   if(!STATE.emailTab)STATE.emailTab=isBD?'pending':'compose';
 
@@ -1389,11 +1389,8 @@ function renderEmail(){
             '<div class="mt1"><strong>Subject:</strong> '+htmlEsc(pe.subject||'')+'</div>'+
           '</div>'+
           '<div style="padding:14px;font-size:13px;line-height:1.7;white-space:pre-wrap;max-height:320px;overflow-y:auto">'+htmlEsc(pe.body||'')+'</div>'+
-          '<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px">'+
-            '<textarea id="edit-email-body-'+pe.id+'" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;min-height:60px;resize:vertical;font-family:inherit">'+htmlEsc(pe.body||'')+'</textarea>'+
-          '</div>'+
-          '<div style="padding:8px 14px;border-top:1px solid var(--border);display:flex;gap:8px">'+
-            '<button class="btn btn-outline btn-sm" onclick="saveEmailEdit(\''+pe.id+'\')">Save edit</button>'+
+          '<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">'+
+            '<button class="btn btn-outline btn-sm" onclick="openEditPendingEmail(\''+pe.id+'\')">✏ Edit email</button>'+
           '</div>'+
         '</div>';
       }
@@ -2290,27 +2287,35 @@ window.setMergeLead=function(id){STATE.mergeLeadId=id;STATE.genEmail=null;render
 window.setPlatform=function(p){STATE.user.plt=p;render();}
 
 window.openEmailPreviewModal=function(){
-  // Build genEmail if not already set (fill template variables from selected lead)
   if(!STATE.genEmail){
-    // Use loose equality (==) so UUID strings match even if stored as different types
     var ml=null;
-    if(STATE.mergeLeadId){
+    // Try composeContactId first (new compose flow)
+    if(STATE.composeContactId){
+      var _p=STATE.composeContactId.split('|');
+      var _c=STATE.contacts.find(function(x){return x.id===_p[0];});
+      var _j=STATE.jobs.find(function(x){return x.id===_p[1];});
+      if(_c&&_j){
+        var _co=STATE.companies.find(function(x){return x.id===_j.company_id;})||{name:_j.company_name,ind:_j.company_ind,loc:_j.location};
+        var _l={fn:_c.first_name||'',ln:_c.last_name||'',pos:_j.position||'',desig:_c.designation||''};
+        STATE.genEmail={to:(_c.first_name||'')+' '+(_c.last_name||''),email:_c.email,subj:fillEmail(STATE.emailSubj,_l,_co,STATE.user.name),body:fillEmail(STATE.emailBody,_l,_co,STATE.user.name),lid:_j.id};
+      }
+    }
+    // Fall back to mergeLeadId (old flow)
+    if(!STATE.genEmail&&STATE.mergeLeadId){
       ml=STATE.leads.find(function(l){return l.id==STATE.mergeLeadId;});
-      if(!ml){console.warn('[preview] mergeLeadId not found in STATE.leads:',STATE.mergeLeadId);}
+      if(ml){
+        var co={
+          name:ml.coName||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).name||'',
+          ind:ml.coInd||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).ind||'',
+          loc:ml.coLoc||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).loc||''
+        };
+        STATE.genEmail={to:(ml.fn||'')+' '+(ml.ln||''),email:ml.email,subj:fillEmail(STATE.emailSubj,ml,co,STATE.user.name),body:fillEmail(STATE.emailBody,ml,co,STATE.user.name),lid:ml.id};
+      }
     }
-    if(ml){
-      // Prefer flat company fields from normaliseLead; fall back to STATE.companies lookup; final fallback to nested l.company
-      var co={
-        name:ml.coName||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).name||(ml.company&&ml.company.name)||'',
-        ind:ml.coInd||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).ind||(ml.company&&ml.company.industry)||'',
-        loc:ml.coLoc||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).loc||(ml.company&&ml.company.location)||''
-      };
-      STATE.genEmail={to:(ml.fn||'')+' '+(ml.ln||''),email:ml.email,subj:fillEmail(STATE.emailSubj,ml,co,STATE.user.name),body:fillEmail(STATE.emailBody,ml,co,STATE.user.name),lid:ml.id};
-    } else if(STATE.manualEmail){
+    if(!STATE.genEmail&&STATE.manualEmail){
       STATE.genEmail={to:STATE.manualEmail,email:STATE.manualEmail,subj:STATE.emailSubj.replace(/{{[\w]+}}/g,''),body:STATE.emailBody.replace(/{{[\w]+}}/g,''),lid:null};
-    } else {
-      showToast('Select a recipient first','warning');return;
     }
+    if(!STATE.genEmail){showToast('Select a recipient first','warning');return;}
   }
   var ge=STATE.genEmail;
   STATE.modal='<div class="modal modal-w640">'+
@@ -4172,10 +4177,33 @@ window.submitSendAll=function(){
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
+window.openEditPendingEmail=function(id){
+  var pe=(STATE.pendingEmails||[]).find(function(e){return e.id===id;});
+  if(!pe)return;
+  STATE.modal='<div class="modal modal-w640">'+
+    '<div class="mh"><div class="mt">Edit Email \u2014 '+htmlEsc(pe.to_email||'')+'</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_" style="padding:18px 20px">'+
+      '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="edit-pe-subj" value="'+htmlEsc(pe.subject||'')+'"/></div>'+
+      '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" id="edit-pe-body" style="min-height:280px;line-height:1.7">'+htmlEsc(pe.body||'')+'</textarea></div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="savePendingEmailEdit(\''+id+'\')">Save changes</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+window.savePendingEmailEdit=function(id){
+  var subj=(document.getElementById('edit-pe-subj')||{}).value||'';
+  var body=(document.getElementById('edit-pe-body')||{}).value||'';
+  apiFetch('PATCH','/emails/'+id,{subject:subj,body:body}).then(function(updated){
+    STATE.pendingEmails=(STATE.pendingEmails||[]).map(function(e){return e.id===id?Object.assign({},e,{subject:updated.subject||subj,body:updated.body||body}):e;});
+    closeModal();showToast('Email updated','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
 window.saveEmailEdit=function(id){
   var el=document.getElementById('edit-email-body-'+id);
   if(!el)return;
-  apiPut='/emails/'+id; // using apiPatch
   apiFetch('PATCH','/emails/'+id,{body:el.value}).then(function(updated){
     STATE.pendingEmails=(STATE.pendingEmails||[]).map(function(e){return e.id===id?Object.assign({},e,{body:updated.body}):e;});
     showToast('Email updated','success');render();
@@ -4884,8 +4912,9 @@ function loadAppData(){
       apiGet('/distribute/today-summary').then(function(d){STATE.todaySummary=d;render();}).catch(function(){});
     }
     if(isBD){
-      STATE.pendingEmails=(r[3]||[]);
-      STATE.emails=(r[4]||[]);
+      STATE.pendingEmails=(r[5]||[]);
+      STATE.emails=(r[6]||[]);
+      apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];render();}).catch(function(){STATE.sentEmails=[];});
     }
     STATE.loading=false;render();
   }).catch(function(err){
