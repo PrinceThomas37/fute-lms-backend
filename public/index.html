@@ -495,10 +495,10 @@ var STATE = {
   assignFilter: {ra:"",dup:"all"},
   pendingEmails: [],
   previewPendingId: null,
+  previewSentId: null,
   emailAccounts: [],
   composeContactId: null,
   composeCompanyId: null,
-  composeCoSearch: '',
   showAIPanel: false,
   raForm: {
     coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',
@@ -1413,17 +1413,48 @@ function renderEmail(){
   // ── SENT TAB ──
   var sentHtml='';
   if(STATE.emailTab==='sent'){
-    var sentRows=sentEmails.map(function(e){
-      var jname=(e.job&&e.job.position?e.job.position:'')+(e.job&&e.job.company?(' · '+e.job.company.name):'');
-      return '<tr style="border-bottom:1px solid var(--border2)">'+
-        '<td style="padding:10px 12px;font-size:13px">'+htmlEsc(e.to_email||'')+'</td>'+
+    var allSent=(STATE.sentEmails||[]);
+    var sentRows=allSent.map(function(e){
+      var toAddr=e.to_email||e.to||'';
+      var subj=e.subject||e.subj||'';
+      var sentAt=e.sent_at||e.dt||'';
+      var jname='';
+      if(e.job){jname=(e.job.position||'')+(e.job.company?' · '+(e.job.company.name||e.job.company):'');}
+      var isSelected=STATE.previewSentId===e.id;
+      return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer;background:'+(isSelected?'var(--accent-l)':'')+'" onclick="previewSentEmail(\''+e.id+'\')">'+
+        '<td style="padding:10px 12px;font-size:13px;font-weight:500">'+htmlEsc(toAddr)+'</td>'+
         '<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+htmlEsc(jname)+'</td>'+
-        '<td style="padding:10px 12px;font-size:12px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subject||'')+'</td>'+
-        '<td style="padding:10px 12px"><span style="font-size:11px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:8px;font-weight:600">'+htmlEsc(e.status||'sent')+'</span></td>'+
-        '<td style="padding:10px 12px;font-size:11px;color:var(--text3)">'+htmlEsc(e.sent_at||'')+'</td>'+
+        '<td style="padding:10px 12px;font-size:12px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(subj)+'</td>'+
+        '<td style="padding:10px 12px"><span style="font-size:11px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:8px;font-weight:600">sent</span></td>'+
+        '<td style="padding:10px 12px;font-size:11px;color:var(--text3)">'+htmlEsc(sentAt)+'</td>'+
       '</tr>';
     }).join('');
     if(!sentRows)sentRows='<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">No sent emails yet.</td></tr>';
+
+    // Preview panel
+    var sentPreviewPanel='';
+    if(STATE.previewSentId){
+      var sp=allSent.find(function(e){return e.id===STATE.previewSentId;});
+      if(sp){
+        var spTo=sp.to_email||sp.to||'';
+        var spSubj=sp.subject||sp.subj||'';
+        var spBody=sp.body||'';
+        var spDate=sp.sent_at||sp.dt||'';
+        sentPreviewPanel='<div style="margin-top:16px;background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
+          '<div style="padding:12px 16px;background:var(--accent-l);border-bottom:1px solid rgba(37,99,235,.15);display:flex;justify-content:space-between;align-items:center">'+
+            '<div style="font-size:12px;font-weight:600;color:var(--accent)">Email Preview</div>'+
+            '<button class="btn-icon" onclick="STATE.previewSentId=null;render()">'+ico('x',13)+'</button>'+
+          '</div>'+
+          '<div style="padding:12px 16px;border-bottom:1px solid var(--border);background:var(--bg)">'+
+            '<div style="font-size:12px;margin-bottom:4px"><strong>To:</strong> '+htmlEsc(spTo)+'</div>'+
+            '<div style="font-size:12px;margin-bottom:4px"><strong>Subject:</strong> '+htmlEsc(spSubj)+'</div>'+
+            (spDate?'<div style="font-size:11px;color:var(--text3)">Sent: '+htmlEsc(spDate)+'</div>':'')+
+          '</div>'+
+          '<div style="padding:16px;font-size:13.5px;line-height:1.8;white-space:pre-wrap;max-height:400px;overflow-y:auto">'+htmlEsc(spBody)+'</div>'+
+        '</div>';
+      }
+    }
+
     sentHtml='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
       '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
         '<thead style="background:var(--bg);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
@@ -1431,7 +1462,8 @@ function renderEmail(){
         '</thead>'+
         '<tbody>'+sentRows+'</tbody>'+
       '</table>'+
-    '</div>';
+    '</div>'+
+    sentPreviewPanel;
   }
 
   // ── TEMPLATES TAB ──
@@ -1476,55 +1508,50 @@ function renderEmail(){
     }).join('');
   }
 
-
-  // ── Compose resolved recipient data ─────────────────────
-  var resolvedContact=null,resolvedJob=null;
-  if(STATE.composeContactId){
-    var _rp=STATE.composeContactId.split('|');
-    resolvedContact=STATE.contacts.find(function(c){return c.id===_rp[0];});
-    resolvedJob=myJobs.find(function(j){return j.id===_rp[1];});
-  }
-
-  // ── Company typeahead list ──────────────────────────────
-  var coSearch=(STATE.composeCoSearch||'').toLowerCase();
-  var coSuggestions=[];
-  if(coSearch.length>=1){
-    coSuggestions=companyList.filter(function(c){
-      return c.name.toLowerCase().indexOf(coSearch)>=0;
-    }).slice(0,8);
-  }
-
   var composeHtml='';
   if(STATE.emailTab==='compose'){
     var hasRecipient=!!(STATE.composeContactId||STATE.manualEmail);
 
-    // Resolve subject/body with variables if POC selected
-    var resolvedSubj=STATE.emailSubj;
-    var resolvedBody=STATE.emailBody;
-    if(resolvedContact&&resolvedJob){
-      var _rco=STATE.companies.find(function(c){return c.id===resolvedJob.company_id;})||{name:resolvedJob.company_name,ind:resolvedJob.company_ind,loc:resolvedJob.location};
-      var _rl={fn:resolvedContact.first_name||'',ln:resolvedContact.last_name||'',pos:resolvedJob.position||'',desig:resolvedContact.designation||''};
-      resolvedSubj=fillEmail(STATE.emailSubj,_rl,_rco,STATE.user.name);
-      resolvedBody=fillEmail(STATE.emailBody,_rl,_rco,STATE.user.name);
-    }
-    if(STATE.genEmail){resolvedSubj=STATE.genEmail.subj||STATE.genEmail.subject||resolvedSubj;resolvedBody=STATE.genEmail.body||resolvedBody;}
-
-    // Recipient card
-    var recipientCard='';
-    if(resolvedContact){
-      recipientCard='<div style="display:flex;align-items:center;gap:10px;padding:10px 13px;background:var(--accent-l);border:1px solid rgba(37,99,235,.15);border-radius:var(--r);margin-top:8px">'+
-        '<div style="flex:1">'+
-          '<div style="font-size:13px;font-weight:600">'+escHtml((resolvedContact.first_name||'')+' '+(resolvedContact.last_name||''))+(resolvedContact.designation?' <span style="font-weight:400;color:var(--text2)">· '+escHtml(resolvedContact.designation)+'</span>':'')+
-          '</div>'+
-          '<div style="font-size:12px;color:var(--accent);margin-top:2px;font-family:var(--mono)">'+escHtml(resolvedContact.email||'—')+'</div>'+
-          (resolvedJob?'<div style="font-size:11px;color:var(--text3);margin-top:1px">'+escHtml(resolvedJob.company_name)+' · '+escHtml(resolvedJob.position)+'</div>':'')+
+    // Recipient badge
+    var recipientBadge='';
+    if(STATE.composeContactId){
+      var parts=STATE.composeContactId.split('|');
+      var cc=STATE.contacts.find(function(c){return c.id===parts[0];});
+      var cj=myJobs.find(function(j){return j.id===parts[1];});
+      if(cc)recipientBadge='<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--accent-l);border-radius:var(--r);margin-top:8px">'+
+        '<div style="flex:1;font-size:13px"><strong>'+escHtml((cc.first_name||'')+' '+(cc.last_name||''))+'</strong>'+(cc.designation?' \u00b7 '+escHtml(cc.designation):'')+
+          '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+escHtml(cc.email||'')+(cj?' \u00b7 '+escHtml(cj.company_name):'')+'</div>'+
         '</div>'+
-        '<button class="btn-icon" onclick="STATE.composeContactId=null;STATE.composeCompanyId=null;STATE.composeCoSearch=\'\';STATE.genEmail=null;render()">'+ico('x',13)+'</button>'+
+        '<button class="btn-icon" onclick="STATE.composeContactId=null;STATE.composeCompanyId=null;STATE.genEmail=null;render()">'+ico('x',13)+'</button>'+
       '</div>';
     } else if(STATE.manualEmail){
-      recipientCard='<div style="display:flex;align-items:center;gap:10px;padding:10px 13px;background:var(--green-l);border:1px solid rgba(22,163,74,.15);border-radius:var(--r);margin-top:8px">'+
-        '<div style="flex:1"><div style="font-size:13px;font-weight:600">'+htmlEsc(STATE.manualEmail)+'</div><div style="font-size:11px;color:var(--text3)">Manual entry</div></div>'+
+      recipientBadge='<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--green-l);border-radius:var(--r);margin-top:8px">'+
+        '<div style="flex:1;font-size:13px"><strong>'+htmlEsc(STATE.manualEmail)+'</strong><div style="font-size:11px;color:var(--text3)">Manual entry</div></div>'+
         '<button class="btn-icon" onclick="STATE.manualEmail=null;STATE.genEmail=null;render()">'+ico('x',13)+'</button>'+
+      '</div>';
+    }
+
+    // Preview section — shows genEmail with editable subject/body
+    var previewSection='';
+    if(STATE.genEmail){
+      var ge=STATE.genEmail;
+      previewSection='<div style="margin-top:14px;border:1.5px solid var(--accent);border-radius:var(--r2);overflow:hidden">'+
+        '<div style="padding:10px 14px;background:var(--accent-l);display:flex;justify-content:space-between;align-items:center">'+
+          '<div style="font-size:12px;font-weight:600;color:var(--accent)">\u2728 AI Preview \u2014 edit before sending</div>'+
+          '<button class="btn-icon" onclick="STATE.genEmail=null;render()">'+ico('x',12)+'</button>'+
+        '</div>'+
+        '<div style="padding:12px 14px;border-bottom:1px solid var(--border)">'+
+          '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Subject</label>'+
+          '<input class="inp" id="preview-subj" value="'+htmlEsc(ge.subj||ge.subject||'')+'" oninput="STATE.genEmail.subj=this.value;STATE.genEmail.subject=this.value" style="font-size:13px"/>'+
+        '</div>'+
+        '<div style="padding:12px 14px;border-bottom:1px solid var(--border)">'+
+          '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Body</label>'+
+          '<textarea id="preview-body" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;line-height:1.7;min-height:160px;resize:vertical;font-family:inherit" oninput="STATE.genEmail.body=this.value">'+htmlEsc(ge.body||'')+'</textarea>'+
+        '</div>'+
+        '<div style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center">'+
+          '<button class="btn btn-outline btn-sm" onclick="STATE.genEmail=null;render()">Discard</button>'+
+          '<button class="btn btn-primary btn-sm" onclick="sendEmail()">'+ico('send',12)+' Send this email</button>'+
+        '</div>'+
       '</div>';
     }
 
@@ -1548,63 +1575,31 @@ function renderEmail(){
       '</div>';
     }
 
-    // Company typeahead
-    var coTypeahead='';
-    if(!STATE.composeCompanyId){
-      coTypeahead=
-        '<div style="position:relative">'+
-          '<input class="inp" id="compose-co-inp" autocomplete="off" placeholder="Type company name\u2026" value="'+htmlEsc(STATE.composeCoSearch||'')+'"'+
-            ' oninput="STATE.composeCoSearch=this.value;STATE.composeCompanyId=null;STATE.composeContactId=null;STATE.genEmail=null;render();setTimeout(function(){var e=document.getElementById(\'compose-co-inp\');if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}},0)"'+
-          '/>'+
-          (coSuggestions.length?
-            '<div style="position:absolute;left:0;right:0;top:100%;z-index:200;background:var(--card);border:1px solid var(--border2);border-radius:var(--r);box-shadow:var(--sh2);max-height:220px;overflow-y:auto;margin-top:2px">'+
-              coSuggestions.map(function(c){
-                return '<div onclick="STATE.composeCompanyId=\''+c.id+'\';STATE.composeCoSearch=\''+c.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\'  ;STATE.composeContactId=null;STATE.genEmail=null;render()"'+
-                  ' style="padding:9px 13px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border)"'+
-                  ' onmouseover="this.style.background=\'var(--bg)\'" onmouseout="this.style.background=\'\'">'+
-                  escHtml(c.name)+
-                '</div>';
-              }).join('')+
-            '</div>':'')+
-        '</div>';
-    } else {
-      var selCo=companyList.find(function(c){return c.id===STATE.composeCompanyId;});
-      coTypeahead=
-        '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg);border:1px solid var(--border2);border-radius:var(--r)">'+
-          '<div style="flex:1;font-size:13px;font-weight:500">'+escHtml(selCo?selCo.name:STATE.composeCoSearch)+'</div>'+
-          '<button class="btn-icon" onclick="STATE.composeCompanyId=null;STATE.composeContactId=null;STATE.composeCoSearch=\'\';STATE.genEmail=null;render()">'+ico('x',12)+'</button>'+
-        '</div>';
-    }
-
-    // POC dropdown (only if company locked and no contact yet)
-    var pocDropdown='';
-    if(STATE.composeCompanyId&&!resolvedContact){
-      pocDropdown=
-        '<div style="margin-top:10px">'+
-          '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Step 2 \u2014 Select contact / POC</label>'+
-          '<select class="sel" onchange="composeSelectPOC(this.value)">'+pocOpts+'</select>'+
-        '</div>';
-    }
-
     composeHtml='<div style="max-width:640px">'+
       '<div class="card cp mb3">'+
         '<div class="fw6 mb2" style="font-size:13px">Recipient</div>'+
 
-        '<div style="margin-bottom:4px">'+
-          '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Step 1 \u2014 Search company</label>'+
-          coTypeahead+
+        // Step 1 — pick company
+        '<div style="margin-bottom:10px">'+
+          '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Step 1 \u2014 Select company</label>'+
+          '<select class="sel" onchange="STATE.composeCompanyId=this.value;STATE.composeContactId=null;STATE.genEmail=null;render()">'+coOpts+'</select>'+
         '</div>'+
 
-        pocDropdown+
-        recipientCard+
+        // Step 2 — pick contact (only shown if company selected)
+        (STATE.composeCompanyId?
+          '<div style="margin-bottom:10px">'+
+            '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Step 2 \u2014 Select contact / POC</label>'+
+            '<select class="sel" onchange="STATE.composeContactId=this.value;STATE.manualEmail=null;STATE.genEmail=null;render()">'+pocOpts+'</select>'+
+          '</div>':'')+
 
-        '<div style="display:flex;align-items:center;gap:8px;margin:12px 0 8px">'+
+        // Divider
+        '<div style="display:flex;align-items:center;gap:8px;margin:10px 0">'+
           '<div style="flex:1;height:1px;background:var(--border)"></div>'+
           '<span style="font-size:11px;color:var(--text3)">or type email directly</span>'+
           '<div style="flex:1;height:1px;background:var(--border)"></div>'+
         '</div>'+
-        '<input class="inp" placeholder="someone@company.com" id="manual-email-inp" value="'+htmlEsc(STATE.manualEmail||'')+'" oninput="STATE.manualEmail=this.value||null;STATE.composeContactId=null;STATE.composeCompanyId=null;STATE.composeCoSearch=\'\';STATE.genEmail=null;render()"/>'+
-
+        '<input class="inp" placeholder="someone@company.com" id="manual-email-inp" value="'+htmlEsc(STATE.manualEmail||'')+'" oninput="STATE.manualEmail=this.value||null;STATE.composeContactId=null;STATE.composeCompanyId=null;STATE.genEmail=null"/>'+
+        recipientBadge+
       '</div>'+
 
       '<div class="card cp mb3">'+
@@ -1618,14 +1613,18 @@ function renderEmail(){
             '</div>'+
           '</div>'+
         '</div>'+
-        (resolvedContact?'<div style="font-size:11px;color:var(--green);margin-bottom:8px;padding:5px 10px;background:var(--green-l);border-radius:6px">\u2713 Variables filled from selected contact</div>':'')+
-        '<div class="fgrp"><label class="flbl">To</label><input class="inp" readonly value="'+escHtml(resolvedContact?resolvedContact.email:(STATE.manualEmail||'')+'')+'" style="background:var(--bg);color:'+(hasRecipient?'var(--text)':'var(--text3)')+'" placeholder="Select a recipient above"/></div>'+
-        '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="email-subj" value="'+htmlEsc(resolvedSubj)+'" oninput="STATE.emailSubj=this.value;if(STATE.genEmail)STATE.genEmail.subj=this.value"/></div>'+
-        '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:200px" id="email-body" oninput="STATE.emailBody=this.value;if(STATE.genEmail)STATE.genEmail.body=this.value">'+htmlEsc(resolvedBody)+'</textarea></div>'+
+        '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="email-subj" value="'+htmlEsc(STATE.emailSubj)+'" oninput="STATE.emailSubj=this.value"/></div>'+
+        '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:140px" id="email-body" oninput="STATE.emailBody=this.value">'+htmlEsc(STATE.emailBody)+'</textarea></div>'+
         aiSection+
-        '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
-          '<button class="btn btn-primary" '+(hasRecipient?'':'disabled style="opacity:.5;cursor:not-allowed"')+' onclick="sendEmail()">'+(ico('send',13))+' Send</button>'+
-        '</div>'+
+        (hasRecipient&&!STATE.genEmail?
+          '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
+            '<button class="btn btn-outline" onclick="openEmailPreviewModal()">\ud83d\udc41 Preview</button>'+
+            '<button class="btn btn-primary" onclick="sendEmail()">'+ico('send',13)+' Send</button>'+
+          '</div>':
+          '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
+            '<button class="btn btn-primary" '+(hasRecipient?'':'disabled style="opacity:.5;cursor:not-allowed"')+' onclick="sendEmail()">'+ico('send',13)+' Send</button>'+
+          '</div>')+
+        previewSection+
       '</div>'+
     '</div>';
   }
@@ -2305,7 +2304,8 @@ window.exportXL=function(){
   }catch(e){showToast("Export failed: "+e.message,"error");}
 }
 
-window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;if(t==='compose'){STATE.composeCoSearch=STATE.composeCoSearch||'';}render();}
+window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;STATE.previewSentId=null;render();}
+window.previewSentEmail=function(id){STATE.previewSentId=(STATE.previewSentId===id?null:id);render();};
 window.previewEmail=function(id){
   var e=STATE.emails.find(function(x){return x.id===id;});
   STATE.previewEmail=e||null;
@@ -2380,9 +2380,6 @@ window.selectEmailRecipient=function(lid){
   STATE.mergeLeadId=lid;STATE.manualEmail=null;STATE.manualEmailName=null;
   STATE.emailSearch=null;STATE.genEmail=null;render();
 }
-window.composeSelectPOC=function(val){
-  STATE.composeContactId=val||null;STATE.manualEmail=null;STATE.genEmail=null;render();
-};
 window.useManualEmail=function(){
   var email=STATE.emailSearch||"";
   if(!email.includes("@")){showToast("Please enter a valid email address","warning");return;}
@@ -2463,34 +2460,16 @@ window.generateAI=function(){
 };
 
 window.sendEmail=function(){
-  // Resolve recipient from composeContactId, mergeLeadId, or manualEmail
+  // If no generated email, build one from template + current recipient
   var ge=STATE.genEmail;
   if(!ge){
-    // Try composeContactId first (new compose flow)
-    if(STATE.composeContactId){
-      var _sp=STATE.composeContactId.split('|');
-      var _sc=STATE.contacts.find(function(c){return c.id===_sp[0];});
-      var _sj=STATE.jobs.find(function(j){return j.id===_sp[1];});
-      if(_sc&&_sj){
-        var _sco=STATE.companies.find(function(c){return c.id===_sj.company_id;})||{name:_sj.company_name,ind:_sj.company_ind,loc:_sj.location};
-        var _sl={fn:_sc.first_name||'',ln:_sc.last_name||'',pos:_sj.position||'',desig:_sc.designation||''};
-        // Use current subject/body fields (may have been manually edited)
-        var _sbody=document.getElementById('email-body');var _ssubj=document.getElementById('email-subj');
-        var finalSubj=(_ssubj&&_ssubj.value?_ssubj.value:fillEmail(STATE.emailSubj,_sl,_sco,STATE.user.name));
-        var finalBody=(_sbody&&_sbody.value?_sbody.value:fillEmail(STATE.emailBody,_sl,_sco,STATE.user.name));
-        ge={to:(_sc.first_name||'')+' '+(_sc.last_name||''),email:_sc.email,subj:finalSubj,body:finalBody,lid:_sj.id};
-      }
-    }
-    if(!ge){
-      var toEmail=STATE.manualEmail||(STATE.mergeLeadId?STATE.leads.find(function(l){return l.id===STATE.mergeLeadId}):null);
-      if(!toEmail){showToast("Select a recipient first","warning");return;}
-      if(typeof toEmail==="object"){
-        var l=toEmail;var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
-        ge={to:l.fn+" "+l.ln,email:l.email,subj:fillEmail(STATE.emailSubj,l,co,STATE.user.name),body:fillEmail(STATE.emailBody,l,co,STATE.user.name),lid:l.id};
-      } else {
-        var _sbody2=document.getElementById('email-body');var _ssubj2=document.getElementById('email-subj');
-        ge={to:STATE.manualEmailName||STATE.manualEmail,email:STATE.manualEmail,subj:(_ssubj2&&_ssubj2.value?_ssubj2.value:STATE.emailSubj.replace(/{{[\w]+}}/g,"")),body:(_sbody2&&_sbody2.value?_sbody2.value:STATE.emailBody.replace(/{{[\w]+}}/g,"")),lid:null};
-      }
+    var toEmail=STATE.manualEmail||(STATE.mergeLeadId?STATE.leads.find(function(l){return l.id===STATE.mergeLeadId}):null);
+    if(!toEmail){showToast("Select a recipient first","warning");return;}
+    if(typeof toEmail==="object"){
+      var l=toEmail;var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
+      ge={to:l.fn+" "+l.ln,email:l.email,subj:fillEmail(STATE.emailSubj,l,co,STATE.user.name),body:fillEmail(STATE.emailBody,l,co,STATE.user.name),lid:l.id};
+    } else {
+      ge={to:STATE.manualEmailName||STATE.manualEmail,email:STATE.manualEmail,subj:STATE.emailSubj.replace(/{{[\w]+}}/g,""),body:STATE.emailBody.replace(/{{[\w]+}}/g,""),lid:null};
     }
   }
   var plt=STATE.user.plt||"Gmail";
@@ -4891,6 +4870,11 @@ STATE.jobs=[];STATE.contacts=[];STATE.users=[];STATE.companies=[];STATE.emails=[
 function normaliseUser(u){var nm=u.name||'';var parts=nm.trim().split(/\s+/);var initials=((parts[0]||'')[0]||'')+((parts[1]||'')[0]||'');var roleAvc={admin:'av-admin',bd:'av-bd',ra:'av-ra',ra_lead:'av-admin',bd_lead:'av-bd'};return{id:u.id,name:nm,email:u.email,role:u.role,empId:u.employee_id,desig:u.designation,plt:u.platform||'Gmail',ooo:u.ooo_until||null,av:initials.toUpperCase()||'?',avc:roleAvc[u.role]||'av-ra',bdm:null};}
 function normaliseJob(j){
   var co=j.company||{};
+  // Fallback: if nested company object missing, look up STATE.companies by company_id
+  if(!co.name&&j.company_id){
+    var _fc=(STATE.companies||[]).find(function(c){return c.id===j.company_id;});
+    if(_fc){co={name:_fc.name,industry:_fc.ind||_fc.industry||'',website:_fc.web||_fc.website||'',location:_fc.loc||_fc.location||''};}
+  }
   var bd=j.bd_assignee||{};
   var sa=j.sending_account||{};
   return{id:j.id,company_id:j.company_id,company_name:co.name||'',company_ind:co.industry||'',company_web:co.website||'',
@@ -4916,9 +4900,9 @@ function loadAppData(){
   if(isBD)calls.push(apiGet('/emails?status=queued'));
   return Promise.all(calls).then(function(r){
     STATE.users=r[0].map(normaliseUser);
+    STATE.companies=r[2].map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});
     STATE.jobs=r[1].map(normaliseJob);
     STATE.contacts=flattenContacts(r[1]);
-    STATE.companies=r[2].map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});
     STATE.reminders=r[3]||[];
     STATE.emailAccounts=r[4]||[];
     // Load pool stats for ra_lead/admin
@@ -4930,8 +4914,10 @@ function loadAppData(){
       apiGet('/distribute/today-summary').then(function(d){STATE.todaySummary=d;render();}).catch(function(){});
     }
     if(isBD){
-      STATE.pendingEmails=(r[3]||[]);
-      STATE.emails=(r[4]||[]);
+      STATE.pendingEmails=(r[5]||[]);
+      STATE.emails=(r[6]||[]);
+      // Also load sent emails for the Sent tab
+      apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];render();}).catch(function(){STATE.sentEmails=[];});
     }
     STATE.loading=false;render();
   }).catch(function(err){
