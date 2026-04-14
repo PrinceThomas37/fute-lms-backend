@@ -1032,7 +1032,9 @@ function renderJobs(){
   var stageOpts=stages.map(function(st){return '<option value="'+st+'"'+(f.stage===st?" selected":"")+'>'+st+'</option>';}).join("");
 
   var canChangeStageInline=['admin','bd','bd_lead'].includes(u.role);
-  var rows=jobs.map(function(j){
+  var _tp=Math.max(1,Math.ceil(jobs.length/20));
+  var _pg=Math.min(STATE.leadsPage||0,_tp-1);
+  var rows=jobs.slice(_pg*20,(_pg+1)*20).map(function(j){
     var cs=jobContacts(j.id);
     var primary=cs[0]||{};
     var stageColor={Unassigned:"#94a3b8",Assigned:"#3b82f6",Connected:"#8b5cf6",Rejected:"#ef4444",Future:"#f59e0b",Qualified:"#10b981"}[j.stage]||"#64748b";
@@ -1113,7 +1115,14 @@ function renderJobs(){
         '<tbody>'+rows+'</tbody>'+
       '</table>'+
     '</div>'+
-    '<div style="margin-top:12px;font-size:12px;color:var(--text3)">'+jobs.length+' job'+(jobs.length===1?"":"s")+(u.role!=="admin"?" assigned to or created by you":" total")+'</div>'+
+    '<div style="margin-top:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">'+
+      '<div style="font-size:12px;color:var(--text3)">'+jobs.length+' lead'+(jobs.length===1?'':'s')+' · page '+(_pg+1)+' of '+_tp+'</div>'+
+      (_tp>1?'<div style="display:flex;gap:5px">'+
+        '<button onclick="setLeadsPage('+(_pg-1)+')" style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer;opacity:'+(_pg===0?'.35':'1')+'" '+(_pg===0?'disabled':'')+'>← Prev</button>'+
+        '<span style="padding:5px 10px;font-size:12px;font-weight:600">'+(_pg+1)+' / '+_tp+'</span>'+
+        '<button onclick="setLeadsPage('+(_pg+1)+')" style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer;opacity:'+(_pg>=_tp-1?'.35':'1')+'" '+(_pg>=_tp-1?'disabled':'')+'>Next →</button>'+
+      '</div>':'')+
+    '</div>'+
   '</div>';
 }
 
@@ -1335,7 +1344,7 @@ function renderEmail(){
   // BD sees pending+queued+sent; others see sent only
   var isBD=(u.role==='bd'||u.role==='bd_lead'||u.role==='admin'||u.role==='ra_lead');
   var pending=STATE.pendingEmails||[];
-  var sentEmails=STATE.sentEmails||[];
+  var sentEmails=STATE.emails||[];
   var tabs=isBD?['pending','compose','sent','templates']:['compose','sent','templates'];
   if(!STATE.emailTab)STATE.emailTab=isBD?'pending':'compose';
 
@@ -1379,9 +1388,12 @@ function renderEmail(){
             '<div><strong>To:</strong> '+htmlEsc(pe.to_email)+'</div>'+
             '<div class="mt1"><strong>Subject:</strong> '+htmlEsc(pe.subject||'')+'</div>'+
           '</div>'+
-          '<div style="padding:14px;font-size:13px;line-height:1.7;white-space:pre-wrap;max-height:340px;overflow-y:auto">'+htmlEsc(pe.body||'')+'</div>'+
-          '<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">'+
-            '<button class="btn btn-outline btn-sm" onclick="openEditPendingEmail(\''+pe.id+'\')">✏ Edit email</button>'+
+          '<div style="padding:14px;font-size:13px;line-height:1.7;white-space:pre-wrap;max-height:320px;overflow-y:auto">'+htmlEsc(pe.body||'')+'</div>'+
+          '<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px">'+
+            '<textarea id="edit-email-body-'+pe.id+'" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;min-height:60px;resize:vertical;font-family:inherit">'+htmlEsc(pe.body||'')+'</textarea>'+
+          '</div>'+
+          '<div style="padding:8px 14px;border-top:1px solid var(--border);display:flex;gap:8px">'+
+            '<button class="btn btn-outline btn-sm" onclick="saveEmailEdit(\''+pe.id+'\')">Save edit</button>'+
           '</div>'+
         '</div>';
       }
@@ -1577,9 +1589,8 @@ function renderEmail(){
             '</div>'+
           '</div>'+
         '</div>'+
-        '<div class="fgrp"><label class="flbl">To</label><input class="inp" readonly value="'+(function(){if(STATE.composeContactId){var _p=STATE.composeContactId.split('|');var _c=STATE.contacts.find(function(x){return x.id===_p[0];});if(_c)return escHtml(_c.email||'');}return htmlEsc(STATE.manualEmail||'');})()+'" style="background:var(--bg)" placeholder="Select recipient above"/></div>'+
-        '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="email-subj" value="'+(function(){if(STATE.genEmail)return htmlEsc(STATE.genEmail.subj||STATE.genEmail.subject||'');if(STATE.composeContactId){var _p=STATE.composeContactId.split('|');var _c=STATE.contacts.find(function(x){return x.id===_p[0];});var _j=myJobs.find(function(x){return x.id===_p[1];});if(_c&&_j){var _co=STATE.companies.find(function(x){return x.id===_j.company_id;})||{name:_j.company_name,ind:_j.company_ind,loc:_j.location};return htmlEsc(fillEmail(STATE.emailSubj,{fn:_c.first_name||'',ln:_c.last_name||'',pos:_j.position||'',desig:_c.designation||''},{name:_co.name||'',ind:_co.ind||_co.industry||'',loc:_co.loc||_co.location||''},STATE.user.name));}}return htmlEsc(STATE.emailSubj);})()+'" oninput="STATE.emailSubj=this.value"/></div>'+
-        '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:200px" id="email-body" oninput="STATE.emailBody=this.value">'+(function(){if(STATE.genEmail)return htmlEsc(STATE.genEmail.body||'');if(STATE.composeContactId){var _p=STATE.composeContactId.split('|');var _c=STATE.contacts.find(function(x){return x.id===_p[0];});var _j=myJobs.find(function(x){return x.id===_p[1];});if(_c&&_j){var _co=STATE.companies.find(function(x){return x.id===_j.company_id;})||{name:_j.company_name,ind:_j.company_ind,loc:_j.location};return htmlEsc(fillEmail(STATE.emailBody,{fn:_c.first_name||'',ln:_c.last_name||'',pos:_j.position||'',desig:_c.designation||''},{name:_co.name||'',ind:_co.ind||_co.industry||'',loc:_co.loc||_co.location||''},STATE.user.name));}}return htmlEsc(STATE.emailBody);})()+'</textarea></div>'+
+        '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="email-subj" value="'+htmlEsc(STATE.emailSubj)+'" oninput="STATE.emailSubj=this.value"/></div>'+
+        '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:140px" id="email-body" oninput="STATE.emailBody=this.value">'+htmlEsc(STATE.emailBody)+'</textarea></div>'+
         aiSection+
         (hasRecipient&&!STATE.genEmail?
           '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
@@ -2639,7 +2650,7 @@ window.sendReminderEmail=function(rid){
 }
 window.sendAllDue=function(){
   var today=todayIST();
-  var due=STATE.reminders.filter(function(r){return r.user_id===STATE.user.id&&r.status==='pending'&&r.return_date<=today;});
+  var due=STATE.reminders.filter(function(r){return r.uid===STATE.user.id&&r.status==="pending"&&r.returnDate<=today});
   due.forEach(function(r){sendReminderEmail(r.id);});
 }
 
@@ -4161,33 +4172,10 @@ window.submitSendAll=function(){
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
-window.openEditPendingEmail=function(id){
-  var pe=(STATE.pendingEmails||[]).find(function(e){return e.id===id;});
-  if(!pe)return;
-  STATE.modal='<div class="modal modal-w640">'+
-    '<div class="mh"><div class="mt">Edit Email \u2014 '+htmlEsc(pe.to_email||'')+'</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
-    '<div class="mb_" style="padding:18px 20px">'+
-      '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="edit-pe-subj" value="'+htmlEsc(pe.subject||'')+'"/></div>'+
-      '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" id="edit-pe-body" style="min-height:280px;line-height:1.7">'+htmlEsc(pe.body||'')+'</textarea></div>'+
-    '</div>'+
-    '<div class="mf">'+
-      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
-      '<button class="btn btn-primary" onclick="savePendingEmailEdit(\''+id+'\')">Save changes</button>'+
-    '</div>'+
-  '</div>';
-  render();
-};
-window.savePendingEmailEdit=function(id){
-  var subj=(document.getElementById('edit-pe-subj')||{}).value||'';
-  var body=(document.getElementById('edit-pe-body')||{}).value||'';
-  apiFetch('PATCH','/emails/'+id,{subject:subj,body:body}).then(function(updated){
-    STATE.pendingEmails=(STATE.pendingEmails||[]).map(function(e){return e.id===id?Object.assign({},e,{subject:updated.subject||subj,body:updated.body||body}):e;});
-    closeModal();showToast('Email updated','success');render();
-  }).catch(function(e){showToast('Failed: '+e.message,'error');});
-};
 window.saveEmailEdit=function(id){
   var el=document.getElementById('edit-email-body-'+id);
   if(!el)return;
+  apiPut='/emails/'+id; // using apiPatch
   apiFetch('PATCH','/emails/'+id,{body:el.value}).then(function(updated){
     STATE.pendingEmails=(STATE.pendingEmails||[]).map(function(e){return e.id===id?Object.assign({},e,{body:updated.body}):e;});
     showToast('Email updated','success');render();
@@ -4896,9 +4884,8 @@ function loadAppData(){
       apiGet('/distribute/today-summary').then(function(d){STATE.todaySummary=d;render();}).catch(function(){});
     }
     if(isBD){
-      STATE.pendingEmails=(r[5]||[]);
-      STATE.emails=(r[6]||[]);
-      apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];render();}).catch(function(){STATE.sentEmails=[];});
+      STATE.pendingEmails=(r[3]||[]);
+      STATE.emails=(r[4]||[]);
     }
     STATE.loading=false;render();
   }).catch(function(err){
