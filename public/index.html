@@ -495,7 +495,6 @@ var STATE = {
   assignFilter: {ra:"",dup:"all"},
   pendingEmails: [],
   previewPendingId: null,
-  previewSentId: null,
   emailAccounts: [],
   composeContactId: null,
   composeCompanyId: null,
@@ -1033,7 +1032,13 @@ function renderJobs(){
   var stageOpts=stages.map(function(st){return '<option value="'+st+'"'+(f.stage===st?" selected":"")+'>'+st+'</option>';}).join("");
 
   var canChangeStageInline=['admin','bd','bd_lead'].includes(u.role);
-  var rows=jobs.map(function(j){
+  var totalJobs=jobs.length;
+  var ps=STATE.leadsPageSize||20;
+  var pg=STATE.leadsPage||0;
+  var totalPages=Math.max(1,Math.ceil(totalJobs/ps));
+  if(pg>=totalPages)pg=totalPages-1;
+  var pagedJobs=jobs.slice(pg*ps,(pg+1)*ps);
+  var rows=pagedJobs.map(function(j){
     var cs=jobContacts(j.id);
     var primary=cs[0]||{};
     var stageColor={Unassigned:"#94a3b8",Assigned:"#3b82f6",Connected:"#8b5cf6",Rejected:"#ef4444",Future:"#f59e0b",Qualified:"#10b981"}[j.stage]||"#64748b";
@@ -1114,7 +1119,14 @@ function renderJobs(){
         '<tbody>'+rows+'</tbody>'+
       '</table>'+
     '</div>'+
-    '<div style="margin-top:12px;font-size:12px;color:var(--text3)">'+jobs.length+' job'+(jobs.length===1?"":"s")+(u.role!=="admin"?" assigned to or created by you":" total")+'</div>'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;flex-wrap:wrap;gap:8px">'+
+      '<div style="font-size:12px;color:var(--text3)">'+totalJobs+' lead'+(totalJobs===1?'':'s')+' · showing '+(pg*ps+1)+'–'+Math.min((pg+1)*ps,totalJobs)+'</div>'+
+      '<div style="display:flex;align-items:center;gap:6px">'+
+        '<button onclick="setLeadsPage('+(pg-1)+')" '+(pg===0?'disabled style="opacity:.35;cursor:not-allowed"':'')+' style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;font-weight:600;cursor:pointer">← Prev</button>'+
+        (function(){var btns='';var start=Math.max(0,pg-2);var end=Math.min(totalPages-1,pg+2);if(start>0)btns+='<button onclick="setLeadsPage(0)" style="padding:5px 10px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer">1</button>'+(start>1?'<span style="font-size:12px;color:var(--text3);padding:0 2px">…</span>':'');for(var i=start;i<=end;i++){btns+='<button onclick="setLeadsPage('+i+')" style="padding:5px 10px;border:1px solid '+(i===pg?'var(--accent)':'var(--border2)')+';border-radius:7px;background:'+(i===pg?'var(--accent)':'var(--card)')+';color:'+(i===pg?'#fff':'inherit')+';font-size:12px;font-weight:'+(i===pg?'700':'400')+';cursor:pointer">'+(i+1)+'</button>';}if(end<totalPages-1)btns+=(end<totalPages-2?'<span style="font-size:12px;color:var(--text3);padding:0 2px">…</span>':'')+'<button onclick="setLeadsPage('+(totalPages-1)+')" style="padding:5px 10px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer">'+totalPages+'</button>';return btns;})() +
+        '<button onclick="setLeadsPage('+(pg+1)+')" '+(pg>=totalPages-1?'disabled style="opacity:.35;cursor:not-allowed"':'')+' style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;font-weight:600;cursor:pointer">Next →</button>'+
+      '</div>'+
+    '</div>'+
   '</div>';
 }
 
@@ -1380,12 +1392,9 @@ function renderEmail(){
             '<div><strong>To:</strong> '+htmlEsc(pe.to_email)+'</div>'+
             '<div class="mt1"><strong>Subject:</strong> '+htmlEsc(pe.subject||'')+'</div>'+
           '</div>'+
-          '<div style="padding:14px;font-size:13px;line-height:1.7;white-space:pre-wrap;max-height:320px;overflow-y:auto">'+htmlEsc(pe.body||'')+'</div>'+
-          '<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px">'+
-            '<textarea id="edit-email-body-'+pe.id+'" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;min-height:60px;resize:vertical;font-family:inherit">'+htmlEsc(pe.body||'')+'</textarea>'+
-          '</div>'+
-          '<div style="padding:8px 14px;border-top:1px solid var(--border);display:flex;gap:8px">'+
-            '<button class="btn btn-outline btn-sm" onclick="saveEmailEdit(\''+pe.id+'\')">Save edit</button>'+
+          '<div style="padding:14px;font-size:13px;line-height:1.7;white-space:pre-wrap;max-height:340px;overflow-y:auto">'+htmlEsc(pe.body||'')+'</div>'+
+          '<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">'+
+            '<button class="btn btn-outline btn-sm" onclick="openEditPendingEmail(\''+pe.id+'\')">✏ Edit email</button>'+
           '</div>'+
         '</div>';
       }
@@ -1413,48 +1422,17 @@ function renderEmail(){
   // ── SENT TAB ──
   var sentHtml='';
   if(STATE.emailTab==='sent'){
-    var allSent=(STATE.sentEmails||[]);
-    var sentRows=allSent.map(function(e){
-      var toAddr=e.to_email||e.to||'';
-      var subj=e.subject||e.subj||'';
-      var sentAt=e.sent_at||e.dt||'';
-      var jname='';
-      if(e.job){jname=(e.job.position||'')+(e.job.company?' · '+(e.job.company.name||e.job.company):'');}
-      var isSelected=STATE.previewSentId===e.id;
-      return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer;background:'+(isSelected?'var(--accent-l)':'')+'" onclick="previewSentEmail(\''+e.id+'\')">'+
-        '<td style="padding:10px 12px;font-size:13px;font-weight:500">'+htmlEsc(toAddr)+'</td>'+
+    var sentRows=sentEmails.map(function(e){
+      var jname=(e.job&&e.job.position?e.job.position:'')+(e.job&&e.job.company?(' · '+e.job.company.name):'');
+      return '<tr style="border-bottom:1px solid var(--border2)">'+
+        '<td style="padding:10px 12px;font-size:13px">'+htmlEsc(e.to_email||'')+'</td>'+
         '<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+htmlEsc(jname)+'</td>'+
-        '<td style="padding:10px 12px;font-size:12px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(subj)+'</td>'+
-        '<td style="padding:10px 12px"><span style="font-size:11px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:8px;font-weight:600">sent</span></td>'+
-        '<td style="padding:10px 12px;font-size:11px;color:var(--text3)">'+htmlEsc(sentAt)+'</td>'+
+        '<td style="padding:10px 12px;font-size:12px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subject||'')+'</td>'+
+        '<td style="padding:10px 12px"><span style="font-size:11px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:8px;font-weight:600">'+htmlEsc(e.status||'sent')+'</span></td>'+
+        '<td style="padding:10px 12px;font-size:11px;color:var(--text3)">'+htmlEsc(e.sent_at||'')+'</td>'+
       '</tr>';
     }).join('');
     if(!sentRows)sentRows='<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">No sent emails yet.</td></tr>';
-
-    // Preview panel
-    var sentPreviewPanel='';
-    if(STATE.previewSentId){
-      var sp=allSent.find(function(e){return e.id===STATE.previewSentId;});
-      if(sp){
-        var spTo=sp.to_email||sp.to||'';
-        var spSubj=sp.subject||sp.subj||'';
-        var spBody=sp.body||'';
-        var spDate=sp.sent_at||sp.dt||'';
-        sentPreviewPanel='<div style="margin-top:16px;background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
-          '<div style="padding:12px 16px;background:var(--accent-l);border-bottom:1px solid rgba(37,99,235,.15);display:flex;justify-content:space-between;align-items:center">'+
-            '<div style="font-size:12px;font-weight:600;color:var(--accent)">Email Preview</div>'+
-            '<button class="btn-icon" onclick="STATE.previewSentId=null;render()">'+ico('x',13)+'</button>'+
-          '</div>'+
-          '<div style="padding:12px 16px;border-bottom:1px solid var(--border);background:var(--bg)">'+
-            '<div style="font-size:12px;margin-bottom:4px"><strong>To:</strong> '+htmlEsc(spTo)+'</div>'+
-            '<div style="font-size:12px;margin-bottom:4px"><strong>Subject:</strong> '+htmlEsc(spSubj)+'</div>'+
-            (spDate?'<div style="font-size:11px;color:var(--text3)">Sent: '+htmlEsc(spDate)+'</div>':'')+
-          '</div>'+
-          '<div style="padding:16px;font-size:13.5px;line-height:1.8;white-space:pre-wrap;max-height:400px;overflow-y:auto">'+htmlEsc(spBody)+'</div>'+
-        '</div>';
-      }
-    }
-
     sentHtml='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
       '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
         '<thead style="background:var(--bg);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
@@ -1462,8 +1440,7 @@ function renderEmail(){
         '</thead>'+
         '<tbody>'+sentRows+'</tbody>'+
       '</table>'+
-    '</div>'+
-    sentPreviewPanel;
+    '</div>';
   }
 
   // ── TEMPLATES TAB ──
@@ -2304,8 +2281,7 @@ window.exportXL=function(){
   }catch(e){showToast("Export failed: "+e.message,"error");}
 }
 
-window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;STATE.previewSentId=null;render();}
-window.previewSentEmail=function(id){STATE.previewSentId=(STATE.previewSentId===id?null:id);render();};
+window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;render();}
 window.previewEmail=function(id){
   var e=STATE.emails.find(function(x){return x.id===id;});
   STATE.previewEmail=e||null;
@@ -4197,6 +4173,30 @@ window.submitSendAll=function(){
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
+window.openEditPendingEmail=function(id){
+  var pe=(STATE.pendingEmails||[]).find(function(e){return e.id===id;});
+  if(!pe)return;
+  STATE.modal='<div class="modal modal-w640">'+
+    '<div class="mh"><div class="mt">Edit Email — '+htmlEsc(pe.to_email)+'</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_" style="padding:18px 20px">'+
+      '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="edit-pe-subj" value="'+htmlEsc(pe.subject||'')+'"/></div>'+
+      '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" id="edit-pe-body" style="min-height:280px;line-height:1.7">'+htmlEsc(pe.body||'')+'</textarea></div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="savePendingEmailEdit(\''+id+'\')">Save changes</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+window.savePendingEmailEdit=function(id){
+  var subj=(document.getElementById('edit-pe-subj')||{}).value;
+  var body=(document.getElementById('edit-pe-body')||{}).value;
+  apiFetch('PATCH','/emails/'+id,{subject:subj,body:body}).then(function(updated){
+    STATE.pendingEmails=(STATE.pendingEmails||[]).map(function(e){return e.id===id?Object.assign({},e,{subject:updated.subject||subj,body:updated.body||body}):e;});
+    closeModal();showToast('Email updated','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
 window.saveEmailEdit=function(id){
   var el=document.getElementById('edit-email-body-'+id);
   if(!el)return;
@@ -4870,11 +4870,6 @@ STATE.jobs=[];STATE.contacts=[];STATE.users=[];STATE.companies=[];STATE.emails=[
 function normaliseUser(u){var nm=u.name||'';var parts=nm.trim().split(/\s+/);var initials=((parts[0]||'')[0]||'')+((parts[1]||'')[0]||'');var roleAvc={admin:'av-admin',bd:'av-bd',ra:'av-ra',ra_lead:'av-admin',bd_lead:'av-bd'};return{id:u.id,name:nm,email:u.email,role:u.role,empId:u.employee_id,desig:u.designation,plt:u.platform||'Gmail',ooo:u.ooo_until||null,av:initials.toUpperCase()||'?',avc:roleAvc[u.role]||'av-ra',bdm:null};}
 function normaliseJob(j){
   var co=j.company||{};
-  // Fallback: if nested company object missing, look up STATE.companies by company_id
-  if(!co.name&&j.company_id){
-    var _fc=(STATE.companies||[]).find(function(c){return c.id===j.company_id;});
-    if(_fc){co={name:_fc.name,industry:_fc.ind||_fc.industry||'',website:_fc.web||_fc.website||'',location:_fc.loc||_fc.location||''};}
-  }
   var bd=j.bd_assignee||{};
   var sa=j.sending_account||{};
   return{id:j.id,company_id:j.company_id,company_name:co.name||'',company_ind:co.industry||'',company_web:co.website||'',
@@ -4900,9 +4895,9 @@ function loadAppData(){
   if(isBD)calls.push(apiGet('/emails?status=queued'));
   return Promise.all(calls).then(function(r){
     STATE.users=r[0].map(normaliseUser);
-    STATE.companies=r[2].map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});
     STATE.jobs=r[1].map(normaliseJob);
     STATE.contacts=flattenContacts(r[1]);
+    STATE.companies=r[2].map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});
     STATE.reminders=r[3]||[];
     STATE.emailAccounts=r[4]||[];
     // Load pool stats for ra_lead/admin
@@ -4914,10 +4909,8 @@ function loadAppData(){
       apiGet('/distribute/today-summary').then(function(d){STATE.todaySummary=d;render();}).catch(function(){});
     }
     if(isBD){
-      STATE.pendingEmails=(r[5]||[]);
-      STATE.emails=(r[6]||[]);
-      // Also load sent emails for the Sent tab
-      apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];render();}).catch(function(){STATE.sentEmails=[];});
+      STATE.pendingEmails=(r[3]||[]);
+      STATE.emails=(r[4]||[]);
     }
     STATE.loading=false;render();
   }).catch(function(err){
