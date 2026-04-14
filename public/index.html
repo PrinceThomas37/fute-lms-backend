@@ -1032,13 +1032,7 @@ function renderJobs(){
   var stageOpts=stages.map(function(st){return '<option value="'+st+'"'+(f.stage===st?" selected":"")+'>'+st+'</option>';}).join("");
 
   var canChangeStageInline=['admin','bd','bd_lead'].includes(u.role);
-  var totalJobs=jobs.length;
-  var ps=STATE.leadsPageSize||20;
-  var pg=STATE.leadsPage||0;
-  var totalPages=Math.max(1,Math.ceil(totalJobs/ps));
-  if(pg>=totalPages)pg=totalPages-1;
-  var pagedJobs=jobs.slice(pg*ps,(pg+1)*ps);
-  var rows=pagedJobs.map(function(j){
+  var rows=jobs.map(function(j){
     var cs=jobContacts(j.id);
     var primary=cs[0]||{};
     var stageColor={Unassigned:"#94a3b8",Assigned:"#3b82f6",Connected:"#8b5cf6",Rejected:"#ef4444",Future:"#f59e0b",Qualified:"#10b981"}[j.stage]||"#64748b";
@@ -1119,14 +1113,7 @@ function renderJobs(){
         '<tbody>'+rows+'</tbody>'+
       '</table>'+
     '</div>'+
-    '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;flex-wrap:wrap;gap:8px">'+
-      '<div style="font-size:12px;color:var(--text3)">'+totalJobs+' lead'+(totalJobs===1?'':'s')+' · showing '+(pg*ps+1)+'–'+Math.min((pg+1)*ps,totalJobs)+'</div>'+
-      '<div style="display:flex;align-items:center;gap:6px">'+
-        '<button onclick="setLeadsPage('+(pg-1)+')" '+(pg===0?'disabled style="opacity:.35;cursor:not-allowed"':'')+' style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;font-weight:600;cursor:pointer">← Prev</button>'+
-        (function(){var btns='';var start=Math.max(0,pg-2);var end=Math.min(totalPages-1,pg+2);if(start>0)btns+='<button onclick="setLeadsPage(0)" style="padding:5px 10px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer">1</button>'+(start>1?'<span style="font-size:12px;color:var(--text3);padding:0 2px">…</span>':'');for(var i=start;i<=end;i++){btns+='<button onclick="setLeadsPage('+i+')" style="padding:5px 10px;border:1px solid '+(i===pg?'var(--accent)':'var(--border2)')+';border-radius:7px;background:'+(i===pg?'var(--accent)':'var(--card)')+';color:'+(i===pg?'#fff':'inherit')+';font-size:12px;font-weight:'+(i===pg?'700':'400')+';cursor:pointer">'+(i+1)+'</button>';}if(end<totalPages-1)btns+=(end<totalPages-2?'<span style="font-size:12px;color:var(--text3);padding:0 2px">…</span>':'')+'<button onclick="setLeadsPage('+(totalPages-1)+')" style="padding:5px 10px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer">'+totalPages+'</button>';return btns;})() +
-        '<button onclick="setLeadsPage('+(pg+1)+')" '+(pg>=totalPages-1?'disabled style="opacity:.35;cursor:not-allowed"':'')+' style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;font-weight:600;cursor:pointer">Next →</button>'+
-      '</div>'+
-    '</div>'+
+    '<div style="margin-top:12px;font-size:12px;color:var(--text3)">'+jobs.length+' job'+(jobs.length===1?"":"s")+(u.role!=="admin"?" assigned to or created by you":" total")+'</div>'+
   '</div>';
 }
 
@@ -1348,7 +1335,7 @@ function renderEmail(){
   // BD sees pending+queued+sent; others see sent only
   var isBD=(u.role==='bd'||u.role==='bd_lead'||u.role==='admin'||u.role==='ra_lead');
   var pending=STATE.pendingEmails||[];
-  var sentEmails=STATE.emails||[];
+  var sentEmails=STATE.sentEmails||[];
   var tabs=isBD?['pending','compose','sent','templates']:['compose','sent','templates'];
   if(!STATE.emailTab)STATE.emailTab=isBD?'pending':'compose';
 
@@ -1590,8 +1577,9 @@ function renderEmail(){
             '</div>'+
           '</div>'+
         '</div>'+
-        '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="email-subj" value="'+htmlEsc(STATE.emailSubj)+'" oninput="STATE.emailSubj=this.value"/></div>'+
-        '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:140px" id="email-body" oninput="STATE.emailBody=this.value">'+htmlEsc(STATE.emailBody)+'</textarea></div>'+
+        '<div class="fgrp"><label class="flbl">To</label><input class="inp" readonly value="'+(function(){if(STATE.composeContactId){var _p=STATE.composeContactId.split('|');var _c=STATE.contacts.find(function(x){return x.id===_p[0];});if(_c)return escHtml(_c.email||'');}return htmlEsc(STATE.manualEmail||'');})()+'" style="background:var(--bg)" placeholder="Select recipient above"/></div>'+
+        '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="email-subj" value="'+(function(){if(STATE.genEmail)return htmlEsc(STATE.genEmail.subj||STATE.genEmail.subject||'');if(STATE.composeContactId){var _p=STATE.composeContactId.split('|');var _c=STATE.contacts.find(function(x){return x.id===_p[0];});var _j=myJobs.find(function(x){return x.id===_p[1];});if(_c&&_j){var _co=STATE.companies.find(function(x){return x.id===_j.company_id;})||{name:_j.company_name,ind:_j.company_ind,loc:_j.location};return htmlEsc(fillEmail(STATE.emailSubj,{fn:_c.first_name||'',ln:_c.last_name||'',pos:_j.position||'',desig:_c.designation||''},{name:_co.name||'',ind:_co.ind||_co.industry||'',loc:_co.loc||_co.location||''},STATE.user.name));}}return htmlEsc(STATE.emailSubj);})()+'" oninput="STATE.emailSubj=this.value"/></div>'+
+        '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:200px" id="email-body" oninput="STATE.emailBody=this.value">'+(function(){if(STATE.genEmail)return htmlEsc(STATE.genEmail.body||'');if(STATE.composeContactId){var _p=STATE.composeContactId.split('|');var _c=STATE.contacts.find(function(x){return x.id===_p[0];});var _j=myJobs.find(function(x){return x.id===_p[1];});if(_c&&_j){var _co=STATE.companies.find(function(x){return x.id===_j.company_id;})||{name:_j.company_name,ind:_j.company_ind,loc:_j.location};return htmlEsc(fillEmail(STATE.emailBody,{fn:_c.first_name||'',ln:_c.last_name||'',pos:_j.position||'',desig:_c.designation||''},{name:_co.name||'',ind:_co.ind||_co.industry||'',loc:_co.loc||_co.location||''},STATE.user.name));}}return htmlEsc(STATE.emailBody);})()+'</textarea></div>'+
         aiSection+
         (hasRecipient&&!STATE.genEmail?
           '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
@@ -2651,7 +2639,7 @@ window.sendReminderEmail=function(rid){
 }
 window.sendAllDue=function(){
   var today=todayIST();
-  var due=STATE.reminders.filter(function(r){return r.uid===STATE.user.id&&r.status==="pending"&&r.returnDate<=today});
+  var due=STATE.reminders.filter(function(r){return r.user_id===STATE.user.id&&r.status==='pending'&&r.return_date<=today;});
   due.forEach(function(r){sendReminderEmail(r.id);});
 }
 
@@ -4177,7 +4165,7 @@ window.openEditPendingEmail=function(id){
   var pe=(STATE.pendingEmails||[]).find(function(e){return e.id===id;});
   if(!pe)return;
   STATE.modal='<div class="modal modal-w640">'+
-    '<div class="mh"><div class="mt">Edit Email — '+htmlEsc(pe.to_email)+'</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mh"><div class="mt">Edit Email \u2014 '+htmlEsc(pe.to_email||'')+'</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
     '<div class="mb_" style="padding:18px 20px">'+
       '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="edit-pe-subj" value="'+htmlEsc(pe.subject||'')+'"/></div>'+
       '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" id="edit-pe-body" style="min-height:280px;line-height:1.7">'+htmlEsc(pe.body||'')+'</textarea></div>'+
@@ -4190,8 +4178,8 @@ window.openEditPendingEmail=function(id){
   render();
 };
 window.savePendingEmailEdit=function(id){
-  var subj=(document.getElementById('edit-pe-subj')||{}).value;
-  var body=(document.getElementById('edit-pe-body')||{}).value;
+  var subj=(document.getElementById('edit-pe-subj')||{}).value||'';
+  var body=(document.getElementById('edit-pe-body')||{}).value||'';
   apiFetch('PATCH','/emails/'+id,{subject:subj,body:body}).then(function(updated){
     STATE.pendingEmails=(STATE.pendingEmails||[]).map(function(e){return e.id===id?Object.assign({},e,{subject:updated.subject||subj,body:updated.body||body}):e;});
     closeModal();showToast('Email updated','success');render();
@@ -4200,7 +4188,6 @@ window.savePendingEmailEdit=function(id){
 window.saveEmailEdit=function(id){
   var el=document.getElementById('edit-email-body-'+id);
   if(!el)return;
-  apiPut='/emails/'+id; // using apiPatch
   apiFetch('PATCH','/emails/'+id,{body:el.value}).then(function(updated){
     STATE.pendingEmails=(STATE.pendingEmails||[]).map(function(e){return e.id===id?Object.assign({},e,{body:updated.body}):e;});
     showToast('Email updated','success');render();
@@ -4909,8 +4896,9 @@ function loadAppData(){
       apiGet('/distribute/today-summary').then(function(d){STATE.todaySummary=d;render();}).catch(function(){});
     }
     if(isBD){
-      STATE.pendingEmails=(r[3]||[]);
-      STATE.emails=(r[4]||[]);
+      STATE.pendingEmails=(r[5]||[]);
+      STATE.emails=(r[6]||[]);
+      apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];render();}).catch(function(){STATE.sentEmails=[];});
     }
     STATE.loading=false;render();
   }).catch(function(err){
