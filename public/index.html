@@ -4629,7 +4629,7 @@ function refreshPoolStats(){
 window.openAssignToManager=function(managerId){
   var m=STATE.users.find(function(u){return u.id===managerId;})||{name:'Manager'};
   var pool=STATE.distributePoolStats||{total:0};
-  var emailAccounts=(STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===managerId&&a.is_active;});
+  var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
   var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
   STATE._assignManagerId=managerId;
   STATE._assignRatio=null;
@@ -4718,7 +4718,7 @@ function showRatioPreview(ratio){
 function generateAutoRatio(){
   var pool=STATE.distributePoolStats||{total:0};
   var managerId=STATE._assignManagerId;
-  var emailAccounts=(STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===managerId&&a.is_active;});
+  var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
   var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
   var ps=Object.assign({},pool,{capacity:capacity});
   var prev=document.getElementById('assign-ratio-preview');
@@ -4735,7 +4735,7 @@ window.generateAssignRatio=function(){
   if(!text.trim()){showToast('Enter priority instructions first','warning');return;}
   var pool=STATE.distributePoolStats||{total:0};
   var managerId=STATE._assignManagerId;
-  var emailAccounts=(STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===managerId&&a.is_active;});
+  var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
   var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
   var ps=Object.assign({},pool,{capacity:capacity});
   var btn=document.getElementById('gen-ratio-btn');
@@ -4756,7 +4756,7 @@ window.confirmAssignToManager=function(){
   var managerId=STATE._assignManagerId;
   if(!ratio||!managerId)return;
   var m=STATE.users.find(function(u){return u.id===managerId;})||{name:'Manager'};
-  var emailAccounts=(STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===managerId&&a.is_active;});
+  var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
   var now=new Date();
   var dateStr=now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
   var timeStr=now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
@@ -5049,7 +5049,7 @@ function renderAssignLeads(){
 
   // Show manager cards
   var managerCards=managers.map(function(m){
-    var emailAccounts=(STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===m.id&&a.is_active;});
+    var emailAccounts=(STATE.userEmailsCache[m.id]||[]).filter(function(a){return a.is_active;});
     var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
     var hasCapacity=emailAccounts.length>0;
     return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:16px;display:flex;align-items:center;gap:14px;margin-bottom:12px">'+
@@ -5248,7 +5248,7 @@ function flattenContacts(jobs){var out=[];jobs.forEach(function(j){(j.contacts||
 
 function loadAppData(){
   STATE.loading=true;render();
-  var calls=[apiGet('/users'),apiGet('/jobs'),apiGet('/companies'),apiGet('/reminders'),apiGet('/email-accounts')];
+  var calls=[apiGet('/users'),apiGet('/jobs'),apiGet('/companies'),apiGet('/reminders')];
   var u=STATE.user;
   var isBD=(u&&(u.role==='bd'||u.role==='bd_lead'||u.role==='admin'||u.role==='ra_lead'));
   if(isBD)calls.push(apiGet('/emails?status=pending'));
@@ -5259,7 +5259,7 @@ function loadAppData(){
     STATE.contacts=flattenContacts(r[1]);
     STATE.companies=r[2].map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});
     STATE.reminders=r[3]||[];
-    STATE.emailAccounts=r[4]||[];
+    STATE.emailAccounts=[];
     // Load pool stats for ra_lead/admin
     if(STATE.user&&(STATE.user.role==='ra_lead'||STATE.user.role==='admin')){
       apiGet('/distribute/pool-stats').then(function(d){STATE.distributePoolStats=d;render();}).catch(function(){});
@@ -5269,8 +5269,8 @@ function loadAppData(){
       apiGet('/distribute/today-summary').then(function(d){STATE.todaySummary=d;render();}).catch(function(){});
     }
     if(isBD){
-      STATE.pendingEmails=(r[5]||[]);
-      STATE.emails=(r[6]||[]);
+      STATE.pendingEmails=(r[4]||[]);
+      STATE.emails=(r[5]||[]);
       apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];render();}).catch(function(){STATE.sentEmails=[];});
     }
     // Load app settings (global send times)
