@@ -157,7 +157,8 @@ table{width:100%;border-collapse:collapse}
 th{background:#F8FAFC;padding:9px 13px;text-align:left;font-size:11px;font-weight:600;color:var(--text3);letter-spacing:.07em;text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap}
 td{padding:11px 13px;border-bottom:1px solid var(--border);font-size:13.5px;vertical-align:middle}
 tr:last-child td{border-bottom:none}
-tr:hover td{background:#FAFBFC}
+tr:hover td{background:var(--accent-l);cursor:pointer}
+th{position:sticky;top:0;z-index:5;background:var(--bg)}
 tr.sel-row td{background:var(--accent-l)}
 .td1{font-weight:500}
 .td2{font-size:12px;color:var(--text3)}
@@ -1496,7 +1497,7 @@ function renderEmail(){
       var cj=myJobs.find(function(j){return j.id===parts[1];});
       if(cc)recipientBadge='<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--accent-l);border-radius:var(--r);margin-top:8px">'+
         '<div style="flex:1;font-size:13px"><strong>'+escHtml((cc.first_name||'')+' '+(cc.last_name||''))+'</strong>'+(cc.designation?' \u00b7 '+escHtml(cc.designation):'')+
-          '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+escHtml(cc.email||'')+(cj?' \u00b7 '+escHtml(cj.company_name):'')+'</div>'+
+          '<div style="font-size:12px;color:var(--accent);font-weight:600;margin-top:2px">'+escHtml(cc.email||'(no email on record)')+'</div>'+(cj?'<div style="font-size:11px;color:var(--text3)">'+escHtml(cj.company_name)+'</div>':'')+
         '</div>'+
         '<button class="btn-icon" onclick="STATE.composeContactId=null;STATE.composeCompanyId=null;STATE.genEmail=null;render()">'+ico('x',13)+'</button>'+
       '</div>';
