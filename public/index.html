@@ -424,9 +424,9 @@ function genJobs(seedLeads, companies){
 }
 function getMyJobs(u){
   if (!u) return [];
-  if (u.role==="admin"||u.role==="ra_lead") return STATE.jobs.slice();
-  if (u.role==="bd_lead") return STATE.jobs.filter(function(j){return j.assigned_to_bd!==null;});
-  if (u.role==="bd") return STATE.jobs.filter(function(j){return j.assigned_to_bd===u.id;});
+  if (userHasAnyRole(u,'admin','ra_lead')) return STATE.jobs.slice();
+  if (userHasRole(u,'bd_lead')) return STATE.jobs.filter(function(j){return j.assigned_to_bd!==null;});
+  if (userHasRole(u,'bd')) return STATE.jobs.filter(function(j){return j.assigned_to_bd===u.id;});
   // ra: only jobs they created
   return STATE.jobs.filter(function(j){return j.created_by===u.id;});
 }
@@ -472,6 +472,10 @@ var STATE = {
   fu2Subj: "Re: Opportunity regarding {{pos}} at {{company}}",
   fu2Body: "Hi {{fn}},\n\nI wanted to reach out one last time regarding {{pos}} at {{company}}. If the timing isn't right, no worries at all — happy to reconnect whenever it makes sense.\n\nBest,\n{{sender}}\nFute Global LLC",
   appSettings: {},
+  teamAssignments: [],
+  userEmailsCache: {},      // userId -> array of user_emails
+  managerUsersTab: 'bd',    // 'ra' | 'bd' | 'rateam' | 'bdteam'
+  selectedManagerUser: null,
   genEmail: null,
   aiGenerating: false,
   adminTab: "users",
@@ -721,13 +725,13 @@ function renderApp(){
   var navItems=[
     {id:"dashboard",lbl:"Dashboard",ic:"dashboard"},
     {id:"leads",lbl:"Leads",ic:"leads",badge:todayCnt},
-    ...(u.role!=="ra"?[{id:"email",lbl:"Email",ic:"email"}]:[]),
-    ...(u.role==='ra'?[{id:"insights",lbl:"Insights",ic:"dashboard"}]:[{id:"reminders",lbl:"Reminders",ic:"star",badge:STATE.reminders.filter(function(r){return r.user_id===u.id&&r.status==="pending"}).length||null}]),
+    ...(!userHasRole(u,'ra')||userHasAnyRole(u,'bd','bd_lead','admin','ra_lead')?[{id:"email",lbl:"Email",ic:"email"}]:[]),
+    ...(userHasRole(u,'ra')&&!userHasAnyRole(u,'admin','bd','bd_lead','ra_lead')?[{id:"insights",lbl:"Insights",ic:"dashboard"}]:[{id:"reminders",lbl:"Reminders",ic:"star",badge:STATE.reminders.filter(function(r){return r.user_id===u.id&&r.status==="pending"}).length||null}]),
     {id:"profile",lbl:"My Profile",ic:"profile"}
   ];
-  if(u.role==="admin"||u.role==="ra_lead"||u.role==="bd_lead")navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
-  if(u.role==="admin"||u.role==="bd_lead")navItems.splice(5,0,{id:"emailaccounts",lbl:"Email Accounts",ic:"email"});
-  if(u.role==="ra_lead"||u.role==="admin")navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
+  if(userHasAnyRole(u,'admin','ra_lead','bd_lead'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
+  if(userHasAnyRole(u,'admin','bd_lead'))navItems.splice(5,0,{id:"managerusers",lbl:"Manager Users",ic:"email"});
+  if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
 
   var nav=navItems.map(function(n){
     var active=STATE.page===n.id?" active":"";
@@ -776,7 +780,7 @@ function renderPage(){
   if(STATE.page==="dashboard")return renderDashboard();
   if(STATE.page==="leads"){var html=renderJobs();setTimeout(bindJobsControls,0);return html;}
   if(STATE.page==="assign"){return renderAssignLeads();}
-  if(STATE.page==="emailaccounts"){return renderEmailAccounts();}
+  if(STATE.page==="emailaccounts"||STATE.page==="managerusers"){return renderManagerUsers();}
   if(STATE.page==="insights"){if(STATE.user&&STATE.user.role==='ra'&&!STATE.insightsData){loadMyInsights();}return renderInsights();}
   if(STATE.page==="email")return renderEmail();
   if(STATE.page==="reminders")return renderReminders();
@@ -1040,7 +1044,7 @@ function renderJobs(){
   var stages=["Unassigned","Assigned","Connected","Rejected","Future","Qualified"];
   var stageOpts=stages.map(function(st){return '<option value="'+st+'"'+(f.stage===st?" selected":"")+'>'+st+'</option>';}).join("");
 
-  var canChangeStageInline=['admin','bd','bd_lead'].includes(u.role);
+  var canChangeStageInline=userHasAnyRole(u,'admin','bd','bd_lead');
   var _tp=Math.max(1,Math.ceil(jobs.length/20));
   var _pg=Math.min(STATE.leadsPage||0,_tp-1);
   var rows=jobs.slice(_pg*20,(_pg+1)*20).map(function(j){
@@ -1189,8 +1193,8 @@ function openAddJob(){ STATE.modal={type:"addJob"}; render(); }
 function renderJobDetailModal(){
   var j=jobById(STATE.modal.id); if(!j) return "";
   var u=STATE.user;
-  var canChangeStage=['admin','bd','bd_lead'].includes(u.role);
-  var canEdit=u.role==="admin"||j.created_by===u.id||j.assigned_to===u.id||j.assigned_to_bd===u.id;
+  var canChangeStage=userHasAnyRole(u,'admin','bd','bd_lead');
+  var canEdit=userHasRole(u,'admin')||j.created_by===u.id||j.assigned_to===u.id||j.assigned_to_bd===u.id;
   var bdStages=['Connected','Rejected','Future','In Discussion'];
   var allStages=['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'];
   var cs=jobContacts(j.id);
@@ -1198,7 +1202,7 @@ function renderJobDetailModal(){
 
   var emailStatusColors={valid:'var(--green)',invalid:'var(--red)',deactivated:'var(--text3)',out_of_office:'var(--amber)'};
   var emailStatusLabels={valid:'Valid',invalid:'Invalid',deactivated:'Deactivated',out_of_office:'Out of Office'};
-  var canChangeEmailStatus=['admin','bd','bd_lead'].includes(u.role);
+  var canChangeEmailStatus=userHasAnyRole(u,'admin','bd','bd_lead');
 
   var contactRows=cs.map(function(c){
     var es=c.email_status||'valid';
@@ -1390,7 +1394,7 @@ function closeModal(){ STATE.modal=null; render(); }
 function renderEmail(){
   var u=STATE.user;
   // BD sees pending+queued+sent; others see sent only
-  var isBD=(u.role==='bd'||u.role==='bd_lead'||u.role==='admin'||u.role==='ra_lead');
+  var isBD=userHasAnyRole(u,'bd','bd_lead','admin','ra_lead');
   var pending=STATE.pendingEmails||[];
   var sentEmails=STATE.sentEmails||[];
   var tabs=isBD?['pending','compose','sent','outreachplan']:['compose','sent','outreachplan'];
@@ -1526,7 +1530,7 @@ function renderEmail(){
       '<div style="font-size:11px;color:var(--text3);margin-top:4px">Must be after Follow-up 1 (Day '+fu1Day+')</div>'+
     '</div>';
   }
-  var canEditTemplates=(u.role==='bd'||u.role==='bd_lead'||u.role==='admin');
+  var canEditTemplates=userHasAnyRole(u,'bd','bd_lead','admin');
   var tmplHtml=canEditTemplates?
     '<div>'+
       '<div style="display:flex;gap:10px;margin-bottom:20px">'+tmplTabBtns+'</div>'+
@@ -1766,7 +1770,7 @@ function renderAdmin(){
     if(!users.length)return'';
     var rows=users.map(function(usr){
       var emailCount=(STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===usr.id;}).length;
-      return '<div onclick="STATE.adminSelectedUser=\''+usr.id+'\';render()" style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s" onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'\'">'+
+      return '<div onclick="STATE.adminSelectedUser=\''+usr.id+'\';render()" style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s">'+
         av(usr,'36')+
         '<div style="flex:1;min-width:0">'+
           '<div style="font-weight:600;font-size:13.5px;color:var(--text)">'+htmlEsc(usr.name)+'</div>'+
@@ -1784,7 +1788,7 @@ function renderAdmin(){
     '</div>';
   }).join('');
 
-  var canSeeEngine=(u.role==='admin'||u.role==='ra_lead');
+  var canSeeEngine=userHasAnyRole(u,'admin','ra_lead');
   var outreachTime=(STATE.appSettings&&STATE.appSettings['outreach_send_time'])||'08:00';
   var followupTime=(STATE.appSettings&&STATE.appSettings['followup_send_time'])||'08:30';
   var enginePanel='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
@@ -2393,6 +2397,179 @@ window.exportXL=function(){
 }
 
 window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;render();}
+
+// ── Manager Users functions ──────────────────────────────────
+window.loadUserEmails=function(userId){
+  apiGet('/users/'+userId+'/emails').then(function(d){
+    STATE.userEmailsCache=STATE.userEmailsCache||{};
+    STATE.userEmailsCache[userId]=d||[];
+    render();
+  }).catch(function(){});
+};
+
+window.toggleUserRole=function(userId,role,checked){
+  var usr=STATE.users.find(function(x){return x.id===userId;});
+  if(!usr)return;
+  var roles=usr.roles?usr.roles.slice():[usr.role];
+  if(checked&&roles.indexOf(role)===-1)roles.push(role);
+  else if(!checked)roles=roles.filter(function(r){return r!==role;});
+  if(!roles.length){showToast('User must have at least one role','warning');return;}
+  apiPut('/users/'+userId+'/roles',{roles:roles}).then(function(u){
+    STATE.users=STATE.users.map(function(x){return x.id===userId?normaliseUser(u):x;});
+    showToast('Roles updated','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.openAddUserEmail=function(userId,platform){
+  platform=platform||'Microsoft';
+  var isMicrosoft=platform==='Microsoft';
+  STATE._addEmailUserId=userId;
+  STATE._addEmailPlatform=platform;
+  STATE.modal='<div class="modal modal-w420">'
+    +'<div class="mh"><div class="mt">Add '+platform+' Email</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'
+    +'<div class="mb_">'
+    +'<div class="fgrp"><label class="flbl">Email address *</label><input class="inp" id="ue-email" placeholder="e.g. john@futeglobal.com"/></div>'
+    +'<div class="fgrp"><label class="flbl">Display name</label><input class="inp" id="ue-name" placeholder="John Smith"/></div>'
+    +'<div class="fgrp"><label class="flbl">Daily limit</label><input class="inp" type="number" id="ue-limit" value="150" min="1" max="500" style="width:120px"/></div>'
+    +'<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:6px 0">'
+    +'<input type="checkbox" id="ue-primary"/> Set as primary email (login email)</label>'
+    +'</div>'
+    +'<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button>'
+    +(isMicrosoft
+      ?'<button class="btn btn-primary" onclick="submitAddUserEmailMicrosoft(STATE._addEmailUserId)" style="background:#0078d4">Save &amp; Connect Microsoft</button>'
+      :'<button class="btn btn-primary" onclick="submitAddUserEmail(STATE._addEmailUserId,STATE._addEmailPlatform)" style="background:#16a34a">Save Gmail</button>')
+    +'</div></div>';
+  render();
+};
+
+window.submitAddUserEmail=function(userId,platform){
+  var email=(document.getElementById('ue-email')||{}).value||'';
+  var name=(document.getElementById('ue-name')||{}).value||'';
+  var limit=parseInt((document.getElementById('ue-limit')||{}).value||'150');
+  var isPrimary=(document.getElementById('ue-primary')||{}).checked||false;
+  if(!email){showToast('Email address required','warning');return;}
+  apiPost('/users/'+userId+'/emails',{email_address:email,display_name:name||email,platform:platform||'Gmail',daily_send_limit:limit,is_primary:isPrimary}).then(function(e){
+    STATE.userEmailsCache=STATE.userEmailsCache||{};
+    STATE.userEmailsCache[userId]=(STATE.userEmailsCache[userId]||[]).concat([e]);
+    closeModal();showToast('Email added','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.submitAddUserEmailMicrosoft=function(userId){
+  var email=(document.getElementById('ue-email')||{}).value||'';
+  var name=(document.getElementById('ue-name')||{}).value||'';
+  var limit=parseInt((document.getElementById('ue-limit')||{}).value||'150');
+  var isPrimary=(document.getElementById('ue-primary')||{}).checked||false;
+  if(!email){showToast('Email address required','warning');return;}
+  apiPost('/users/'+userId+'/emails',{email_address:email,display_name:name||email,platform:'Microsoft',daily_send_limit:limit,is_primary:isPrimary}).then(function(e){
+    STATE.userEmailsCache=STATE.userEmailsCache||{};
+    STATE.userEmailsCache[userId]=(STATE.userEmailsCache[userId]||[]).concat([e]);
+    closeModal();render();
+    // Open Microsoft OAuth popup
+    var url=API_URL+'/auth/microsoft/connect?userEmailId='+e.id+'&token='+STATE.token;
+    window.open(url,'ms_oauth','width=600,height=700,scrollbars=yes');
+    showToast('Complete Microsoft login in the popup','info');
+    window._msOAuthHandler=function(event){
+      if(event.data&&event.data.type==='ms_oauth_success'){
+        window.removeEventListener('message',window._msOAuthHandler);
+        loadUserEmails(userId);
+        showToast('Microsoft connected: '+event.data.email,'success');
+      } else if(event.data&&event.data.type==='ms_oauth_error'){
+        window.removeEventListener('message',window._msOAuthHandler);
+        showToast('Connection failed: '+event.data.error,'error');
+      }
+    };
+    window.addEventListener('message',window._msOAuthHandler);
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.connectMicrosoftUserEmail=function(userId,userEmailId){
+  var url=API_URL+'/auth/microsoft/connect?userEmailId='+userEmailId+'&token='+STATE.token;
+  window.open(url,'ms_oauth','width=600,height=700,scrollbars=yes');
+  showToast('Complete Microsoft login in the popup','info');
+  window._msOAuthHandler=function(event){
+    if(event.data&&event.data.type==='ms_oauth_success'){
+      window.removeEventListener('message',window._msOAuthHandler);
+      loadUserEmails(userId);
+      showToast('Connected: '+event.data.email,'success');
+    } else if(event.data&&event.data.type==='ms_oauth_error'){
+      window.removeEventListener('message',window._msOAuthHandler);
+      showToast('Failed: '+event.data.error,'error');
+    }
+  };
+  window.addEventListener('message',window._msOAuthHandler);
+};
+
+window.toggleUserEmailActive=function(userId,emailId,active){
+  apiPatch('/users/'+userId+'/emails/'+emailId,{is_active:active}).then(function(e){
+    STATE.userEmailsCache[userId]=(STATE.userEmailsCache[userId]||[]).map(function(x){return x.id===emailId?e:x;});
+    showToast(active?'Activated':'Deactivated','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.setPrimaryEmail=function(userId,emailId){
+  apiPatch('/users/'+userId+'/emails/'+emailId,{is_primary:true}).then(function(){
+    loadUserEmails(userId);
+    showToast('Primary email updated','success');
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.deleteUserEmail=function(userId,emailId){
+  if(!confirm('Remove this email ID?'))return;
+  apiDelete('/users/'+userId+'/emails/'+emailId).then(function(){
+    STATE.userEmailsCache[userId]=(STATE.userEmailsCache[userId]||[]).filter(function(x){return x.id!==emailId;});
+    showToast('Email removed','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.openAssignToBDLead=function(leadId){
+  STATE._assignManagerId=leadId;
+  STATE._assignType='bd_to_bdlead';
+  var bdManagers=STATE.users.filter(function(x){return userHasRole(x,'bd');});
+  var existing=(STATE.teamAssignments||[]).filter(function(a){return a.manager_id===leadId&&a.assignment_type==='bd_to_bdlead';}).map(function(a){return a.member_id;});
+  var available=bdManagers.filter(function(x){return existing.indexOf(x.id)===-1;});
+  if(!available.length){showToast('All BD Managers already assigned to this lead','info');return;}
+  var opts=available.map(function(u){return '<option value="'+u.id+'">'+htmlEsc(u.name)+'</option>';}).join('');
+  STATE.modal='<div class="modal modal-w400"><div class="mh"><div class="mt">Assign BD Manager</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'
+    +'<div class="mb_"><div class="fgrp"><label class="flbl">Select BD Manager</label><select class="sel" id="assign-member"><option value="">— select —</option>'+opts+'</select></div></div>'
+    +'<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="submitAssignment(STATE._assignManagerId,STATE._assignType)">Assign</button></div></div>';
+  render();
+};
+
+window.openAssignRAToManager=function(managerId){
+  STATE._assignManagerId=managerId;
+  STATE._assignType='ra_to_bd';
+  var raUsers=STATE.users.filter(function(x){return userHasRole(x,'ra');});
+  var existing=(STATE.teamAssignments||[]).filter(function(a){return a.manager_id===managerId&&a.assignment_type==='ra_to_bd';}).map(function(a){return a.member_id;});
+  var available=raUsers.filter(function(x){return existing.indexOf(x.id)===-1;});
+  if(!available.length){showToast('All RAs already assigned to this manager','info');return;}
+  var opts=available.map(function(u){return '<option value="'+u.id+'">'+htmlEsc(u.name)+'</option>';}).join('');
+  STATE.modal='<div class="modal modal-w400"><div class="mh"><div class="mt">Assign Research Analyst</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'
+    +'<div class="mb_"><div class="fgrp"><label class="flbl">Select RA</label><select class="sel" id="assign-member"><option value="">— select —</option>'+opts+'</select></div></div>'
+    +'<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="submitAssignment(STATE._assignManagerId,STATE._assignType)">Assign</button></div></div>';
+  render();
+};
+
+window.submitAssignment=function(managerId,type){
+  managerId=managerId||STATE._assignManagerId;
+  type=type||STATE._assignType;
+  var memberId=(document.getElementById('assign-member')||{}).value||'';
+  if(!memberId){showToast('Please select a user','warning');return;}
+  apiPost('/team-assignments',{member_id:memberId,manager_id:managerId,assignment_type:type}).then(function(a){
+    STATE.teamAssignments=(STATE.teamAssignments||[]).concat([a]);
+    closeModal();showToast('Assigned','success');
+    apiGet('/team-assignments').then(function(d){STATE.teamAssignments=d||[];render();});
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.removeAssignment=function(event,assignmentId){
+  event.stopPropagation();
+  if(!confirm('Remove this assignment?'))return;
+  apiDelete('/team-assignments/'+assignmentId).then(function(){
+    STATE.teamAssignments=(STATE.teamAssignments||[]).filter(function(a){return a.id!==assignmentId;});
+    showToast('Removed','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
 
 window.connectMicrosoftAccount=function(accountId){
   var url=API_URL+'/auth/microsoft/connect?accountId='+accountId;
@@ -4046,7 +4223,7 @@ function renderInsights(){
     var raCards=ras.map(function(ra){
       // Quick stats from STATE.jobs (last 30 days approx)
       var raJobs=STATE.jobs.filter(function(j){return j.created_by===ra.id;});
-      return '<div onclick="loadRAInsights(\''+ra.id+'\')" style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px 16px;display:flex;align-items:center;gap:14px;margin-bottom:10px;cursor:pointer;transition:background .1s" onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'\'">'+
+      return '<div onclick="loadRAInsights(\''+ra.id+'\')" style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px 16px;display:flex;align-items:center;gap:14px;margin-bottom:10px;cursor:pointer;transition:background .1s">'+
         av(ra,'36')+
         '<div style="flex:1">'+
           '<div style="font-weight:600;font-size:13.5px">'+htmlEsc(ra.name)+'</div>'+
@@ -4620,88 +4797,70 @@ window.submitAssignToManager=function(){
 // ════════════════════════════════════════════════
 // EMAIL ACCOUNTS PAGE — Drop M
 // ════════════════════════════════════════════════
-function renderEmailAccounts(){
+function renderManagerUsers(){
   var u=STATE.user;
-  var accounts=STATE.emailAccounts||[];
-  var managers=STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead'||x.role==='admin';});
-
-  // Group accounts by assigned manager
-  var byManager={};
-  var unassigned=[];
-  accounts.forEach(function(a){
-    if(a.assigned_to){
-      if(!byManager[a.assigned_to])byManager[a.assigned_to]=[];
-      byManager[a.assigned_to].push(a);
-    } else {
-      unassigned.push(a);
-    }
-  });
-
-  var managerBlocks=managers.map(function(m){
-    var mAccounts=byManager[m.id]||[];
-    var rows=mAccounts.map(function(a){
-      return '<tr style="border-bottom:1px solid var(--border2)">'+
-        '<td style="padding:10px 12px;font-size:13px"><div style="font-weight:500">'+htmlEsc(a.display_name)+'</div>'+
-          '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(a.email_address)+'</div></td>'+
-        '<td style="padding:10px 12px;text-align:center">'+
-          '<span style="font-size:12px;padding:3px 8px;background:'+(a.is_active?'var(--green-l)':'var(--red-l)')+';color:'+(a.is_active?'var(--green)':'var(--red)')+';border-radius:8px;font-weight:600">'+(a.is_active?'Active':'Inactive')+'</span>'+
-        '</td>'+
-        '<td style="padding:10px 12px;text-align:center;font-size:13px;color:var(--text2)">'+htmlEsc(String(a.daily_send_limit||150))+'</td>'+
-        '<td style="padding:10px 12px;white-space:nowrap">'+
-          '<button class="btn-icon" onclick="openEditEmailAccount(\''+a.id+'\')">'+ico('edit',13)+'</button>'+
-          '<button class="btn-icon" style="color:var(--red)" onclick="toggleEmailAccount(\''+a.id+'\','+(!a.is_active)+')">'+(a.is_active?ico('trash',13):'\u21a9')+'</button>'+
-        '</td>'+
-      '</tr>';
-    }).join('');
-
-    return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);margin-bottom:14px;overflow:hidden">'+
-      '<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:var(--bg)">'+
-        '<div style="display:flex;align-items:center;gap:10px">'+
-          av(m,'32')+
-          '<div><div style="font-weight:600;font-size:13px">'+htmlEsc(m.name)+'</div>'+
-          '<div style="font-size:11px;color:var(--text3)">'+roleLabel(m.role)+'</div></div>'+
-        '</div>'+
-        '<div style="display:flex;align-items:center;gap:10px">'+
-          '<span style="font-size:12px;color:var(--text3)">'+mAccounts.length+' / 4 email IDs</span>'+
-          (mAccounts.length<4?'<button onclick="openAddEmailAccount(\''+m.id+'\')" style="font-size:12px;padding:5px 11px;background:var(--accent);color:#fff;border:0;border-radius:7px;cursor:pointer">+ Add Email ID</button>':
-          '<span style="font-size:11px;color:var(--text3);padding:4px 8px;background:var(--bg);border-radius:6px">Max reached</span>')+
-        '</div>'+
-      '</div>'+
-      (rows?
-        '<table style="width:100%;border-collapse:collapse">'+
-          '<thead style="background:var(--bg);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
-            '<tr><th style="padding:8px 12px;text-align:left">Email ID</th><th style="padding:8px 12px;text-align:center">Status</th><th style="padding:8px 12px;text-align:center">Daily Limit</th><th style="padding:8px 12px"></th></tr>'+
-          '</thead>'+
-          '<tbody>'+rows+'</tbody>'+
-        '</table>'
-      :'<div style="padding:20px;text-align:center;font-size:13px;color:var(--text3)">No email IDs assigned yet.</div>')+
-    '</div>';
+  var tab=STATE.managerUsersTab||'bd';
+  var allUsers=STATE.users||[];
+  var assignments=STATE.teamAssignments||[];
+  if(STATE.selectedManagerUser){return renderManagerUserDetail(STATE.selectedManagerUser);}
+  var tabDefs=[{key:'bd',label:'BD Managers'},{key:'ra',label:'Research Analysts'},{key:'bdteam',label:'BD Team'},{key:'rateam',label:'RA Team'}];
+  var tabBar=tabDefs.map(function(t){
+    var isActive=tab===t.key;
+    return '<button onclick="STATE.managerUsersTab=\''+t.key+'\';render()" style="padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:2px solid '+(isActive?'var(--accent)':'var(--border)')+';background:'+(isActive?'var(--accent)':'var(--card)')+';color:'+(isActive?'#fff':'var(--text2)')+';transition:all .15s">'+t.label+'</button>';
   }).join('');
+  var body='';
+  if(tab==='bd'){
+    var bdUsers=allUsers.filter(function(x){return userHasRole(x,'bd')||userHasRole(x,'bd_lead');});
+    var rows=bdUsers.map(function(usr){
+      var emailCount=(STATE.userEmailsCache[usr.id]||[]).length;
+      var teamCount=assignments.filter(function(a){return a.manager_id===usr.id;}).length;
+      return '<div class="user-list-row" onclick="STATE.selectedManagerUser=\''+usr.id+'\';loadUserEmails(\''+usr.id+'\');render()" style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer">'+av(usr,'36')+'<div style="flex:1"><div style="font-weight:600;font-size:13.5px">'+htmlEsc(usr.name)+'</div><div style="font-size:11.5px;color:var(--text3)">'+htmlEsc(usr.email)+'</div></div><span style="font-size:11px;padding:2px 8px;background:var(--accent-l);color:var(--accent);border-radius:8px">'+emailCount+' email'+(emailCount!==1?'s':'')+'</span>'+(teamCount?'<span style="font-size:11px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:8px">'+teamCount+' member'+(teamCount!==1?'s':'')+'</span>':'')+'<div style="color:var(--text3);font-size:18px">&#8250;</div></div>';
+    }).join('');
+    body='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+(rows||'<div style="padding:30px;text-align:center;color:var(--text3);font-size:13px">No BD Managers yet. Add users from the Admin tab.</div>')+'</div>';
+  } else if(tab==='ra'){
+    var raUsers=allUsers.filter(function(x){return userHasRole(x,'ra')&&!userHasAnyRole(x,'bd','bd_lead','admin');});
+    var rows=raUsers.map(function(usr){
+      var myManagers=assignments.filter(function(a){return a.member_id===usr.id&&a.assignment_type==='ra_to_bd';}).map(function(a){return a.manager&&a.manager.name||'';}).filter(Boolean);
+      return '<div class="user-list-row" onclick="STATE.selectedManagerUser=\''+usr.id+'\';render()" style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer">'+av(usr,'36')+'<div style="flex:1"><div style="font-weight:600;font-size:13.5px">'+htmlEsc(usr.name)+'</div><div style="font-size:11.5px;color:var(--text3)">'+htmlEsc(usr.email)+'</div></div>'+(myManagers.length?'<span style="font-size:11px;padding:2px 8px;background:var(--accent-l);color:var(--accent);border-radius:8px">&#8594; '+htmlEsc(myManagers.join(', '))+'</span>':'<span style="font-size:11px;color:var(--text3)">Unassigned</span>')+'<div style="color:var(--text3);font-size:18px">&#8250;</div></div>';
+    }).join('');
+    body='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+(rows||'<div style="padding:30px;text-align:center;color:var(--text3);font-size:13px">No Research Analysts yet.</div>')+'</div>';
+  } else if(tab==='bdteam'){
+    var bdLeads=allUsers.filter(function(x){return userHasRole(x,'bd_lead');});
+    body=bdLeads.length?bdLeads.map(function(lead){
+      var members=assignments.filter(function(a){return a.manager_id===lead.id&&a.assignment_type==='bd_to_bdlead';});
+      var memberRows=members.length?members.map(function(a){var m=a.member;if(!m)return'';return '<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border2)">'+av(m,'30')+'<div style="flex:1"><div style="font-size:13px;font-weight:500">'+htmlEsc(m.name)+'</div><div style="font-size:11px;color:var(--text3)">'+htmlEsc(m.email)+'</div></div><button onclick="removeAssignment(event,\''+a.id+'\')" style="font-size:11px;color:var(--red);background:transparent;border:0;cursor:pointer">Remove</button></div>';}).join(''):'<div style="padding:12px 16px;font-size:12px;color:var(--text3)">No BD Managers assigned yet.</div>';
+      return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);margin-bottom:14px;overflow:hidden"><div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center;gap:10px">'+av(lead,'32')+'<div style="font-weight:700;font-size:13.5px">'+htmlEsc(lead.name)+'</div></div><button onclick="openAssignToBDLead(\''+lead.id+'\')" style="font-size:12px;padding:5px 12px;background:var(--accent);color:#fff;border:0;border-radius:7px;cursor:pointer">+ Assign BD Manager</button></div>'+memberRows+'</div>';
+    }).join(''):'<div style="padding:30px;text-align:center;color:var(--text3);font-size:13px;background:var(--card);border:1px solid var(--border);border-radius:var(--r2)">No BD Team Leads yet.</div>';
+  } else if(tab==='rateam'){
+    var bdManagers=allUsers.filter(function(x){return userHasRole(x,'bd');});
+    body=bdManagers.length?bdManagers.map(function(mgr){
+      var members=assignments.filter(function(a){return a.manager_id===mgr.id&&a.assignment_type==='ra_to_bd';});
+      var memberRows=members.length?members.map(function(a){var m=a.member;if(!m)return'';return '<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border2)">'+av(m,'30')+'<div style="flex:1"><div style="font-size:13px;font-weight:500">'+htmlEsc(m.name)+'</div><div style="font-size:11px;color:var(--text3)">'+htmlEsc(m.email)+'</div></div><button onclick="removeAssignment(event,\''+a.id+'\')" style="font-size:11px;color:var(--red);background:transparent;border:0;cursor:pointer">Remove</button></div>';}).join(''):'<div style="padding:12px 16px;font-size:12px;color:var(--text3)">No RAs assigned yet.</div>';
+      return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);margin-bottom:14px;overflow:hidden"><div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center;gap:10px">'+av(mgr,'32')+'<div style="font-weight:700;font-size:13.5px">'+htmlEsc(mgr.name)+'</div></div><button onclick="openAssignRAToManager(\''+mgr.id+'\')" style="font-size:12px;padding:5px 12px;background:var(--accent);color:#fff;border:0;border-radius:7px;cursor:pointer">+ Assign RA</button></div>'+memberRows+'</div>';
+    }).join(''):'<div style="padding:30px;text-align:center;color:var(--text3);font-size:13px;background:var(--card);border:1px solid var(--border);border-radius:var(--r2)">No BD Managers yet.</div>';
+  }
+  return '<div class="page"><div class="ph"><div class="flex jb aic"><div><div class="ptitle">Manager Users</div><div class="psub">'+allUsers.length+' users</div></div><button class="btn btn-primary btn-sm" onclick="STATE.page=\'admin\';STATE.adminSelectedUser=null;render()">'+ico('plus',13)+' Manage Users</button></div></div><div style="display:flex;gap:10px;margin-bottom:20px">'+tabBar+'</div>'+body+'</div>';
+}
 
-  var unassignedBlock=unassigned.length?
-    '<div style="background:var(--card);border:1.5px dashed var(--border2);border-radius:var(--r2);margin-bottom:14px;padding:14px 16px">'+
-      '<div style="font-weight:600;font-size:13px;margin-bottom:10px;color:var(--text3)">Unassigned Email IDs ('+unassigned.length+')</div>'+
-      unassigned.map(function(a){
-        return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">'+
-          '<div><div style="font-size:13px;font-weight:500">'+htmlEsc(a.display_name)+'</div>'+
-            '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(a.email_address)+'</div></div>'+
-          '<button onclick="openEditEmailAccount(\''+a.id+'\')" class="btn btn-outline btn-sm">Assign</button>'+
-        '</div>';
-      }).join('')+
-    '</div>':'';
-
-  return '<div class="page">'+
-    '<div class="ph"><div class="flex jb aic">'+
-      '<div><div class="ptitle">Email Accounts</div>'+
-        '<div class="psub">'+accounts.length+' email IDs · '+managers.length+' managers</div></div>'+
-      '<div style="display:flex;gap:8px">'+
-        '<button class="btn btn-primary btn-sm" onclick="openAddEmailAccount(null,false,\'Microsoft\')">'+ico('plus',13)+' Microsoft Email</button>'+
-        '<button class="btn btn-outline btn-sm" onclick="openAddEmailAccount(null,false,\'Gmail\')">'+ico('plus',13)+' Gmail Email</button>'+
-      '</div>'+
-    '</div></div>'+
-    unassignedBlock+
-    managerBlocks+
-  '</div>';
+function renderManagerUserDetail(userId){
+  var usr=STATE.users.find(function(x){return x.id===userId;});
+  if(!usr)return'';
+  var userEmails=STATE.userEmailsCache[userId]||[];
+  var assignments=STATE.teamAssignments||[];
+  var myManagers=assignments.filter(function(a){return a.member_id===userId;});
+  var myMembers=assignments.filter(function(a){return a.manager_id===userId;});
+  var rolesAll=['admin','ra_lead','bd_lead','bd','ra'];
+  var roleLabelsMap={admin:'Admin',ra_lead:'RA Team Lead',bd_lead:'BD Team Lead',bd:'BD Manager',ra:'Research Analyst'};
+  var userRoles=usr.roles||[usr.role];
+  var roleCheckboxes=rolesAll.map(function(r){
+    var checked=userRoles.indexOf(r)>-1;
+    return '<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:6px 0"><input type="checkbox" '+(checked?'checked':'')+' onchange="toggleUserRole(\''+userId+'\',\''+r+'\',this.checked)" style="width:15px;height:15px"/>'+roleLabelsMap[r]+'</label>';
+  }).join('');
+  var emailRows=userEmails.map(function(e){
+    var msConnected=e.ms_connected;
+    return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap"><div style="flex:1;min-width:180px"><div style="font-weight:500;font-size:13px">'+htmlEsc(e.display_name||e.email_address)+'</div><div style="font-size:11px;color:var(--text3)">'+htmlEsc(e.email_address)+'</div></div><span style="font-size:10px;padding:2px 7px;border-radius:6px;font-weight:600;background:'+(e.platform==='Microsoft'?'#e0f2fe':'#f0fdf4')+';color:'+(e.platform==='Microsoft'?'#0369a1':'#166534')+'">'+e.platform+'</span>'+(e.is_primary?'<span style="font-size:10px;padding:2px 7px;background:var(--amber-l);color:var(--amber);border-radius:6px;font-weight:600">Primary</span>':'')+'<span style="font-size:10px;padding:2px 7px;border-radius:6px;font-weight:600;background:'+(e.is_active?'var(--green-l)':'var(--red-l)')+';color:'+(e.is_active?'var(--green)':'var(--red)')+'">'+( e.is_active?'Active':'Inactive')+'</span>'+(e.platform==='Microsoft'&&!msConnected?'<button onclick="connectMicrosoftUserEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:10px;padding:2px 8px;background:#0078d4;color:#fff;border:0;border-radius:6px;cursor:pointer">Connect</button>':(e.platform==='Microsoft'&&msConnected?'<span style="font-size:10px;color:var(--green)">&#10003; Connected</span>':''))+'<button onclick="toggleUserEmailActive(\''+userId+'\',\''+e.id+'\','+(e.is_active?'false':'true')+')" style="font-size:11px;color:'+(e.is_active?'var(--red)':'var(--green)')+';background:transparent;border:0;cursor:pointer">'+(e.is_active?'Deactivate':'Activate')+'</button>'+(e.is_primary?'':'<button onclick="setPrimaryEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:11px;color:var(--text3);background:transparent;border:0;cursor:pointer">Set Primary</button>')+'<button onclick="deleteUserEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:11px;color:var(--red);background:transparent;border:0;cursor:pointer">&#10005;</button></div>';
+  }).join('');
+  return '<div class="page"><div class="ph"><div class="flex aic gap3"><button onclick="STATE.selectedManagerUser=null;render()" style="background:transparent;border:0;color:var(--text3);font-size:22px;cursor:pointer">&#8592;</button>'+av(usr,'40')+'<div><div class="ptitle" style="margin:0">'+htmlEsc(usr.name)+'</div><div class="psub" style="margin:0">'+htmlEsc(usr.email)+'</div></div></div></div><div style="max-width:640px"><div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px"><div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Roles</div>'+roleCheckboxes+'</div><div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;margin-bottom:16px"><div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"><div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Email IDs <span style="font-weight:400">('+userEmails.length+' · max 4 active)</span></div><div style="display:flex;gap:6px"><button onclick="openAddUserEmail(\''+userId+'\',\'Microsoft\')" style="font-size:12px;padding:5px 10px;background:#0078d4;color:#fff;border:0;border-radius:7px;cursor:pointer">+ Microsoft</button><button onclick="openAddUserEmail(\''+userId+'\',\'Gmail\')" style="font-size:12px;padding:5px 10px;background:#16a34a;color:#fff;border:0;border-radius:7px;cursor:pointer">+ Gmail</button></div></div>'+(emailRows||'<div style="padding:20px;text-align:center;font-size:13px;color:var(--text3)">No email IDs added yet.</div>')+'</div><div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px"><div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Team Assignment</div>'+(myManagers.length?'<div style="font-size:13px;margin-bottom:8px">Reports to: '+myManagers.map(function(a){return'<strong>'+(a.manager&&a.manager.name||'')+'</strong>';}).join(', ')+'</div>':'')+(myMembers.length?'<div style="font-size:13px">Members: '+myMembers.map(function(a){return(a.member&&a.member.name)||'';}).filter(Boolean).join(', ')+'</div>':'<div style="font-size:13px;color:var(--text3)">No team members assigned.</div>')+'</div></div></div>';
 }
 
 window.openAddEmailAccount=function(managerId,fromDetail,platform){
@@ -5042,6 +5201,7 @@ function apiFetch(method,path,body){var headers={'Content-Type':'application/jso
 function apiGet(p){return apiFetch('GET',p);}
 function apiPost(p,b){return apiFetch('POST',p,b);}
 function apiPut(p,b){return apiFetch('PUT',p,b);}
+function apiPatch(p,b){return apiFetch('PATCH',p,b);}
 function apiDelete(p){return apiFetch('DELETE',p);}
 
 // ── Restore session if present ─────────────────
@@ -5050,7 +5210,24 @@ try{var _su=localStorage.getItem('fg_user');if(_su){var _parsed=JSON.parse(_su);
 // Wipe demo seed data — will be replaced by API on login
 STATE.jobs=[];STATE.contacts=[];STATE.users=[];STATE.companies=[];STATE.emails=[];STATE.reminders=[];STATE.activities=[];STATE.leads=[];
 
-function normaliseUser(u){var nm=u.name||'';var parts=nm.trim().split(/\s+/);var initials=((parts[0]||'')[0]||'')+((parts[1]||'')[0]||'');var roleAvc={admin:'av-admin',bd:'av-bd',ra:'av-ra',ra_lead:'av-admin',bd_lead:'av-bd'};return{id:u.id,name:nm,email:u.email,role:u.role,empId:u.employee_id,desig:u.designation,plt:u.platform||'Gmail',ooo:u.ooo_until||null,av:initials.toUpperCase()||'?',avc:roleAvc[u.role]||'av-ra',bdm:null};}
+function normaliseUser(u){
+  var nm=u.name||'';
+  var parts=nm.trim().split(/\s+/);
+  var initials=((parts[0]||'')[0]||'')+((parts[1]||'')[0]||'');
+  var roles=u.roles||(u.role?[u.role]:[]);
+  var primaryRole=roles[0]||u.role||'ra';
+  var roleAvc={admin:'av-admin',bd:'av-bd',ra:'av-ra',ra_lead:'av-admin',bd_lead:'av-bd'};
+  return{id:u.id,name:nm,email:u.email,role:primaryRole,roles:roles,empId:u.employee_id,desig:u.designation,plt:u.platform||'Gmail',ooo:u.ooo_until||null,av:initials.toUpperCase()||'?',avc:roleAvc[primaryRole]||'av-ra',bdm:null};
+}
+function userHasRole(u,role){
+  if(!u)return false;
+  if(Array.isArray(u.roles)&&u.roles.length)return u.roles.indexOf(role)>-1;
+  return u.role===role;
+}
+function userHasAnyRole(u){
+  var roles=Array.prototype.slice.call(arguments,1);
+  return roles.some(function(r){return userHasRole(u,r);});
+}
 function normaliseJob(j){
   var co=j.company||{};
   var bd=j.bd_assignee||{};
@@ -5102,7 +5279,7 @@ function loadAppData(){
       render();
     }).catch(function(){});
     // Load this user's personal outreach plan
-    if(STATE.user&&['bd','bd_lead','admin'].includes(STATE.user.role)){
+    if(STATE.user&&userHasAnyRole(STATE.user,'bd','bd_lead','admin')){
       apiGet('/outreach-plan').then(function(plan){
         STATE.myOutreachPlan=plan||{};
         if(plan['tmpl_o1_subject'])STATE.emailSubj=plan['tmpl_o1_subject'];
@@ -5112,6 +5289,19 @@ function loadAppData(){
         if(plan['tmpl_fu2_subject'])STATE.fu2Subj=plan['tmpl_fu2_subject'];
         if(plan['tmpl_fu2_body'])STATE.fu2Body=plan['tmpl_fu2_body'];
         render();
+      }).catch(function(){});
+    }
+    // Load team assignments for admin/bd_lead
+    if(STATE.user&&userHasAnyRole(STATE.user,'admin','bd_lead','ra_lead')){
+      apiGet('/team-assignments').then(function(d){STATE.teamAssignments=d||[];render();}).catch(function(){});
+      // Pre-load email IDs for all users
+      apiGet('/users').then(function(users){
+        (users||[]).forEach(function(u){
+          apiGet('/users/'+u.id+'/emails').then(function(emails){
+            STATE.userEmailsCache=STATE.userEmailsCache||{};
+            STATE.userEmailsCache[u.id]=emails||[];
+          }).catch(function(){});
+        });
       }).catch(function(){});
     }
     STATE.loading=false;render();
