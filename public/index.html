@@ -508,6 +508,7 @@ var STATE = {
   emailAccounts: [],
   composeContactId: null,
   composeCompanyId: null,
+  composeFromEmailId: null,
   showAIPanel: false,
   raForm: {
     coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',
@@ -1670,6 +1671,24 @@ function renderEmail(){
         recipientBadge+
       '</div>'+
 
+      // ── From email selector ──
+      (function(){
+        var myEmails=(STATE.userEmailsCache[u.id]||[]).filter(function(e){return e.is_active;});
+        if(!myEmails.length)return '';
+        var fromOpts=myEmails.map(function(e){
+          var sel=STATE.composeFromEmailId===e.id;
+          return '<option value="'+e.id+'"'+(sel?' selected':'')+'>'+htmlEsc(e.display_name||e.email_address)+' <'+htmlEsc(e.email_address)+'></option>';
+        }).join('');
+        return '<div class="card cp mb3">'+
+          '<div class="fw6 mb2" style="font-size:13px">From</div>'+
+          '<select class="sel" onchange="STATE.composeFromEmailId=this.value;render()">'+
+            '<option value="">— Select sending email —</option>'+fromOpts+
+          '</select>'+
+          (STATE.composeFromEmailId?'':
+            '<div style="font-size:11px;color:var(--amber);margin-top:6px">Select a sending email to enable send</div>')+
+        '</div>';
+      })()+
+
       '<div class="card cp mb3">'+
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
           '<div class="fw6" style="font-size:13px">Message</div>'+
@@ -2388,7 +2407,7 @@ window.exportXL=function(){
   }catch(e){showToast("Export failed: "+e.message,"error");}
 }
 
-window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;render();}
+window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;STATE.composeFromEmailId=null;render();}
 
 // ── Manager Users functions ──────────────────────────────────
 window.loadUserEmails=function(userId){
@@ -2848,13 +2867,20 @@ window.sendEmail=function(){
       ge={to:STATE.manualEmailName||STATE.manualEmail,email:STATE.manualEmail,subj:STATE.emailSubj.replace(/{{[\w]+}}/g,""),body:STATE.emailBody.replace(/{{[\w]+}}/g,""),lid:null};
     }
   }
+  // Attach from email if selected
+  var fromEmail=null;
+  if(STATE.composeFromEmailId){
+    var fromEm=(STATE.userEmailsCache[STATE.user.id]||[]).find(function(e){return e.id===STATE.composeFromEmailId;});
+    if(fromEm)fromEmail=fromEm.email_address;
+  }
   var plt=STATE.user.plt||"Gmail";
+  var gmailFrom=fromEmail||STATE.user.email||'';
   var url=plt==="Gmail"
-    ?"https://mail.google.com/mail/?view=cm&to="+encodeURIComponent(ge.email)+"&su="+encodeURIComponent(ge.subj)+"&body="+encodeURIComponent(ge.body)
+    ?"https://mail.google.com/mail/?view=cm&to="+encodeURIComponent(ge.email)+"&su="+encodeURIComponent(ge.subj)+"&body="+encodeURIComponent(ge.body)+(gmailFrom?"&authuser="+encodeURIComponent(gmailFrom):'')
     :"https://outlook.live.com/mail/0/deeplink/compose?to="+encodeURIComponent(ge.email)+"&subject="+encodeURIComponent(ge.subj)+"&body="+encodeURIComponent(ge.body);
   window.open(url,"_blank");
-  STATE.emails.push({id:"e"+Date.now(),lid:ge.lid,by:STATE.user.id,to:ge.email,subj:ge.subj,body:ge.body,plt:plt,dt:todayIST(),status:"sent"});
-  showToast("Email opened in "+plt,"success");
+  STATE.emails.push({id:"e"+Date.now(),lid:ge.lid,by:STATE.user.id,to:ge.email,from_email:fromEmail||null,subj:ge.subj,body:ge.body,plt:plt,dt:todayIST(),status:"sent"});
+  showToast("Email opened in "+plt+(fromEmail?' from '+fromEmail:''),"success");
 }
 
 window.copyToClip=function(text){
@@ -5306,6 +5332,14 @@ function loadAppData(){
       STATE.appSettings=s||{};
       render();
     }).catch(function(){});
+    // Load current user's own email IDs for compose From selector
+    if(STATE.user){
+      apiGet('/users/'+STATE.user.id+'/emails').then(function(emails){
+        STATE.userEmailsCache=STATE.userEmailsCache||{};
+        STATE.userEmailsCache[STATE.user.id]=emails||[];
+        render();
+      }).catch(function(){});
+    }
     // Load this user's personal outreach plan
     if(STATE.user&&userHasAnyRole(STATE.user,'bd','bd_lead','admin')){
       apiGet('/outreach-plan').then(function(plan){
