@@ -2688,24 +2688,21 @@ window.unassignRA=function(id){
   showToast("RA unassigned","info");render();
 }
 window.saveUser=function(existingId){
-  var name=document.getElementById("u-name").value.trim();
-  var email=document.getElementById("u-email").value.trim();
-  if(!name||!email){showToast("Name and email required","warning");return;}
-  var role=document.getElementById("u-role").value;
-  var eid=document.getElementById("u-eid").value;
-  var desig=document.getElementById("u-desig").value;
-  var plt=document.getElementById("u-plt").value;
-  var bdm=document.getElementById("u-bd").value||null;
-  var av=name.split(" ").map(function(w){return w[0]}).join("").toUpperCase().slice(0,2);
-  var avc=role==="ra"?"av-ra":role==="bd"?"av-bd":"av-admin";
-  if(existingId){
-    STATE.users=STATE.users.map(function(u){return u.id===existingId?Object.assign({},u,{name:name,email:email,role:role,empId:eid,desig:desig,plt:plt,bdm:bdm,av:av,avc:avc}):u;});
-    showToast("User updated","success");
-  } else {
-    STATE.users.push({id:"u"+Date.now(),name:name,email:email,role:role,empId:eid,desig:desig,plt:plt,bdm:bdm,av:av,avc:avc});
-    showToast("User added","success");
-  }
-  closeModal();render();
+  var name=(document.getElementById('u-name')||{}).value||'';
+  var email=(document.getElementById('u-email')||{}).value||'';
+  name=name.trim();email=email.trim();
+  if(!name||!email){showToast('Name and email required','warning');return;}
+  var role=(document.getElementById('u-role')||{}).value||'ra';
+  var eid=(document.getElementById('u-eid')||{}).value||'';
+  var desig=(document.getElementById('u-desig')||{}).value||'';
+  var plt=(document.getElementById('u-plt')||{}).value||'Gmail';
+  var payload={name:name,email:email,role:role,employee_id:eid||undefined,designation:desig||undefined,platform:plt};
+  apiPost('/users',payload).then(function(u){
+    STATE.users.push(normaliseUser(u));
+    closeModal();
+    showToast('User added — '+name,'success');
+    render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
 }
 
 window.saveProfile=function(){
