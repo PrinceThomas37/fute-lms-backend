@@ -483,7 +483,7 @@ var STATE = {
   jobs: [],
   contacts: [],
   detailJob: null,
-  jobsFilter: {search:"",stages:[],industries:[],dateFrom:"",dateTo:""},
+  jobsFilter: {search:"",stages:[],industries:[],dateRange:"all",dateFrom:"",dateTo:""},
   openDrop: null,
   assignSel: {},
   assignTargetBD: "",
@@ -1029,8 +1029,8 @@ function renderJobs(){
   }
   if(f.stages&&f.stages.length)jobs=jobs.filter(function(j){return f.stages.indexOf(j.stage)>-1;});
   if(f.industries&&f.industries.length)jobs=jobs.filter(function(j){return f.industries.indexOf(j.industry||j.company_ind||"")>-1;});
-  if(f.dateFrom)jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)>=f.dateFrom;});
-  if(f.dateTo)jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)<=f.dateTo;});
+  if(f.dateRange&&f.dateRange!=="all"&&f.dateRange!=="custom"){var _now=new Date();var _today=todayIST();var _cut=null;if(f.dateRange==="today")_cut=_today;else if(f.dateRange==="yesterday"){var _yy=new Date(_now);_yy.setDate(_yy.getDate()-1);_cut=_yy.toISOString().slice(0,10);}else if(f.dateRange==="week"){var _ww=new Date(_now);_ww.setDate(_ww.getDate()-7);_cut=_ww.toISOString().slice(0,10);}if(_cut){if(f.dateRange==="today"||f.dateRange==="yesterday")jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)===_cut;});else jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)>=_cut;});}}
+  if(f.dateRange==="custom"){if(f.dateFrom)jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)>=f.dateFrom;});if(f.dateTo)jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)<=f.dateTo;});}
 
   var stages=["Unassigned","Assigned","Connected","Rejected","Future","Qualified"];
   var stageOpts=stages.map(function(st){return '<option value="'+st+'"'+(f.stage===st?" selected":"")+'>'+st+'</option>';}).join("");
@@ -1101,11 +1101,10 @@ function renderJobs(){
   var allIndustriesList=['Engineering','Healthcare','Legal','Accounting','Management','Other'];
   var stageActive=f.stages&&f.stages.length>0;
   var indActive=f.industries&&f.industries.length>0;
-  var dateActive=!!(f.dateFrom||f.dateTo);
+  var dateActive=f.dateRange&&f.dateRange!=='all';
   var anyActive=stageActive||indActive||dateActive;
-  function mkDrop(name,key,items,selected,active){
-    var label=active?name+' ('+selected.length+')':name;
-    var btn='<button onclick="event.stopPropagation();STATE.openDrop=STATE.openDrop===\''+name+'\' ?null:\''+name+'\';render()" style="padding:9px 13px;border:'+(active?'1.5px solid var(--accent)':'1px solid var(--border)')+';border-radius:8px;background:'+(active?'var(--accent-l)':'var(--bg2)')+';color:'+(active?'var(--accent)':'var(--text)')+';font-size:13px;font-weight:'+(active?'600':'400')+';cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap">'+label+' <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></button>';
+  function mkChkDrop(name,key,items,selected,active){
+    var btn='<button onclick="event.stopPropagation();STATE.openDrop=STATE.openDrop===\''+name+'\' ?null:\''+name+'\';render()" style="padding:9px 13px;border:'+(active?'1.5px solid var(--accent)':'1px solid var(--border)')+';border-radius:8px;background:'+(active?'var(--accent-l)':'var(--bg2)')+';color:'+(active?'var(--accent)':'var(--text)')+';font-size:13px;font-weight:'+(active?'600':'400')+';cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap">'+(active?name+' ('+selected.length+')':name)+' <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></button>';
     var panel='';
     if(STATE.openDrop===name){
       panel='<div style="position:absolute;top:calc(100% + 4px);left:0;z-index:9000;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);min-width:190px;padding:6px 0" onclick="event.stopPropagation()">'+
@@ -1115,18 +1114,23 @@ function renderJobs(){
     }
     return '<div style="position:relative">'+btn+panel+'</div>';
   }
-  var dateBtnLabel=dateActive?((f.dateFrom||'…')+' → '+(f.dateTo||'…')):'Date';
-  var dateBtnActive=dateActive;
+  var dateLabel=f.dateRange==='today'?'Today':f.dateRange==='yesterday'?'Yesterday':f.dateRange==='week'?'This week':f.dateRange==='custom'&&(f.dateFrom||f.dateTo)?((f.dateFrom||'…')+' → '+(f.dateTo||'…')):'Date';
   var dateBtn='<div style="position:relative">'+
-    '<button onclick="event.stopPropagation();STATE.openDrop=STATE.openDrop===\'date\' ?null:\'date\';render()" style="padding:9px 13px;border:'+(dateBtnActive?'1.5px solid var(--accent)':'1px solid var(--border)')+';border-radius:8px;background:'+(dateBtnActive?'var(--accent-l)':'var(--bg2)')+';color:'+(dateBtnActive?'var(--accent)':'var(--text)')+';font-size:13px;font-weight:'+(dateBtnActive?'600':'400')+';cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap">'+dateBtnLabel+' <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></button>'+
+    '<button onclick="event.stopPropagation();STATE.openDrop=STATE.openDrop===\'date\' ?null:\'date\';render()" style="padding:9px 13px;border:'+(dateActive?'1.5px solid var(--accent)':'1px solid var(--border)')+';border-radius:8px;background:'+(dateActive?'var(--accent-l)':'var(--bg2)')+';color:'+(dateActive?'var(--accent)':'var(--text)')+';font-size:13px;font-weight:'+(dateActive?'600':'400')+';cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap">'+dateLabel+' <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></button>'+
     (STATE.openDrop==='date'?
-      '<div style="position:absolute;top:calc(100% + 4px);left:0;z-index:9000;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);padding:14px 16px;min-width:280px" onclick="event.stopPropagation()">'+
-        '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Date added</div>'+
-        '<div style="display:flex;flex-direction:column;gap:10px">'+
-          '<div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;color:var(--text2);width:28px">From</span><input type="date" value="'+escAttr(f.dateFrom||'')+'" onchange="STATE.jobsFilter.dateFrom=this.value;STATE.leadsPage=0;render()" style="flex:1;padding:7px 10px;border:1px solid var(--border2);border-radius:7px;font-size:13px;background:var(--card);color:var(--text)"/></div>'+
-          '<div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;color:var(--text2);width:28px">To</span><input type="date" value="'+escAttr(f.dateTo||'')+'" onchange="STATE.jobsFilter.dateTo=this.value;STATE.leadsPage=0;render()" style="flex:1;padding:7px 10px;border:1px solid var(--border2);border-radius:7px;font-size:13px;background:var(--card);color:var(--text)"/></div>'+
+      '<div style="position:absolute;top:calc(100% + 4px);left:0;z-index:9000;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);padding:12px 14px;min-width:240px" onclick="event.stopPropagation()">'+
+        // Preset chips
+        '<div style="display:flex;flex-direction:column;gap:2px;margin-bottom:8px">'+
+          ['today','yesterday','week'].map(function(val){var lbl=val==='today'?'Today':val==='yesterday'?'Yesterday':'This week';var on=f.dateRange===val;return '<button onclick="STATE.jobsFilter.dateRange=STATE.jobsFilter.dateRange===\''+val+'\' ?\'all\':\''+val+'\';STATE.jobsFilter.dateFrom=\'\';STATE.jobsFilter.dateTo=\'\';STATE.leadsPage=0;render()" style="padding:7px 12px;border-radius:7px;font-size:13px;cursor:pointer;text-align:left;border:1px solid '+(on?'var(--accent)':'var(--border)')+';background:'+(on?'var(--accent-l)':'transparent')+';color:'+(on?'var(--accent)':'var(--text)')+';font-weight:'+(on?'600':'400')+'">'+lbl+'</button>';}).join('')+
         '</div>'+
-        (dateActive?'<button onclick="STATE.jobsFilter.dateFrom=\'\';STATE.jobsFilter.dateTo=\'\';STATE.leadsPage=0;render()" style="margin-top:10px;font-size:11.5px;color:var(--red);background:none;border:none;cursor:pointer;padding:0">Clear dates</button>':'')+
+        // Custom separator
+        '<div style="border-top:1px solid var(--border);margin:8px 0 10px"></div>'+
+        '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Custom range</div>'+
+        '<div style="display:flex;flex-direction:column;gap:8px">'+
+          '<div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;color:var(--text2);width:28px">From</span><input type="date" value="'+escAttr(f.dateFrom||'')+'" onchange="STATE.jobsFilter.dateRange=\'custom\';STATE.jobsFilter.dateFrom=this.value;STATE.leadsPage=0;render()" style="flex:1;padding:6px 10px;border:1px solid var(--border2);border-radius:7px;font-size:13px;background:var(--card);color:var(--text)"/></div>'+
+          '<div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;color:var(--text2);width:28px">To</span><input type="date" value="'+escAttr(f.dateTo||'')+'" onchange="STATE.jobsFilter.dateRange=\'custom\';STATE.jobsFilter.dateTo=this.value;STATE.leadsPage=0;render()" style="flex:1;padding:6px 10px;border:1px solid var(--border2);border-radius:7px;font-size:13px;background:var(--card);color:var(--text)"/></div>'+
+        '</div>'+
+        (dateActive?'<button onclick="STATE.jobsFilter.dateRange=\'all\';STATE.jobsFilter.dateFrom=\'\';STATE.jobsFilter.dateTo=\'\';STATE.leadsPage=0;render()" style="margin-top:10px;font-size:11.5px;color:var(--red);background:none;border:none;cursor:pointer;padding:0">Clear</button>':'')+
       '</div>':'')  +
   '</div>';
 
@@ -1134,10 +1138,10 @@ function renderJobs(){
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;gap:12px;flex-wrap:wrap">'+
       '<div style="display:flex;gap:10px;align-items:center;flex:1;min-width:280px;flex-wrap:wrap">'+
         '<input id="jobs-search" placeholder="Search jobs, companies, contacts..." value="'+escAttr(f.search)+'" style="flex:1;max-width:340px;padding:9px 13px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);font-size:13px"/>'+
-        mkDrop('Stage','stages',allStagesList,f.stages||[],stageActive)+
-        mkDrop('Industry','industries',allIndustriesList,f.industries||[],indActive)+
+        mkChkDrop('Stage','stages',allStagesList,f.stages||[],stageActive)+
+        mkChkDrop('Industry','industries',allIndustriesList,f.industries||[],indActive)+
         dateBtn+
-        (anyActive?'<button onclick="STATE.jobsFilter.stages=[];STATE.jobsFilter.industries=[];STATE.jobsFilter.dateFrom=\'\';STATE.jobsFilter.dateTo=\'\';STATE.openDrop=null;STATE.leadsPage=0;render()" style="padding:7px 12px;border:1.5px solid var(--red);border-radius:8px;background:var(--red-l);color:var(--red);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">&#10005; Clear</button>':'')+
+        (anyActive?'<button onclick="STATE.jobsFilter.stages=[];STATE.jobsFilter.industries=[];STATE.jobsFilter.dateRange=\'all\';STATE.jobsFilter.dateFrom=\'\';STATE.jobsFilter.dateTo=\'\';STATE.openDrop=null;STATE.leadsPage=0;render()" style="padding:7px 12px;border:1.5px solid var(--red);border-radius:8px;background:var(--red-l);color:var(--red);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">&#10005; Clear</button>':'')+
       '</div>'+
       '<div style="display:flex;gap:8px;align-items:center">'+
         (u.role==='ra_lead'||u.role==='admin'?'<button onclick="openExportLeads()" style="background:var(--card);color:var(--text);border:1.5px solid var(--border);padding:9px 15px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px">'+ico("dl",13)+' Export</button>':'')+
@@ -1383,7 +1387,7 @@ function renderEmail(){
   // BD sees pending+queued+sent; others see sent only
   var isBD=(u.role==='bd'||u.role==='bd_lead'||u.role==='admin'||u.role==='ra_lead');
   var pending=STATE.pendingEmails||[];
-var sentEmails=STATE.sentEmails||[];
+  var sentEmails=STATE.sentEmails||[];
   var tabs=isBD?['pending','compose','sent','templates']:['compose','sent','templates'];
   if(!STATE.emailTab)STATE.emailTab=isBD?'pending':'compose';
 
@@ -1427,12 +1431,10 @@ var sentEmails=STATE.sentEmails||[];
             '<div><strong>To:</strong> '+htmlEsc(pe.to_email)+'</div>'+
             '<div class="mt1"><strong>Subject:</strong> '+htmlEsc(pe.subject||'')+'</div>'+
           '</div>'+
-          '<div style="padding:14px;font-size:13px;line-height:1.7;white-space:pre-wrap;max-height:320px;overflow-y:auto">'+htmlEsc(pe.body||'')+'</div>'+
-          '<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px">'+
-            '<textarea id="edit-email-body-'+pe.id+'" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;min-height:60px;resize:vertical;font-family:inherit">'+htmlEsc(pe.body||'')+'</textarea>'+
+          '<div style="padding:14px;font-size:13px;line-height:1.7;white-space:pre-wrap;max-height:360px;overflow-y:auto">'+htmlEsc(pe.body||'')+'</div>'+
+          '<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">'+
+            '<button class="btn btn-outline btn-sm" onclick="openEditPendingEmail(\''+pe.id+'\')">✒ Edit email</button>'+
           '</div>'+
-          '<div style="padding:8px 14px;border-top:1px solid var(--border);display:flex;gap:8px">'+
-            '<button class="btn btn-outline btn-sm" onclick="saveEmailEdit(\''+pe.id+'\')">Save edit</button>'+
           '</div>'+
         '</div>';
       }
@@ -1535,7 +1537,7 @@ var sentEmails=STATE.sentEmails||[];
       var cj=myJobs.find(function(j){return j.id===parts[1];});
       if(cc)recipientBadge='<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--accent-l);border-radius:var(--r);margin-top:8px">'+
         '<div style="flex:1;font-size:13px"><strong>'+escHtml((cc.first_name||'')+' '+(cc.last_name||''))+'</strong>'+(cc.designation?' \u00b7 '+escHtml(cc.designation):'')+
-          '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+escHtml(cc.email||'')+(cj?' \u00b7 '+escHtml(cj.company_name):'')+'</div>'+
+          '<div style="font-size:12px;color:var(--accent);font-weight:600;margin-top:2px">'+escHtml(cc.email||'(no email on record)')+'</div>'+(cj?'<div style="font-size:11px;color:var(--text3)">'+escHtml(cj.company_name)+'</div>':'')+
         '</div>'+
         '<button class="btn-icon" onclick="STATE.composeContactId=null;STATE.composeCompanyId=null;STATE.genEmail=null;render()">'+ico('x',13)+'</button>'+
       '</div>';
@@ -2701,7 +2703,30 @@ window.toggleJobFilter=function(key,val,checked){
   else{arr=arr.filter(function(x){return x!==val;});}
   STATE.jobsFilter[key]=arr;STATE.leadsPage=0;render();
 };
-// Close any open dropdown when clicking outside
+window.openEditPendingEmail=function(id){
+  var pe=(STATE.pendingEmails||[]).find(function(e){return e.id===id;});
+  if(!pe)return;
+  STATE.modal='<div class="modal modal-w640">'+
+    '<div class="mh"><div class="mt">Edit Email \u2014 '+htmlEsc(pe.to_email||'')+'</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_" style="padding:18px 20px">'+
+      '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="edit-pe-subj" value="'+htmlEsc(pe.subject||'')+'"/></div>'+
+      '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" id="edit-pe-body" style="min-height:300px;line-height:1.7">'+htmlEsc(pe.body||'')+'</textarea></div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="savePendingEmailEdit(\''+id+'\')">Save changes</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+window.savePendingEmailEdit=function(id){
+  var subj=(document.getElementById('edit-pe-subj')||{}).value||'';
+  var body=(document.getElementById('edit-pe-body')||{}).value||'';
+  apiFetch('PATCH','/emails/'+id,{subject:subj,body:body}).then(function(updated){
+    STATE.pendingEmails=(STATE.pendingEmails||[]).map(function(e){return e.id===id?Object.assign({},e,{subject:updated.subject||subj,body:updated.body||body}):e;});
+    closeModal();showToast('Email updated','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
 document.addEventListener('click',function(){
   if(STATE.openDrop!==null){STATE.openDrop=null;render();}
 });
