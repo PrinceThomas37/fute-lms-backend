@@ -1784,6 +1784,7 @@ function renderAdmin(){
     '</div>';
   }).join('');
 
+  var canSeeEngine=(u.role==='admin'||u.role==='ra_lead');
   var outreachTime=(STATE.appSettings&&STATE.appSettings['outreach_send_time'])||'08:00';
   var followupTime=(STATE.appSettings&&STATE.appSettings['followup_send_time'])||'08:30';
   var enginePanel='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
@@ -1803,7 +1804,7 @@ function renderAdmin(){
     '<div class="ph"><div class="flex jb aic">'+
       '<div><div class="ptitle">Admin</div><div class="psub">'+STATE.users.length+' users · Fute Global LLC</div></div>'+
       '<button class="btn btn-primary btn-sm" onclick="openAddUser()">'+ico('plus',13)+'Add user</button>'+
-    '</div></div>'+enginePanel+sections+'</div>';
+    '</div></div>'+(canSeeEngine?enginePanel:'')+sections+'</div>';
 }
 
 function renderAdminUserDetail(userId){
