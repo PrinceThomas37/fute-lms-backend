@@ -1032,7 +1032,9 @@ function renderJobs(){
   var stageOpts=stages.map(function(st){return '<option value="'+st+'"'+(f.stage===st?" selected":"")+'>'+st+'</option>';}).join("");
 
   var canChangeStageInline=['admin','bd','bd_lead'].includes(u.role);
-  var rows=jobs.map(function(j){
+  var _tp=Math.max(1,Math.ceil(jobs.length/20));
+  var _pg=Math.min(STATE.leadsPage||0,_tp-1);
+  var rows=jobs.slice(_pg*20,(_pg+1)*20).map(function(j){
     var cs=jobContacts(j.id);
     var primary=cs[0]||{};
     var stageColor={Unassigned:"#94a3b8",Assigned:"#3b82f6",Connected:"#8b5cf6",Rejected:"#ef4444",Future:"#f59e0b",Qualified:"#10b981"}[j.stage]||"#64748b";
@@ -1113,7 +1115,14 @@ function renderJobs(){
         '<tbody>'+rows+'</tbody>'+
       '</table>'+
     '</div>'+
-    '<div style="margin-top:12px;font-size:12px;color:var(--text3)">'+jobs.length+' job'+(jobs.length===1?"":"s")+(u.role!=="admin"?" assigned to or created by you":" total")+'</div>'+
+    '<div style="margin-top:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">'+
+      '<div style="font-size:12px;color:var(--text3)">'+jobs.length+' lead'+(jobs.length===1?'':'s')+' · page '+(_pg+1)+' of '+_tp+'</div>'+
+      (_tp>1?'<div style="display:flex;gap:5px">'+
+        '<button onclick="setLeadsPage('+(_pg-1)+')" style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer;opacity:'+(_pg===0?'.35':'1')+'" '+(_pg===0?'disabled':'')+'>← Prev</button>'+
+        '<span style="padding:5px 10px;font-size:12px;font-weight:600">'+(_pg+1)+' / '+_tp+'</span>'+
+        '<button onclick="setLeadsPage('+(_pg+1)+')" style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer;opacity:'+(_pg>=_tp-1?'.35':'1')+'" '+(_pg>=_tp-1?'disabled':'')+'>Next →</button>'+
+      '</div>':'')+
+    '</div>'+
   '</div>';
 }
 
@@ -1335,7 +1344,7 @@ function renderEmail(){
   // BD sees pending+queued+sent; others see sent only
   var isBD=(u.role==='bd'||u.role==='bd_lead'||u.role==='admin'||u.role==='ra_lead');
   var pending=STATE.pendingEmails||[];
-  var sentEmails=STATE.emails||[];
+  var sentEmails=STATE.sentEmails||[];
   var tabs=isBD?['pending','compose','sent','templates']:['compose','sent','templates'];
   if(!STATE.emailTab)STATE.emailTab=isBD?'pending':'compose';
 
@@ -2632,7 +2641,7 @@ window.sendReminderEmail=function(rid){
   var r=STATE.reminders.find(function(x){return x.id===rid});
   if(!r)return;
   var subj="Following up — hope you're back!";
-  var body="Hi "+r.name.split(" ")[0]+",\n\nHope you had a great break! I wanted to follow up on my earlier message.\n\nWould you have 15 minutes for a quick call this week?\n\nWarm regards,\n"+STATE.user.name+"\nFute Global LLC";
+  var body="Hi "+((r.contact_name||r.name||'').split(' ')[0]||'there')+",\n\nHope you had a great break! I wanted to follow up on my earlier message.\n\nWould you have 15 minutes for a quick call this week?\n\nWarm regards,\n"+STATE.user.name+"\nFute Global LLC";
   var plt=STATE.user.plt||"Gmail";
   window.open(plt==="Gmail"
     ?"https://mail.google.com/mail/?view=cm&to="+encodeURIComponent(r.email)+"&su="+encodeURIComponent(subj)+"&body="+encodeURIComponent(body)
@@ -2642,7 +2651,7 @@ window.sendReminderEmail=function(rid){
 }
 window.sendAllDue=function(){
   var today=todayIST();
-  var due=STATE.reminders.filter(function(r){return r.uid===STATE.user.id&&r.status==="pending"&&r.returnDate<=today});
+  var due=STATE.reminders.filter(function(r){return r.user_id===STATE.user.id&&r.status==="pending"&&r.return_date<=today});
   due.forEach(function(r){sendReminderEmail(r.id);});
 }
 
@@ -4876,8 +4885,9 @@ function loadAppData(){
       apiGet('/distribute/today-summary').then(function(d){STATE.todaySummary=d;render();}).catch(function(){});
     }
     if(isBD){
-      STATE.pendingEmails=(r[3]||[]);
-      STATE.emails=(r[4]||[]);
+      STATE.pendingEmails=(r[5]||[]);
+      STATE.emails=(r[6]||[]);
+      apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];render();}).catch(function(){STATE.sentEmails=[];});
     }
     STATE.loading=false;render();
   }).catch(function(err){
