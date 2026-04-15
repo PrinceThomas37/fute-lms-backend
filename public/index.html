@@ -1789,19 +1789,11 @@ function renderAdmin(){
   }).join('');
 
   var canSeeEngine=userHasAnyRole(u,'admin','ra_lead');
-  var outreachTime=(STATE.appSettings&&STATE.appSettings['outreach_send_time'])||'08:00';
-  var followupTime=(STATE.appSettings&&STATE.appSettings['followup_send_time'])||'08:30';
-  var enginePanel='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
-    '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Email Engine — Send Times (IST)</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'+
-      '<div class="fgrp"><label class="flbl">Outreach send time</label><input class="inp" type="time" id="admin-outreach-time" value="'+outreachTime+'"/></div>'+
-      '<div class="fgrp"><label class="flbl">Follow-up send time</label><input class="inp" type="time" id="admin-followup-time" value="'+followupTime+'"/></div>'+
-    '</div>'+
-    '<div style="display:flex;gap:10px;align-items:center">'+
-      '<button class="btn btn-primary btn-sm" onclick="saveAdminSendTimes()">Save times</button>'+
-      '<button class="btn btn-outline btn-sm" onclick="runFollowupEngineNow()" style="border-color:var(--amber);color:var(--amber)">▶ Run follow-up engine now</button>'+
-      '<span style="font-size:11.5px;color:var(--text3)">Use the manual run to test follow-up generation</span>'+
-    '</div>'+
+  var enginePanel='<div style="display:flex;justify-content:flex-end;margin-bottom:16px">'+
+    '<button onclick="openEmailEngineModal()" style="display:flex;align-items:center;gap:7px;padding:7px 14px;background:var(--card);border:1px solid var(--border2);border-radius:8px;font-size:13px;color:var(--text2);cursor:pointer">'+
+      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'+
+      'Email Engine Schedule'+
+    '</button>'+
   '</div>';
 
   return '<div class="page">'+
@@ -2632,6 +2624,41 @@ window.saveEmailTemplate=function(key,subjId,bodyId){
   Promise.all(saves).then(function(){showToast('Template saved','success');}).catch(function(e){showToast('Save failed: '+e.message,'error');});
 };
 
+window.openEmailEngineModal=function(){
+  var outreachTime=(STATE.appSettings&&STATE.appSettings['outreach_send_time'])||'08:00';
+  var followupTime=(STATE.appSettings&&STATE.appSettings['followup_send_time'])||'08:30';
+  var tzOpts=[
+    {val:'Asia/Kolkata',label:'IST — India (UTC+5:30)'},
+    {val:'America/New_York',label:'EST — New York (UTC-5)'},
+    {val:'America/Chicago',label:'CST — Chicago (UTC-6)'},
+    {val:'America/Denver',label:'MST — Denver (UTC-7)'},
+    {val:'America/Los_Angeles',label:'PST — Los Angeles (UTC-8)'}
+  ].map(function(tz){
+    var sel=tz.val==='Asia/Kolkata';
+    return '<option value="'+tz.val+'"'+(sel?' selected':'')+'>'+tz.label+'</option>';
+  }).join('');
+  STATE.modal='<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Email Engine Schedule</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div style="font-size:13px;color:var(--text2);margin-bottom:18px">Set the daily send times for outreach and follow-up emails. The engine runs automatically at these times every day.</div>'+
+      '<div class="fgrp"><label class="flbl">Timezone</label><select class="sel" id="engine-tz">'+tzOpts+'</select></div>'+
+      '<div class="g2">'+
+        '<div class="fgrp"><label class="flbl">Outreach send time</label><input class="inp" type="time" id="admin-outreach-time" value="'+outreachTime+'"/></div>'+
+        '<div class="fgrp"><label class="flbl">Follow-up send time</label><input class="inp" type="time" id="admin-followup-time" value="'+followupTime+'"/></div>'+
+      '</div>'+
+      '<div style="padding:10px 12px;background:var(--amber-l);border-radius:var(--r);font-size:12px;color:var(--amber);margin-top:4px">'+
+        '<strong>Testing:</strong> Use "Run now" to trigger the follow-up engine immediately without waiting for the scheduled time.'+
+      '</div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline btn-sm" onclick="runFollowupEngineNow()" style="color:var(--amber);border-color:var(--amber);margin-right:auto">▶ Run now</button>'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="saveAdminSendTimes()">Save schedule</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+
 window.saveAdminSendTimes=function(){
   var ot=(document.getElementById('admin-outreach-time')||{}).value||'08:00';
   var ft=(document.getElementById('admin-followup-time')||{}).value||'08:30';
@@ -2643,6 +2670,7 @@ window.saveAdminSendTimes=function(){
     STATE.appSettings=STATE.appSettings||{};
     STATE.appSettings['outreach_send_time']=ot;
     STATE.appSettings['followup_send_time']=ft;
+    closeModal();
     showToast('Send times saved','success');
   }).catch(function(e){showToast('Save failed: '+e.message,'error');});
 };
