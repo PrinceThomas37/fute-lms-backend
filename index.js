@@ -1448,7 +1448,7 @@ app.get('/app-settings', auth, async (req, res) => {
 
 app.post('/app-settings', auth, async (req, res) => {
   try {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    if (!['admin','ra_lead'].includes(req.user.role)) return res.status(403).json({ error: 'Admin or RA Lead only' });
     const { key, value } = req.body;
     if (!key || value === undefined) return res.status(400).json({ error: 'key and value required' });
     const { error } = await supabase.from('app_settings')
