@@ -1508,7 +1508,7 @@ function renderEmail(){
   var activeTmpl=tmplDefs.find(function(t){return t.key===STATE.activeTmpl;})||tmplDefs[0];
   var tmplTabBtns=tmplDefs.map(function(t){
     var isActive=STATE.activeTmpl===t.key;
-    return '<button onclick="STATE.activeTmpl=\''+t.key+'\';render()" style="padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:2px solid '+(isActive?t.color:'var(--border)')+';background:'+(isActive?t.color:'var(--card)')+';color:'+(isActive?'#fff':'var(--text2)')+';transition:all .15s">'+t.label+'<div style="font-size:10px;font-weight:400;margin-top:2px;opacity:.85">'+t.sublabel+'</div></button>';
+    return '<button onclick="STATE.activeTmpl=\''+t.key+'\';render()" style="padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:2px solid '+(isActive?t.color:'var(--border)')+';background:'+(isActive?t.color:'var(--card)')+';color:'+(isActive?'#fff':'var(--text2)')+';transition:all .15s">'+t.label+'</button>';
   }).join('');
   var daySettingsHtml='';
   if(STATE.activeTmpl==='fu1'){
