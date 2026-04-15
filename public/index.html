@@ -4798,8 +4798,10 @@ window.submitCreateEmailAndConnectMicrosoft=function(managerId){
   var name=(document.getElementById('ea-name')||{}).value||'';
   var limit=parseInt((document.getElementById('ea-limit')||{}).value||'150');
   if(!email||!name){showToast('Email address and display name required','warning');return;}
+  // Sanitise managerId — treat string "null" or empty as no assignment
+  var assignTo=(managerId&&managerId!=='null'&&managerId!=='')?managerId:undefined;
   // First create the email account record
-  apiPost('/email-accounts',{email_address:email,display_name:name,assigned_to:managerId||undefined,daily_send_limit:limit,platform:'Microsoft'}).then(function(a){
+  apiPost('/email-accounts',{email_address:email,display_name:name,assigned_to:assignTo,daily_send_limit:limit,platform:'Microsoft'}).then(function(a){
     STATE.emailAccounts.push(a);
     closeModal();
     render();
@@ -4830,7 +4832,8 @@ window.submitCreateAndAssignEmailAccount=function(managerId){
   var name=(document.getElementById('ea-name')||{}).value||'';
   var limit=parseInt((document.getElementById('ea-limit')||{}).value||'150');
   if(!email||!name){showToast('Email address and display name required','warning');return;}
-  apiPost('/email-accounts',{email_address:email,display_name:name,assigned_to:managerId||undefined,daily_send_limit:limit}).then(function(a){
+  var assignTo=(managerId&&managerId!=='null'&&managerId!=='')?managerId:undefined;
+  apiPost('/email-accounts',{email_address:email,display_name:name,assigned_to:assignTo,daily_send_limit:limit}).then(function(a){
     STATE.emailAccounts.push(a);
     closeModal();showToast('Email ID created and assigned','success');render();
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
