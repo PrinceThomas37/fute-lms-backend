@@ -483,7 +483,8 @@ var STATE = {
   jobs: [],
   contacts: [],
   detailJob: null,
-  jobsFilter: {search:"",stage:"all",industry:"all",dateRange:"all",dateDays:"",bd:"all"},
+  jobsFilter: {search:"",stages:[],industries:[],dateFrom:"",dateTo:"",bd:"all"},
+  showFilterPanel: false,
   assignSel: {},
   assignTargetBD: "",
   distributePoolStats: null,
@@ -1026,21 +1027,10 @@ function renderJobs(){
       return false;
     });
   }
-  if(f.stage&&f.stage!=="all")jobs=jobs.filter(function(j){return j.stage===f.stage;});
-  if(f.industry&&f.industry!=="all")jobs=jobs.filter(function(j){return (j.industry||j.company_ind||"")===f.industry;});
-  if(f.dateRange&&f.dateRange!=="all"){
-    var _now=new Date();
-    var _today=todayIST();
-    var _cutoff=null;var _exact=false;
-    if(f.dateRange==="today"){_cutoff=_today;_exact=true;}
-    else if(f.dateRange==="yesterday"){var _y=new Date(_now);_y.setDate(_y.getDate()-1);_cutoff=_y.toISOString().slice(0,10);_exact=true;}
-    else if(f.dateRange==="week"){var _w=new Date(_now);_w.setDate(_w.getDate()-7);_cutoff=_w.toISOString().slice(0,10);}
-    else if(f.dateRange==="custom"&&parseInt(f.dateDays)>0){var _c=new Date(_now);_c.setDate(_c.getDate()-parseInt(f.dateDays));_cutoff=_c.toISOString().slice(0,10);}
-    if(_cutoff){
-      if(_exact)jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)===_cutoff;});
-      else jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)>=_cutoff;});
-    }
-  }
+  if(f.stages&&f.stages.length)jobs=jobs.filter(function(j){return f.stages.indexOf(j.stage)>-1;});
+  if(f.industries&&f.industries.length)jobs=jobs.filter(function(j){return f.industries.indexOf(j.industry||j.company_ind||"")>-1;});
+  if(f.dateFrom)jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)>=f.dateFrom;});
+  if(f.dateTo)jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)<=f.dateTo;});
   if(f.bd&&f.bd!=="all")jobs=jobs.filter(function(j){return j.assigned_to_bd===f.bd;});
 
   var stages=["Unassigned","Assigned","Connected","Rejected","Future","Qualified"];
@@ -1108,57 +1098,102 @@ function renderJobs(){
     '</div>';
   }
 
+  var allStagesList=["Unassigned","Assigned","Connected","Rejected","Future","In Discussion"];
+  var allIndustries=["Engineering","Healthcare","Legal","Accounting","Management","Other"];
   var bdManagers=(u.role==='admin'||u.role==='ra_lead'||u.role==='bd_lead')?STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead';}):[];
-  var activeFilters=[f.stage!=='all',f.industry!=='all',f.dateRange!=='all',f.bd!=='all'].filter(Boolean).length;
-  var selStyle='padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:13px;cursor:pointer;height:38px';
-  var selActiveStyle='padding:8px 12px;border:1.5px solid var(--accent);border-radius:8px;background:var(--accent-l);color:var(--accent);font-size:13px;font-weight:600;cursor:pointer;height:38px';
+  var activeCount=(f.stages.length)+(f.industries.length)+(f.dateFrom||f.dateTo?1:0)+(f.bd!=='all'?1:0);
+
+  // Draft state lives in STATE.filterDraft — populated when panel opens, applied on "Apply"
+  var draft=STATE.filterDraft||{stages:[].concat(f.stages),industries:[].concat(f.industries),dateFrom:f.dateFrom,dateTo:f.dateTo,bd:f.bd};
+
+  var filterPanel='';
+  if(STATE.showFilterPanel){
+    var chk=function(val,arr,key){
+      var checked=arr.indexOf(val)>-1;
+      return '<label style="display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:13px;background:'+(checked?'var(--accent-l)':'transparent')+'">'
+        +'<input type="checkbox" '+(checked?'checked':'')+' onchange="toggleFilterDraft(\''+key+'\',\''+escAttr(val)+'\',this.checked)" style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer"/>'
+        +escHtml(val)+'</label>';
+    };
+    filterPanel=
+      '<div style="position:absolute;top:48px;left:0;z-index:300;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);width:520px;padding:0" onclick="event.stopPropagation()">'+
+        '<div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'+
+          '<div style="font-size:13px;font-weight:600">Filters</div>'+
+          '<button class="btn-icon" onclick="STATE.showFilterPanel=false;render()">'+ico('x',13)+'</button>'+
+        '</div>'+
+        '<div style="padding:14px 16px;display:grid;grid-template-columns:1fr 1fr;gap:16px">'+
+          // Stage
+          '<div>'+
+            '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Stage</div>'+
+            allStagesList.map(function(s){return chk(s,draft.stages,'stages');}).join('')+
+          '</div>'+
+          // Industry
+          '<div>'+
+            '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Industry</div>'+
+            allIndustries.map(function(ind){return chk(ind,draft.industries,'industries');}).join('')+
+          '</div>'+
+        '</div>'+
+        // Date range
+        '<div style="padding:0 16px 14px;border-top:1px solid var(--border)">'+
+          '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:12px 0 8px">Date added</div>'+
+          '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
+            '<div style="display:flex;align-items:center;gap:6px">'+
+              '<label style="font-size:12px;color:var(--text2)">From</label>'+
+              '<input type="date" value="'+escAttr(draft.dateFrom||'')+'" onchange="STATE.filterDraft.dateFrom=this.value" style="padding:6px 10px;border:1px solid var(--border2);border-radius:7px;font-size:13px;color:var(--text);background:var(--card)"/>'+
+            '</div>'+
+            '<div style="display:flex;align-items:center;gap:6px">'+
+              '<label style="font-size:12px;color:var(--text2)">To</label>'+
+              '<input type="date" value="'+escAttr(draft.dateTo||'')+'" onchange="STATE.filterDraft.dateTo=this.value" style="padding:6px 10px;border:1px solid var(--border2);border-radius:7px;font-size:13px;color:var(--text);background:var(--card)"/>'+
+            '</div>'+
+            (draft.dateFrom||draft.dateTo?'<button onclick="STATE.filterDraft.dateFrom=\'\';STATE.filterDraft.dateTo=\'\';render()" style="font-size:11px;color:var(--text3);background:none;border:none;cursor:pointer;padding:0">Clear dates</button>':'')+
+          '</div>'+
+        '</div>'+
+        // BD manager (if applicable)
+        (bdManagers.length?
+          '<div style="padding:0 16px 14px;border-top:1px solid var(--border)">'+
+            '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:12px 0 8px">BD Manager</div>'+
+            '<select onchange="STATE.filterDraft.bd=this.value" style="padding:7px 12px;border:1px solid var(--border2);border-radius:7px;font-size:13px;color:var(--text);background:var(--card);width:100%">'+
+              '<option value="all"'+(draft.bd==='all'?' selected':'')+'>All managers</option>'+
+              bdManagers.map(function(m){return '<option value="'+m.id+'"'+(draft.bd===m.id?' selected':'')+'>'+escHtml(m.name)+'</option>';}).join('')+
+            '</select>'+
+          '</div>':'')  +
+        // Footer
+        '<div style="padding:12px 16px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:var(--bg)">'+
+          '<button onclick="STATE.filterDraft={stages:[],industries:[],dateFrom:\'\',dateTo:\'\',bd:\'all\'};render()" style="font-size:12px;color:var(--text3);background:none;border:none;cursor:pointer;padding:4px 0">Reset all</button>'+
+          '<div style="display:flex;gap:8px">'+
+            '<button onclick="STATE.showFilterPanel=false;STATE.filterDraft=null;render()" class="btn btn-outline btn-sm">Cancel</button>'+
+            '<button onclick="applyLeadFilters()" class="btn btn-primary btn-sm">Apply filters</button>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+  }
+
+  // Active filter tags shown below toolbar
+  var activeTags='';
+  var tagBtn=function(label,clear){return '<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;background:var(--accent-l);color:var(--accent);border-radius:20px;font-size:12px;font-weight:500">'+label+'<button onclick="'+clear+';STATE.leadsPage=0;render()" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:13px;line-height:1;padding:0">&times;</button></span>';};
+  if(f.stages.length)activeTags+=f.stages.map(function(s){return tagBtn(s,'STATE.jobsFilter.stages=STATE.jobsFilter.stages.filter(function(x){return x!==\''+s+'\'})');}).join('');
+  if(f.industries.length)activeTags+=f.industries.map(function(ind){return tagBtn(ind,'STATE.jobsFilter.industries=STATE.jobsFilter.industries.filter(function(x){return x!==\''+ind+'\'})');}).join('');
+  if(f.dateFrom||f.dateTo)activeTags+=tagBtn('Date: '+(f.dateFrom||'…')+' → '+(f.dateTo||'…'),'STATE.jobsFilter.dateFrom=\'\';STATE.jobsFilter.dateTo=\'\'');
+  if(f.bd!=='all'){var bdm=bdManagers.find(function(m){return m.id===f.bd;});activeTags+=tagBtn('BD: '+escHtml(bdm?bdm.name:f.bd),'STATE.jobsFilter.bd=\'all\'');}
 
   return '<div style="padding:24px">'+
-    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">'+
-      // Search
-      '<input id="jobs-search" placeholder="Search jobs, companies, contacts..." value="'+escAttr(f.search)+'" style="flex:1;min-width:200px;max-width:320px;padding:8px 13px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:13px;height:38px"/>'+
-      // Stage
-      '<select id="jobs-stage" style="'+(f.stage!=='all'?selActiveStyle:selStyle)+'">'+
-        '<option value="all">All stages</option>'+stageOpts+
-      '</select>'+
-      // Date
-      '<select onchange="STATE.jobsFilter.dateRange=this.value;if(this.value!==\'custom\')STATE.jobsFilter.dateDays=\'\';STATE.leadsPage=0;render()" style="'+(f.dateRange!=='all'?selActiveStyle:selStyle)+'">'+
-        '<option value="all">Any date</option>'+
-        '<option value="today"'+(f.dateRange==='today'?' selected':'')+'>Today</option>'+
-        '<option value="yesterday"'+(f.dateRange==='yesterday'?' selected':'')+'>Yesterday</option>'+
-        '<option value="week"'+(f.dateRange==='week'?' selected':'')+'>This week</option>'+
-        '<option value="custom"'+(f.dateRange==='custom'?' selected':'')+'>Custom…</option>'+
-      '</select>'+
-      // Custom days input — only shown when custom selected
-      (f.dateRange==='custom'?
-        '<div style="display:flex;align-items:center;gap:6px">'+
-          '<span style="font-size:12px;color:var(--text2);white-space:nowrap">Last</span>'+
-          '<input id="date-days-inp" type="number" min="1" max="365" value="'+escAttr(f.dateDays||'')+'" placeholder="N" style="width:56px;padding:6px 8px;border:1.5px solid var(--accent);border-radius:8px;font-size:13px;text-align:center;background:var(--accent-l);color:var(--accent);height:38px" oninput="STATE.jobsFilter.dateDays=this.value;STATE.leadsPage=0;render();setTimeout(function(){var e=document.getElementById(\'date-days-inp\');if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}},0)"/>'+
-          '<span style="font-size:12px;color:var(--text2)">days</span>'+
-        '</div>':'')+
-      // Industry
-      '<select onchange="STATE.jobsFilter.industry=this.value;STATE.leadsPage=0;render()" style="'+(f.industry!=='all'?selActiveStyle:selStyle)+'">'+
-        '<option value="all">All industries</option>'+
-        ['Engineering','Healthcare','Legal','Accounting','Management','Other'].map(function(ind){
-          return '<option value="'+ind+'"'+(f.industry===ind?' selected':'')+'>'+ind+'</option>';
-        }).join('')+
-      '</select>'+
-      // BD Manager (admin/ra_lead/bd_lead only)
-      (bdManagers.length?
-        '<select onchange="STATE.jobsFilter.bd=this.value;STATE.leadsPage=0;render()" style="'+(f.bd!=='all'?selActiveStyle:selStyle)+'">'+
-          '<option value="all">All managers</option>'+
-          bdManagers.map(function(m){return '<option value="'+m.id+'"'+(f.bd===m.id?' selected':'')+'>'+escHtml(m.name)+'</option>';}).join('')+
-        '</select>':'')  +
-      // Clear button
-      (activeFilters?
-        '<button onclick="STATE.jobsFilter.stage=\'all\';STATE.jobsFilter.industry=\'all\';STATE.jobsFilter.dateRange=\'all\';STATE.jobsFilter.dateDays=\'\';STATE.jobsFilter.bd=\'all\';STATE.leadsPage=0;render()" style="padding:8px 14px;border:1.5px solid var(--red);border-radius:8px;background:var(--red-l);color:var(--red);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;height:38px">&#10005; Clear ('+activeFilters+')</button>':'')+
-      // Spacer + action buttons
+    // Toolbar
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:'+(activeTags?'8px':'14px')+';flex-wrap:wrap">'+
+      '<input id="jobs-search" placeholder="Search jobs, companies, contacts..." value="'+escAttr(f.search)+'" style="flex:1;min-width:200px;max-width:340px;padding:8px 13px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:13px;height:38px"/>'+
+      '<div style="position:relative">'+
+        '<button onclick="if(!STATE.showFilterPanel){STATE.filterDraft={stages:[].concat(STATE.jobsFilter.stages),industries:[].concat(STATE.jobsFilter.industries),dateFrom:STATE.jobsFilter.dateFrom,dateTo:STATE.jobsFilter.dateTo,bd:STATE.jobsFilter.bd};}STATE.showFilterPanel=!STATE.showFilterPanel;render()" style="display:flex;align-items:center;gap:7px;padding:8px 16px;height:38px;border:1.5px solid '+(activeCount?'var(--accent)':'var(--border2)')+';border-radius:8px;background:'+(activeCount?'var(--accent-l)':'var(--card)')+';color:'+(activeCount?'var(--accent)':'var(--text)')+';font-size:13px;font-weight:500;cursor:pointer">'+
+          ico('filter',13)+' Filters'+(activeCount?' <span style="background:var(--accent);color:#fff;border-radius:10px;font-size:10px;font-weight:700;padding:1px 6px;margin-left:2px">'+activeCount+'</span>':'')+
+        '</button>'+
+        filterPanel+
+      '</div>'+
+      (activeCount?'<button onclick="STATE.jobsFilter={search:STATE.jobsFilter.search,stages:[],industries:[],dateFrom:\'\',dateTo:\'\',bd:\'all\'};STATE.leadsPage=0;render()" style="padding:6px 12px;height:38px;border:1.5px solid var(--red);border-radius:8px;background:var(--red-l);color:var(--red);font-size:12px;font-weight:600;cursor:pointer">&#10005; Clear all</button>':'')+
       '<div style="flex:1"></div>'+
-      (u.role==='ra_lead'||u.role==='admin'?'<button onclick="openExportLeads()" style="background:var(--card);color:var(--text);border:1.5px solid var(--border);padding:8px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px;height:38px">'+ico("dl",13)+' Export</button>':'')+
-      '<button onclick="triggerImport()" style="background:var(--card);color:var(--text);border:1.5px solid var(--border);padding:8px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px;height:38px">'+ico("upload",13)+' Import Excel</button>'+
-      (u.role!=='ra'?'<button onclick="openAddJob()" style="background:var(--accent);color:#fff;border:0;padding:8px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;height:38px">+ Add Job</button>':'')+
+      (u.role==='ra_lead'||u.role==='admin'?'<button onclick="openExportLeads()" style="background:var(--card);color:var(--text);border:1.5px solid var(--border);padding:8px 14px;height:38px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px">'+ico("dl",13)+' Export</button>':'')+
+      '<button onclick="triggerImport()" style="background:var(--card);color:var(--text);border:1.5px solid var(--border);padding:8px 14px;height:38px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px">'+ico("upload",13)+' Import Excel</button>'+
+      (u.role!=='ra'?'<button onclick="openAddJob()" style="background:var(--accent);color:#fff;border:0;padding:8px 18px;height:38px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px">+ Add Job</button>':'')+
       '<input type="file" id="xl-import" accept=".xlsx,.xls" style="display:none" onchange="importXL(this)"/>'+
     '</div>'+
+    // Active filter tags row
+    (activeTags?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">'+activeTags+'</div>':'')+
     '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden">'+
       '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
         '<thead style="background:var(--bg3);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
@@ -2709,6 +2744,30 @@ window.sendAllDue=function(){
 // ── PAGINATION ─────────────────────────────────
 window.setLeadsPage=function(p){STATE.leadsPage=Math.max(0,p);render();}
 window.setLeadsPageSize=function(n){STATE.leadsPageSize=n;STATE.leadsPage=0;render();}
+window.toggleFilterDraft=function(key,val,checked){
+  if(!STATE.filterDraft)return;
+  var arr=STATE.filterDraft[key]||[];
+  if(checked){if(arr.indexOf(val)===-1)arr.push(val);}
+  else{arr=arr.filter(function(x){return x!==val;});}
+  STATE.filterDraft[key]=arr;
+  render();
+};
+window.applyLeadFilters=function(){
+  var d=STATE.filterDraft||{};
+  STATE.jobsFilter.stages=d.stages||[];
+  STATE.jobsFilter.industries=d.industries||[];
+  STATE.jobsFilter.dateFrom=d.dateFrom||'';
+  STATE.jobsFilter.dateTo=d.dateTo||'';
+  STATE.jobsFilter.bd=d.bd||'all';
+  STATE.leadsPage=0;
+  STATE.showFilterPanel=false;
+  STATE.filterDraft=null;
+  render();
+};
+// Close filter panel on outside click
+document.addEventListener('click',function(){
+  if(STATE.showFilterPanel){STATE.showFilterPanel=false;STATE.filterDraft=null;render();}
+});
 
 // ── MAIL MERGE ─────────────────────────────────
 window.openMailMerge=function(ids){
