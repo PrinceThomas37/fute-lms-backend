@@ -892,11 +892,21 @@ app.post('/distribute/execute', auth, async (req, res) => {
 
     // Create follow-up rows for all assigned jobs
     const jobIds = selected.map(j => j.id);
-    const fu1Date = new Date(now); fu1Date.setDate(fu1Date.getDate() + 3);
-    const fu2Date = new Date(now); fu2Date.setDate(fu2Date.getDate() + 7);
+    const outreachDateStr = now.toISOString().split('T')[0];
+
+    // Look up this manager's personal FU day settings (fallback: 3 and 7)
+    const { data: bdSettings } = await supabase.from('app_settings')
+      .select('key,value')
+      .in('key', [`u_${manager_id}_fu1_day`, `u_${manager_id}_fu2_day`]);
+    const bdSettingsMap = {};
+    (bdSettings || []).forEach(r => { bdSettingsMap[r.key] = r.value; });
+    const fu1Day = parseInt(bdSettingsMap[`u_${manager_id}_fu1_day`] || '3', 10);
+    const fu2Day = parseInt(bdSettingsMap[`u_${manager_id}_fu2_day`] || '7', 10);
+
+    const fu1Date = new Date(now); fu1Date.setDate(fu1Date.getDate() + fu1Day);
+    const fu2Date = new Date(now); fu2Date.setDate(fu2Date.getDate() + fu2Day);
     const fu1Str = fu1Date.toISOString().split('T')[0];
     const fu2Str = fu2Date.toISOString().split('T')[0];
-    const outreachDateStr = now.toISOString().split('T')[0];
 
     // For each assigned job, find its primary contact and create follow-up rows
     const { data: assignedJobs } = await supabase.from('jobs')
@@ -1470,6 +1480,38 @@ app.get('/follow-ups', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Per-user outreach plan settings ──────────────────────────
+app.get('/outreach-plan', auth, async (req, res) => {
+  try {
+    const uid = req.user.id;
+    const keys = [
+      `u_${uid}_fu1_day`, `u_${uid}_fu2_day`,
+      `u_${uid}_tmpl_o1_subject`, `u_${uid}_tmpl_o1_body`,
+      `u_${uid}_tmpl_fu1_subject`, `u_${uid}_tmpl_fu1_body`,
+      `u_${uid}_tmpl_fu2_subject`, `u_${uid}_tmpl_fu2_body`
+    ];
+    const { data } = await supabase.from('app_settings').select('key,value').in('key', keys);
+    const plan = {};
+    (data || []).forEach(r => { plan[r.key.replace(`u_${uid}_`, '')] = r.value; });
+    res.json(plan);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/outreach-plan', auth, async (req, res) => {
+  try {
+    if (!['bd','bd_lead','admin'].includes(req.user.role)) return res.status(403).json({ error: 'BD role required' });
+    const uid = req.user.id;
+    const allowed = ['fu1_day','fu2_day','tmpl_o1_subject','tmpl_o1_body','tmpl_fu1_subject','tmpl_fu1_body','tmpl_fu2_subject','tmpl_fu2_body'];
+    const { key, value } = req.body;
+    if (!allowed.includes(key)) return res.status(400).json({ error: 'Invalid key' });
+    const fullKey = `u_${uid}_${key}`;
+    const { error } = await supabase.from('app_settings')
+      .upsert({ key: fullKey, value: String(value), updated_at: new Date() }, { onConflict: 'key' });
+    if (error) throw error;
+    res.json({ success: true, key: fullKey, value });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Manual trigger — admin/bd_lead only
 app.post('/follow-ups/run', auth, async (req, res) => {
   try {
@@ -1492,14 +1534,15 @@ async function runFollowupEngine() {
     if (fuErr) throw fuErr;
     log.checked = (dueFu || []).length;
 
-    // Get email templates from app_settings
+    // Get all app_settings (global + per-user)
     const { data: settingsRows } = await supabase.from('app_settings').select('key,value');
     const settings = {};
     (settingsRows || []).forEach(r => { settings[r.key] = r.value; });
-    const fu1SubjTmpl = settings['template_fu1_subject'] || 'Re: Staffing Partnership — {{company}}';
-    const fu1BodyTmpl = settings['template_fu1_body'] || 'Hi {{fn}},\n\nJust following up on my previous email regarding {{pos}} at {{company}}. I wanted to make sure it didn\'t get buried.\n\nWe\'ve helped similar companies fill roles like this quickly. Would love to connect briefly.\n\nBest,\n{{sender}}';
-    const fu2SubjTmpl = settings['template_fu2_subject'] || 'Re: Staffing Partnership — {{company}}';
-    const fu2BodyTmpl = settings['template_fu2_body'] || 'Hi {{fn}},\n\nI wanted to reach out one last time regarding {{pos}} at {{company}}. If the timing isn\'t right, no worries at all — happy to reconnect whenever it makes sense.\n\nBest,\n{{sender}}';
+
+    // Helper: get per-BD template, fallback to global, fallback to hardcoded default
+    function getBDTemplate(bdId, key, globalKey, fallback) {
+      return settings[`u_${bdId}_${key}`] || settings[globalKey] || fallback;
+    }
 
     function fillTemplate(tmpl, vars) {
       return (tmpl || '').replace(/{{(\w+)}}/g, (m, k) => vars[k] || m);
@@ -1567,8 +1610,13 @@ async function runFollowupEngine() {
           sender: senderName
         };
 
-        const subjTmpl = isFu2 ? fu2SubjTmpl : fu1SubjTmpl;
-        const bodyTmpl = isFu2 ? fu2BodyTmpl : fu1BodyTmpl;
+        const bdId = job.assigned_to_bd;
+        const subjTmpl = isFu2
+          ? getBDTemplate(bdId, 'tmpl_fu2_subject', 'template_fu2_subject', 'Re: Staffing Partnership — {{company}}')
+          : getBDTemplate(bdId, 'tmpl_fu1_subject', 'template_fu1_subject', 'Re: Staffing Partnership — {{company}}');
+        const bodyTmpl = isFu2
+          ? getBDTemplate(bdId, 'tmpl_fu2_body', 'template_fu2_body', 'Hi {{fn}},\n\nI wanted to reach out one last time regarding {{pos}} at {{company}}. If the timing isn\'t right, no worries at all — happy to reconnect whenever it makes sense.\n\nBest,\n{{sender}}')
+          : getBDTemplate(bdId, 'tmpl_fu1_body', 'template_fu1_body', 'Hi {{fn}},\n\nJust following up on my previous email regarding {{pos}} at {{company}}. I wanted to make sure it didn\'t get buried.\n\nWe\'ve helped similar companies fill roles like this quickly. Would love to connect briefly.\n\nBest,\n{{sender}}');
         const subject = fillTemplate(subjTmpl, vars);
         const body = fillTemplate(bodyTmpl, vars);
         const followupType = isFu2 ? 'fu2' : 'fu1';
