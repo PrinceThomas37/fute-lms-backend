@@ -1673,20 +1673,24 @@ function renderEmail(){
 
       // ── From email selector ──
       (function(){
-        var myEmails=(STATE.userEmailsCache[u.id]||[]).filter(function(e){return e.is_active;});
-        if(!myEmails.length)return '';
+        var myEmails=(STATE.userEmailsCache&&STATE.userEmailsCache[u.id]||[]).filter(function(e){return e.is_active;});
+        if(!myEmails.length){
+          return '<div class="card cp mb3">'
+            +'<div class="fw6 mb2" style="font-size:13px">From</div>'
+            +'<div style="font-size:12px;color:var(--text3);padding:8px 0">No active email IDs assigned to your account. Add one in Manager Users.</div>'
+            +'</div>';
+        }
         var fromOpts=myEmails.map(function(e){
           var sel=STATE.composeFromEmailId===e.id;
-          return '<option value="'+e.id+'"'+(sel?' selected':'')+'>'+htmlEsc(e.display_name||e.email_address)+' <'+htmlEsc(e.email_address)+'></option>';
+          return '<option value="'+e.id+'"'+(sel?' selected':'')+'>'+htmlEsc(e.display_name||e.email_address)+' &lt;'+htmlEsc(e.email_address)+'&gt;</option>';
         }).join('');
-        return '<div class="card cp mb3">'+
-          '<div class="fw6 mb2" style="font-size:13px">From</div>'+
-          '<select class="sel" onchange="STATE.composeFromEmailId=this.value;render()">'+
-            '<option value="">— Select sending email —</option>'+fromOpts+
-          '</select>'+
-          (STATE.composeFromEmailId?'':
-            '<div style="font-size:11px;color:var(--amber);margin-top:6px">Select a sending email to enable send</div>')+
-        '</div>';
+        return '<div class="card cp mb3">'
+          +'<div class="fw6 mb2" style="font-size:13px">From</div>'
+          +'<select class="sel" onchange="STATE.composeFromEmailId=this.value;render()">'
+            +'<option value="">— Select sending email —</option>'+fromOpts
+          +'</select>'
+          +(STATE.composeFromEmailId?'':'<div style="font-size:11px;color:var(--amber);margin-top:6px">Select a sending email to enable send</div>')
+          +'</div>';
       })()+
 
       '<div class="card cp mb3">'+
