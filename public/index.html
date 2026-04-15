@@ -1393,11 +1393,11 @@ function renderEmail(){
   var isBD=(u.role==='bd'||u.role==='bd_lead'||u.role==='admin'||u.role==='ra_lead');
   var pending=STATE.pendingEmails||[];
   var sentEmails=STATE.sentEmails||[];
-  var tabs=isBD?['pending','compose','sent','templates']:['compose','sent','templates'];
+  var tabs=isBD?['pending','compose','sent','outreachplan']:['compose','sent','outreachplan'];
   if(!STATE.emailTab)STATE.emailTab=isBD?'pending':'compose';
 
   var tabBar=tabs.map(function(t){
-    var lbl=t==='pending'?('Pending'+(pending.length?' ('+pending.length+')':'')):t.charAt(0).toUpperCase()+t.slice(1);
+    var lbl=t==='pending'?('Pending'+(pending.length?' ('+pending.length+')':'')):t==='outreachplan'?'Outreach Plan':t.charAt(0).toUpperCase()+t.slice(1);
     return '<div class="tab'+(STATE.emailTab===t?' active':'')+'" onclick="setEmailTab(\''+t+'\')">'+lbl+'</div>';
   }).join('');
 
@@ -1483,37 +1483,66 @@ function renderEmail(){
     '</div>';
   }
 
-  // ── TEMPLATES TAB ──
+  // ── OUTREACH PLAN TAB ──
   var vars=[['{{fn}}','First name'],['{{company}}','Company'],['{{pos}}','Position'],['{{ind}}','Industry'],['{{desig}}','Designation'],['{{loc}}','Location'],['{{sender}}','Sender name']];
   var varChips=vars.map(function(v){
     return '<span onclick="insertVar(\''+v[0]+'\')" style="font-size:11.5px;padding:4px 10px;background:var(--accent-l);color:var(--accent);border-radius:6px;cursor:pointer;font-family:var(--mono);border:1px solid rgba(37,99,235,.2)">'+v[0]+'<span style="font-family:var(--font);font-size:10px;opacity:.7;margin-left:4px">'+v[1]+'</span></span>';
   }).join(' ');
   if(!STATE.activeTmpl)STATE.activeTmpl='outreach';
+  var myPlan=STATE.myOutreachPlan||{};
+  var fu1Day=parseInt(myPlan['fu1_day']||'3',10);
+  var fu2Day=parseInt(myPlan['fu2_day']||'7',10);
+  function dayOpts(selected,minDay){
+    var opts='';
+    for(var d=1;d<=10;d++){
+      if(d<=minDay)continue;
+      opts+='<option value="'+d+'"'+(d===selected?' selected':'')+'>Day '+d+'</option>';
+    }
+    return opts;
+  }
   var tmplDefs=[
-    {key:'outreach',label:'Outreach 1',color:'var(--accent)',subjVal:STATE.emailSubj,bodyVal:STATE.emailBody,subjId:'tmpl-o1-subj',bodyId:'tmpl-o1-body'},
-    {key:'fu1',label:'Follow-up 1 — Day 3',color:'#ca8a04',subjVal:STATE.fu1Subj,bodyVal:STATE.fu1Body,subjId:'tmpl-fu1-subj',bodyId:'tmpl-fu1-body'},
-    {key:'fu2',label:'Follow-up 2 — Day 7',color:'#ea580c',subjVal:STATE.fu2Subj,bodyVal:STATE.fu2Body,subjId:'tmpl-fu2-subj',bodyId:'tmpl-fu2-body'}
+    {key:'outreach',label:'Outreach 1',sublabel:'Sent immediately on assignment',color:'var(--accent)',subjVal:myPlan['tmpl_o1_subject']||STATE.emailSubj,bodyVal:myPlan['tmpl_o1_body']||STATE.emailBody,subjId:'tmpl-o1-subj',bodyId:'tmpl-o1-body'},
+    {key:'fu1',label:'Follow-up 1',sublabel:'Day '+fu1Day+' after outreach',color:'#ca8a04',subjVal:myPlan['tmpl_fu1_subject']||STATE.fu1Subj,bodyVal:myPlan['tmpl_fu1_body']||STATE.fu1Body,subjId:'tmpl-fu1-subj',bodyId:'tmpl-fu1-body'},
+    {key:'fu2',label:'Follow-up 2',sublabel:'Day '+fu2Day+' after outreach',color:'#ea580c',subjVal:myPlan['tmpl_fu2_subject']||STATE.fu2Subj,bodyVal:myPlan['tmpl_fu2_body']||STATE.fu2Body,subjId:'tmpl-fu2-subj',bodyId:'tmpl-fu2-body'}
   ];
   var activeTmpl=tmplDefs.find(function(t){return t.key===STATE.activeTmpl;})||tmplDefs[0];
   var tmplTabBtns=tmplDefs.map(function(t){
     var isActive=STATE.activeTmpl===t.key;
-    return '<button onclick="STATE.activeTmpl=\''+t.key+'\';render()" style="padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:2px solid '+(isActive?t.color:'var(--border)')+';background:'+(isActive?t.color:'var(--card)')+';color:'+(isActive?'#fff':'var(--text2)')+';transition:all .15s">'+t.label+'</button>';
+    return '<button onclick="STATE.activeTmpl=\''+t.key+'\';render()" style="padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:2px solid '+(isActive?t.color:'var(--border)')+';background:'+(isActive?t.color:'var(--card)')+';color:'+(isActive?'#fff':'var(--text2)')+';transition:all .15s">'+t.label+'<div style="font-size:10px;font-weight:400;margin-top:2px;opacity:.85">'+t.sublabel+'</div></button>';
   }).join('');
+  var daySettingsHtml='';
+  if(STATE.activeTmpl==='fu1'){
+    daySettingsHtml='<div class="fgrp" style="margin-bottom:14px"><label class="flbl">Send Follow-up 1 on</label>'+
+      '<select class="sel" style="max-width:160px" id="fu1-day-sel" onchange="saveOutreachDay(\'fu1_day\',this.value)">'+
+        '<option value="">— select day —</option>'+dayOpts(fu1Day,0)+
+      '</select>'+
+      '<div style="font-size:11px;color:var(--text3);margin-top:4px">Days after the outreach email was sent</div>'+
+    '</div>';
+  } else if(STATE.activeTmpl==='fu2'){
+    daySettingsHtml='<div class="fgrp" style="margin-bottom:14px"><label class="flbl">Send Follow-up 2 on</label>'+
+      '<select class="sel" style="max-width:160px" id="fu2-day-sel" onchange="saveOutreachDay(\'fu2_day\',this.value)">'+
+        '<option value="">— select day —</option>'+dayOpts(fu2Day,fu1Day)+
+      '</select>'+
+      '<div style="font-size:11px;color:var(--text3);margin-top:4px">Must be after Follow-up 1 (Day '+fu1Day+')</div>'+
+    '</div>';
+  }
   var canEditTemplates=(u.role==='bd'||u.role==='bd_lead'||u.role==='admin');
   var tmplHtml=canEditTemplates?
     '<div>'+
       '<div style="display:flex;gap:10px;margin-bottom:20px">'+tmplTabBtns+'</div>'+
       '<div class="card cp" style="border-top:3px solid '+activeTmpl.color+'">'+
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
-          '<div style="font-weight:700;font-size:14px;color:var(--text)">'+activeTmpl.label+'</div>'+
+          '<div><div style="font-weight:700;font-size:14px;color:var(--text)">'+activeTmpl.label+'</div>'+
+              '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+activeTmpl.sublabel+'</div></div>'+
           '<div style="display:flex;gap:6px;flex-wrap:wrap">'+varChips+'</div>'+
         '</div>'+
+        daySettingsHtml+
         '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="'+activeTmpl.subjId+'" value="'+htmlEsc(activeTmpl.subjVal)+'"/></div>'+
         '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:200px" id="'+activeTmpl.bodyId+'">'+htmlEsc(activeTmpl.bodyVal)+'</textarea></div>'+
-        '<button class="btn btn-primary mt2" onclick="saveEmailTemplate(\''+activeTmpl.key+'\',\''+activeTmpl.subjId+'\',\''+activeTmpl.bodyId+'\')" >Save template</button>'+
+        '<button class="btn btn-primary mt2" onclick="saveOutreachTemplate(\''+activeTmpl.key+'\',\''+activeTmpl.subjId+'\',\''+activeTmpl.bodyId+'\')" >Save template</button>'+
       '</div>'+
     '</div>':
-    '<div class="card cp"><div style="color:var(--text3);font-size:13px">Template editing is available to BD and Admin roles only.</div></div>';
+    '<div class="card cp"><div style="color:var(--text3);font-size:13px">Outreach plan editing is available to BD and Admin roles only.</div></div>';
 
   // ── COMPOSE TAB ──
   var myJobs=getMyJobs(u);
@@ -1717,7 +1746,7 @@ function renderEmail(){
     (STATE.emailTab==='pending'?pendingHtml:'')+
     (STATE.emailTab==='compose'?composeHtml:'')+
     (STATE.emailTab==='sent'?sentHtml:'')+
-    (STATE.emailTab==='templates'?tmplHtml:'')+
+    (STATE.emailTab==='outreachplan'?tmplHtml:'')+
   '</div>';
 }
 
@@ -2355,6 +2384,34 @@ window.exportXL=function(){
 }
 
 window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;render();}
+
+window.saveOutreachTemplate=function(key,subjId,bodyId){
+  var subj=(document.getElementById(subjId)||{}).value||'';
+  var body=(document.getElementById(bodyId)||{}).value||'';
+  // Update local STATE
+  if(key==='outreach'){STATE.emailSubj=subj;STATE.emailBody=body;}
+  else if(key==='fu1'){STATE.fu1Subj=subj;STATE.fu1Body=body;}
+  else if(key==='fu2'){STATE.fu2Subj=subj;STATE.fu2Body=body;}
+  STATE.myOutreachPlan=STATE.myOutreachPlan||{};
+  STATE.myOutreachPlan['tmpl_'+key+'_subject']=subj;
+  STATE.myOutreachPlan['tmpl_'+key+'_body']=body;
+  var saves=[
+    apiPost('/outreach-plan',{key:'tmpl_'+key+'_subject',value:subj}),
+    apiPost('/outreach-plan',{key:'tmpl_'+key+'_body',value:body})
+  ];
+  Promise.all(saves).then(function(){showToast('Template saved','success');}).catch(function(e){showToast('Save failed: '+e.message,'error');});
+};
+
+window.saveOutreachDay=function(key,val){
+  if(!val)return;
+  var day=parseInt(val,10);
+  STATE.myOutreachPlan=STATE.myOutreachPlan||{};
+  STATE.myOutreachPlan[key]=String(day);
+  apiPost('/outreach-plan',{key:key,value:String(day)}).then(function(){
+    showToast('Schedule saved — '+key.replace('_day','').toUpperCase()+' set to Day '+day,'success');
+    render();
+  }).catch(function(e){showToast('Save failed: '+e.message,'error');});
+};
 
 window.saveEmailTemplate=function(key,subjId,bodyId){
   var subj=(document.getElementById(subjId)||{}).value||'';
@@ -5031,15 +5088,24 @@ function loadAppData(){
       STATE.emails=(r[6]||[]);
       apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];render();}).catch(function(){STATE.sentEmails=[];});
     }
-    // Load app settings (send times + templates)
+    // Load app settings (global send times)
     apiGet('/app-settings').then(function(s){
       STATE.appSettings=s||{};
-      if(s['template_fu1_subject'])STATE.fu1Subj=s['template_fu1_subject'];
-      if(s['template_fu1_body'])STATE.fu1Body=s['template_fu1_body'];
-      if(s['template_fu2_subject'])STATE.fu2Subj=s['template_fu2_subject'];
-      if(s['template_fu2_body'])STATE.fu2Body=s['template_fu2_body'];
       render();
     }).catch(function(){});
+    // Load this user's personal outreach plan
+    if(STATE.user&&['bd','bd_lead','admin'].includes(STATE.user.role)){
+      apiGet('/outreach-plan').then(function(plan){
+        STATE.myOutreachPlan=plan||{};
+        if(plan['tmpl_o1_subject'])STATE.emailSubj=plan['tmpl_o1_subject'];
+        if(plan['tmpl_o1_body'])STATE.emailBody=plan['tmpl_o1_body'];
+        if(plan['tmpl_fu1_subject'])STATE.fu1Subj=plan['tmpl_fu1_subject'];
+        if(plan['tmpl_fu1_body'])STATE.fu1Body=plan['tmpl_fu1_body'];
+        if(plan['tmpl_fu2_subject'])STATE.fu2Subj=plan['tmpl_fu2_subject'];
+        if(plan['tmpl_fu2_body'])STATE.fu2Body=plan['tmpl_fu2_body'];
+        render();
+      }).catch(function(){});
+    }
     STATE.loading=false;render();
   }).catch(function(err){
     STATE.loading=false;STATE.user=null;STATE.token=null;
