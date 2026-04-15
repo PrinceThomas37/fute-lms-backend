@@ -1488,24 +1488,30 @@ function renderEmail(){
   var varChips=vars.map(function(v){
     return '<span onclick="insertVar(\''+v[0]+'\')" style="font-size:11.5px;padding:4px 10px;background:var(--accent-l);color:var(--accent);border-radius:6px;cursor:pointer;font-family:var(--mono);border:1px solid rgba(37,99,235,.2)">'+v[0]+'<span style="font-family:var(--font);font-size:10px;opacity:.7;margin-left:4px">'+v[1]+'</span></span>';
   }).join(' ');
-  function tmplBlock(title,color,subjId,bodyId,subjVal,bodyVal,saveKey){
-    return '<div class="card cp" style="margin-bottom:16px;border-left:4px solid '+color+'">'+
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
-        '<div class="fw6" style="font-size:14px">'+title+'</div>'+
-        '<div class="flex gap1 flex-wrap">'+varChips+'</div>'+
-      '</div>'+
-      '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="'+subjId+'" value="'+htmlEsc(subjVal)+'"/></div>'+
-      '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:160px" id="'+bodyId+'">'+htmlEsc(bodyVal)+'</textarea></div>'+
-      '<button class="btn btn-primary btn-sm mt2" onclick="saveEmailTemplate(\''+saveKey+'\',\''+subjId+'\',\''+bodyId+'\')" style="font-size:12px">Save</button>'+
-    '</div>';
-  }
+  if(!STATE.activeTmpl)STATE.activeTmpl='outreach';
+  var tmplDefs=[
+    {key:'outreach',label:'Outreach 1',color:'var(--accent)',subjVal:STATE.emailSubj,bodyVal:STATE.emailBody,subjId:'tmpl-o1-subj',bodyId:'tmpl-o1-body'},
+    {key:'fu1',label:'Follow-up 1 — Day 3',color:'#ca8a04',subjVal:STATE.fu1Subj,bodyVal:STATE.fu1Body,subjId:'tmpl-fu1-subj',bodyId:'tmpl-fu1-body'},
+    {key:'fu2',label:'Follow-up 2 — Day 7',color:'#ea580c',subjVal:STATE.fu2Subj,bodyVal:STATE.fu2Body,subjId:'tmpl-fu2-subj',bodyId:'tmpl-fu2-body'}
+  ];
+  var activeTmpl=tmplDefs.find(function(t){return t.key===STATE.activeTmpl;})||tmplDefs[0];
+  var tmplTabBtns=tmplDefs.map(function(t){
+    var isActive=STATE.activeTmpl===t.key;
+    return '<button onclick="STATE.activeTmpl=\''+t.key+'\';render()" style="padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:2px solid '+(isActive?t.color:'var(--border)')+';background:'+(isActive?t.color:'var(--card)')+';color:'+(isActive?'#fff':'var(--text2)')+';transition:all .15s">'+t.label+'</button>';
+  }).join('');
   var canEditTemplates=(u.role==='bd'||u.role==='bd_lead'||u.role==='admin');
   var tmplHtml=canEditTemplates?
     '<div>'+
-      '<div style="font-size:13px;color:var(--text2);margin-bottom:16px">Set templates for outreach and follow-up emails. Variables like <code>{{fn}}</code> are replaced automatically when emails are generated.</div>'+
-      tmplBlock('Outreach 1 — First Email','var(--accent)','tmpl-o1-subj','tmpl-o1-body',STATE.emailSubj,STATE.emailBody,'outreach')+
-      tmplBlock('Follow-up 1 — Day 3','#ca8a04','tmpl-fu1-subj','tmpl-fu1-body',STATE.fu1Subj,STATE.fu1Body,'fu1')+
-      tmplBlock('Follow-up 2 — Day 7','#ea580c','tmpl-fu2-subj','tmpl-fu2-body',STATE.fu2Subj,STATE.fu2Body,'fu2')+
+      '<div style="display:flex;gap:10px;margin-bottom:20px">'+tmplTabBtns+'</div>'+
+      '<div class="card cp" style="border-top:3px solid '+activeTmpl.color+'">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
+          '<div style="font-weight:700;font-size:14px;color:var(--text)">'+activeTmpl.label+'</div>'+
+          '<div style="display:flex;gap:6px;flex-wrap:wrap">'+varChips+'</div>'+
+        '</div>'+
+        '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="'+activeTmpl.subjId+'" value="'+htmlEsc(activeTmpl.subjVal)+'"/></div>'+
+        '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:200px" id="'+activeTmpl.bodyId+'">'+htmlEsc(activeTmpl.bodyVal)+'</textarea></div>'+
+        '<button class="btn btn-primary mt2" onclick="saveEmailTemplate(\''+activeTmpl.key+'\',\''+activeTmpl.subjId+'\',\''+activeTmpl.bodyId+'\')" >Save template</button>'+
+      '</div>'+
     '</div>':
     '<div class="card cp"><div style="color:var(--text3);font-size:13px">Template editing is available to BD and Admin roles only.</div></div>';
 
