@@ -502,6 +502,11 @@ app.put('/jobs/:id', auth, async (req, res) => {
 
     if (stage !== undefined && stage !== existing.stage) {
       await logActivity(data.id, null, req.user.id, 'stage_change', `Stage: ${existing.stage} → ${stage}`, { stage: existing.stage }, { stage });
+      // If stage moved away from Assigned, skip any active follow-ups for this job
+      if (existing.stage === 'Assigned' && stage !== 'Assigned') {
+        await supabase.from('follow_ups').update({ status: 'skipped' })
+          .eq('job_id', req.params.id).eq('status', 'active');
+      }
     } else {
       await logActivity(data.id, null, req.user.id, 'job_updated', 'Job updated', null, null);
     }
@@ -885,8 +890,38 @@ app.post('/distribute/execute', auth, async (req, res) => {
       }, { onConflict: 'email_account_id,send_date' });
     }
 
-    // Generate AI emails for all assigned jobs
+    // Create follow-up rows for all assigned jobs
     const jobIds = selected.map(j => j.id);
+    const fu1Date = new Date(now); fu1Date.setDate(fu1Date.getDate() + 3);
+    const fu2Date = new Date(now); fu2Date.setDate(fu2Date.getDate() + 7);
+    const fu1Str = fu1Date.toISOString().split('T')[0];
+    const fu2Str = fu2Date.toISOString().split('T')[0];
+    const outreachDateStr = now.toISOString().split('T')[0];
+
+    // For each assigned job, find its primary contact and create follow-up rows
+    const { data: assignedJobs } = await supabase.from('jobs')
+      .select('id,sending_email_id,contacts(id,email)')
+      .in('id', jobIds);
+    const followUpRows = [];
+    for (const aj of (assignedJobs || [])) {
+      const contacts = (aj.contacts || []).filter(c => c.email);
+      for (const c of contacts) {
+        followUpRows.push({
+          job_id: aj.id,
+          contact_id: c.id,
+          email_account_id: aj.sending_email_id,
+          outreach_sent_at: outreachDateStr,
+          followup1_due_date: fu1Str,
+          followup2_due_date: fu2Str,
+          status: 'active'
+        });
+      }
+    }
+    if (followUpRows.length) {
+      await supabase.from('follow_ups').insert(followUpRows);
+    }
+
+    // Generate AI emails for all assigned jobs
     // Fire and forget — don't wait for email generation to respond
     fetch(`${req.protocol}://${req.get('host')}/emails/generate`, {
       method: 'POST',
@@ -1387,6 +1422,248 @@ app.post('/ai/generate-email', auth, async (req, res) => {
     res.json({ subject, body });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// ══════════════════════════════════════════════════════════════
+// APP SETTINGS  (admin-controlled key/value store)
+// ══════════════════════════════════════════════════════════════
+app.get('/app-settings', auth, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('app_settings').select('key,value');
+    if (error) throw error;
+    const settings = {};
+    (data || []).forEach(r => { settings[r.key] = r.value; });
+    res.json(settings);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/app-settings', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    const { key, value } = req.body;
+    if (!key || value === undefined) return res.status(400).json({ error: 'key and value required' });
+    const { error } = await supabase.from('app_settings')
+      .upsert({ key, value, updated_at: new Date() }, { onConflict: 'key' });
+    if (error) throw error;
+    res.json({ success: true, key, value });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════
+// FOLLOW-UPS
+// ══════════════════════════════════════════════════════════════
+app.get('/follow-ups', auth, async (req, res) => {
+  try {
+    let query = supabase.from('follow_ups')
+      .select(`*, contact:contacts(id,first_name,last_name,email,designation), job:jobs(id,position,stage,company:companies(name))`)
+      .order('followup1_due_date', { ascending: true });
+    // BD sees only their own jobs; admin/ra_lead/bd_lead see all
+    if (req.user.role === 'bd') {
+      // filter via job assigned_to_bd
+      const { data: myJobs } = await supabase.from('jobs').select('id').eq('assigned_to_bd', req.user.id).is('deleted_at', null);
+      const myJobIds = (myJobs || []).map(j => j.id);
+      if (!myJobIds.length) return res.json([]);
+      query = query.in('job_id', myJobIds);
+    }
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Manual trigger — admin/bd_lead only
+app.post('/follow-ups/run', auth, async (req, res) => {
+  try {
+    if (!['admin','bd_lead'].includes(req.user.role)) return res.status(403).json({ error: 'Admin only' });
+    const result = await runFollowupEngine();
+    res.json({ success: true, ...result });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Follow-up engine core ──────────────────────────────────────
+async function runFollowupEngine() {
+  const todayDate = today();
+  const log = { checked: 0, fu1_queued: 0, fu2_queued: 0, skipped_quota: 0, skipped_stage: 0 };
+
+  try {
+    // Get all active follow-ups due today or earlier
+    const { data: dueFu, error: fuErr } = await supabase.from('follow_ups')
+      .select(`*, contact:contacts(id,first_name,last_name,email,designation), job:jobs(id,position,stage,assigned_to_bd,company:companies(name,industry,location),sending_account:email_accounts!sending_email_id(id,email_address,display_name))`)
+      .eq('status', 'active');
+    if (fuErr) throw fuErr;
+    log.checked = (dueFu || []).length;
+
+    // Get email templates from app_settings
+    const { data: settingsRows } = await supabase.from('app_settings').select('key,value');
+    const settings = {};
+    (settingsRows || []).forEach(r => { settings[r.key] = r.value; });
+    const fu1SubjTmpl = settings['template_fu1_subject'] || 'Re: Staffing Partnership — {{company}}';
+    const fu1BodyTmpl = settings['template_fu1_body'] || 'Hi {{fn}},\n\nJust following up on my previous email regarding {{pos}} at {{company}}. I wanted to make sure it didn\'t get buried.\n\nWe\'ve helped similar companies fill roles like this quickly. Would love to connect briefly.\n\nBest,\n{{sender}}';
+    const fu2SubjTmpl = settings['template_fu2_subject'] || 'Re: Staffing Partnership — {{company}}';
+    const fu2BodyTmpl = settings['template_fu2_body'] || 'Hi {{fn}},\n\nI wanted to reach out one last time regarding {{pos}} at {{company}}. If the timing isn\'t right, no worries at all — happy to reconnect whenever it makes sense.\n\nBest,\n{{sender}}';
+
+    function fillTemplate(tmpl, vars) {
+      return (tmpl || '').replace(/{{(\w+)}}/g, (m, k) => vars[k] || m);
+    }
+
+    // Get today's send counts per email account
+    const { data: sendLogs } = await supabase.from('email_send_log')
+      .select('email_account_id,emails_sent').eq('send_date', todayDate);
+    const sentToday = {};
+    (sendLogs || []).forEach(l => { sentToday[l.email_account_id] = l.emails_sent || 0; });
+
+    // Get daily limits per email account
+    const { data: allAccounts } = await supabase.from('email_accounts').select('id,daily_send_limit').eq('is_active', true);
+    const limitMap = {};
+    (allAccounts || []).forEach(a => { limitMap[a.id] = a.daily_send_limit || 150; });
+
+    // Helper: remaining quota for an account
+    function remaining(acId) {
+      return (limitMap[acId] || 150) - (sentToday[acId] || 0);
+    }
+
+    // Get BD user names for sender var
+    const bdIdSet = [...new Set((dueFu || []).map(f => f.job?.assigned_to_bd).filter(Boolean))];
+    let bdMap = {};
+    if (bdIdSet.length) {
+      const { data: bdUsers } = await supabase.from('users').select('id,name').in('id', bdIdSet);
+      (bdUsers || []).forEach(u => { bdMap[u.id] = u.name; });
+    }
+
+    const emailsToInsert = [];
+    const fu1Updates = []; // follow_up ids to mark fu1 sent
+    const fu2Updates = []; // follow_up ids to mark fu2 sent
+    const acCountDelta = {}; // email_account_id → count added this run
+
+    // Separate FU1 and FU2 due items — priority: FU1 first, FU2 second
+    const fu1Due = (dueFu || []).filter(f => !f.followup1_sent_at && f.followup1_due_date <= todayDate);
+    const fu2Due = (dueFu || []).filter(f => f.followup1_sent_at && !f.followup2_sent_at && f.followup2_due_date <= todayDate);
+
+    for (const fuList of [fu1Due, fu2Due]) {
+      const isFu2 = fuList === fu2Due;
+      for (const fu of fuList) {
+        const job = fu.job;
+        if (!job || job.stage !== 'Assigned') {
+          // Stage changed — skip and mark
+          await supabase.from('follow_ups').update({ status: 'skipped' }).eq('id', fu.id);
+          log.skipped_stage++;
+          continue;
+        }
+        const acId = job.sending_account?.id;
+        if (!acId) continue;
+        const rem = (limitMap[acId] || 150) - (sentToday[acId] || 0) - (acCountDelta[acId] || 0);
+        if (rem <= 0) { log.skipped_quota++; continue; }
+
+        const contact = fu.contact;
+        if (!contact?.email) continue;
+        const senderName = bdMap[job.assigned_to_bd] || 'Fute Global';
+        const vars = {
+          fn: contact.first_name || '',
+          ln: contact.last_name || '',
+          company: job.company?.name || '',
+          pos: job.position || '',
+          desig: contact.designation || '',
+          ind: job.company?.industry || '',
+          loc: job.company?.location || '',
+          sender: senderName
+        };
+
+        const subjTmpl = isFu2 ? fu2SubjTmpl : fu1SubjTmpl;
+        const bodyTmpl = isFu2 ? fu2BodyTmpl : fu1BodyTmpl;
+        const subject = fillTemplate(subjTmpl, vars);
+        const body = fillTemplate(bodyTmpl, vars);
+        const followupType = isFu2 ? 'fu2' : 'fu1';
+
+        emailsToInsert.push({
+          contact_id: fu.contact_id,
+          job_id: fu.job_id,
+          to_email: contact.email,
+          from_email: job.sending_account?.email_address || null,
+          subject, body,
+          platform: 'Outlook',
+          sent_by: job.assigned_to_bd,
+          status: 'pending',
+          followup_type: followupType,
+          follow_up_id: fu.id
+        });
+
+        if (isFu2) { fu2Updates.push(fu.id); } else { fu1Updates.push(fu.id); }
+        acCountDelta[acId] = (acCountDelta[acId] || 0) + 1;
+        if (isFu2) { log.fu2_queued++; } else { log.fu1_queued++; }
+      }
+    }
+
+    // Insert emails
+    if (emailsToInsert.length) {
+      await supabase.from('emails').insert(emailsToInsert);
+    }
+
+    // Mark follow-ups as sent
+    const nowTs = new Date().toISOString();
+    if (fu1Updates.length) {
+      await supabase.from('follow_ups').update({ followup1_sent_at: nowTs }).in('id', fu1Updates);
+    }
+    if (fu2Updates.length) {
+      await supabase.from('follow_ups').update({ followup2_sent_at: nowTs }).in('id', fu2Updates);
+      // Mark completed if both sent
+      const completedIds = fu2Updates; // fu2 = last follow-up
+      await supabase.from('follow_ups').update({ status: 'completed' }).in('id', completedIds);
+    }
+
+    // Update send log counts
+    for (const [acId, cnt] of Object.entries(acCountDelta)) {
+      await supabase.from('email_send_log').upsert({
+        email_account_id: acId,
+        send_date: todayDate,
+        emails_sent: (sentToday[acId] || 0) + cnt
+      }, { onConflict: 'email_account_id,send_date' });
+    }
+
+    console.log(`[FollowupEngine] ${new Date().toISOString()} — FU1: ${log.fu1_queued}, FU2: ${log.fu2_queued}, skipped_quota: ${log.skipped_quota}, skipped_stage: ${log.skipped_stage}`);
+    return log;
+  } catch (err) {
+    console.error('[FollowupEngine] Error:', err.message);
+    return { ...log, error: err.message };
+  }
+}
+
+// ── Cron: check every minute if it's time to run either engine ──
+function toIST(date) {
+  // IST = UTC+5:30
+  const utc = date.getTime() + date.getTimezoneOffset() * 60000;
+  return new Date(utc + 5.5 * 3600000);
+}
+
+const cronState = { lastOutreachRun: null, lastFollowupRun: null };
+
+setInterval(async () => {
+  try {
+    const now = toIST(new Date());
+    const hhmm = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    const dateStr = now.toISOString().split('T')[0];
+
+    const { data: settingsRows } = await supabase.from('app_settings').select('key,value');
+    const settings = {};
+    (settingsRows || []).forEach(r => { settings[r.key] = r.value; });
+
+    const outreachTime = settings['outreach_send_time'] || '08:00';
+    const followupTime = settings['followup_send_time'] || '08:30';
+
+    if (hhmm === outreachTime && cronState.lastOutreachRun !== dateStr) {
+      cronState.lastOutreachRun = dateStr;
+      console.log(`[Cron] Outreach engine triggered at ${hhmm} IST`);
+      // Outreach engine: currently emails are generated at assign time and sit as pending.
+      // Future: auto-send pending outreach emails here.
+    }
+
+    if (hhmm === followupTime && cronState.lastFollowupRun !== dateStr) {
+      cronState.lastFollowupRun = dateStr;
+      console.log(`[Cron] Follow-up engine triggered at ${hhmm} IST`);
+      await runFollowupEngine();
+    }
+  } catch (e) {
+    console.error('[Cron] Error:', e.message);
+  }
+}, 60000);
 
 // ── START ──────────────────────────────────────────────────────
 app.listen(PORT, () => console.log(`Fute Global LMS API v2.0.0-jobs running on port ${PORT}`));
