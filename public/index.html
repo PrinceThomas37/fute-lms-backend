@@ -1118,9 +1118,9 @@ function renderJobs(){
     '<div style="margin-top:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">'+
       '<div style="font-size:12px;color:var(--text3)">'+jobs.length+' lead'+(jobs.length===1?'':'s')+' · page '+(_pg+1)+' of '+_tp+'</div>'+
       (_tp>1?'<div style="display:flex;gap:5px">'+
-        '<button onclick="setLeadsPage('+(_pg-1)+')" style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer;opacity:'+(_pg===0?'.35':'1')+'" '+(_pg===0?'disabled':'')+'>← Prev</button>'+
+        '<button onclick="setLeadsPage('+(_pg-1)+')" style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer" '+(_pg===0?'disabled':'')+'>&#8592; Prev</button>'+
         '<span style="padding:5px 10px;font-size:12px;font-weight:600">'+(_pg+1)+' / '+_tp+'</span>'+
-        '<button onclick="setLeadsPage('+(_pg+1)+')" style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer;opacity:'+(_pg>=_tp-1?'.35':'1')+'" '+(_pg>=_tp-1?'disabled':'')+'>Next →</button>'+
+        '<button onclick="setLeadsPage('+(_pg+1)+')" style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer" '+(_pg>=_tp-1?'disabled':'')+'>Next &#8594;</button>'+
       '</div>':'')+
     '</div>'+
   '</div>';
@@ -1496,8 +1496,7 @@ function renderEmail(){
       var cj=myJobs.find(function(j){return j.id===parts[1];});
       if(cc)recipientBadge='<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--accent-l);border-radius:var(--r);margin-top:8px">'+
         '<div style="flex:1;font-size:13px"><strong>'+escHtml((cc.first_name||'')+' '+(cc.last_name||''))+'</strong>'+(cc.designation?' \u00b7 '+escHtml(cc.designation):'')+
-          '<div style="font-size:12px;color:var(--accent);font-weight:600;margin-top:2px">'+escHtml(cc.email||'(no email on record)')+'</div>'+
-          (cj?'<div style="font-size:11px;color:var(--text3)">'+escHtml(cj.company_name)+'</div>':'')+
+          '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+escHtml(cc.email||'')+(cj?' \u00b7 '+escHtml(cj.company_name):'')+'</div>'+
         '</div>'+
         '<button class="btn-icon" onclick="STATE.composeContactId=null;STATE.composeCompanyId=null;STATE.genEmail=null;render()">'+ico('x',13)+'</button>'+
       '</div>';
@@ -2641,7 +2640,7 @@ window.sendReminderEmail=function(rid){
   var r=STATE.reminders.find(function(x){return x.id===rid});
   if(!r)return;
   var subj="Following up — hope you're back!";
-  var body="Hi "+((r.contact_name||r.name||'').split(' ')[0]||'there')+",\n\nHope you had a great break! I wanted to follow up on my earlier message.\n\nWould you have 15 minutes for a quick call this week?\n\nWarm regards,\n"+STATE.user.name+"\nFute Global LLC";
+  var body="Hi "+((r.contact_name||r.name||"").split(" ")[0]||"there")+",\n\nHope you had a great break! I wanted to follow up on my earlier message.\n\nWould you have 15 minutes for a quick call this week?\n\nWarm regards,\n"+STATE.user.name+"\nFute Global LLC";
   var plt=STATE.user.plt||"Gmail";
   window.open(plt==="Gmail"
     ?"https://mail.google.com/mail/?view=cm&to="+encodeURIComponent(r.email)+"&su="+encodeURIComponent(subj)+"&body="+encodeURIComponent(body)
