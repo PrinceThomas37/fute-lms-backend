@@ -538,11 +538,17 @@ app.get('/email-accounts', auth, async (req, res) => {
       .select('*, assigned_user:users!assigned_to(id,name,email,role), assigner:users!assigned_by(id,name)')
       .order('created_at');
     if (error) throw error;
-    // non-admins see only their own
     const filtered = ['admin','ra_lead','bd_lead'].includes(req.user.role)
       ? data
       : data.filter(a => a.assigned_to === req.user.id);
-    res.json(filtered);
+    // Attach ms_connected flag
+    const accountIds = filtered.map(a => a.id);
+    const { data: tokens } = accountIds.length
+      ? await supabase.from('microsoft_tokens').select('email_account_id').in('email_account_id', accountIds)
+      : { data: [] };
+    const connectedSet = new Set((tokens || []).map(t => t.email_account_id));
+    const result = filtered.map(a => ({ ...a, ms_connected: connectedSet.has(a.id) }));
+    res.json(result);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1477,6 +1483,211 @@ app.get('/follow-ups', auth, async (req, res) => {
     const { data, error } = await query;
     if (error) throw error;
     res.json(data || []);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════
+// MICROSOFT OAUTH — Email sending
+// ══════════════════════════════════════════════════════════════
+
+const MS_TENANT   = process.env.MICROSOFT_TENANT_ID;
+const MS_CLIENT   = process.env.MICROSOFT_CLIENT_ID;
+const MS_SECRET   = process.env.MICROSOFT_CLIENT_SECRET;
+const MS_REDIRECT = 'https://fute-lms-backend.onrender.com/auth/microsoft/callback';
+const MS_SCOPES   = 'Mail.Send offline_access User.Read';
+
+// Step 1 — redirect admin to Microsoft consent page
+// Browser redirect can't send Authorization header — accept token via query param
+app.get('/auth/microsoft/connect', async (req, res) => {
+  try {
+    const token = req.query.token || (req.headers.authorization || '').replace('Bearer ', '');
+    if (!token) return res.status(401).send('Unauthorized');
+    let reqUser;
+    try { reqUser = jwt.verify(token, process.env.JWT_SECRET); } catch { return res.status(401).send('Invalid token'); }
+    if (!['admin','bd_lead'].includes(reqUser.role)) return res.status(403).send('Admin only');
+    const { accountId } = req.query;
+    if (!accountId) return res.status(400).send('accountId required');
+    const state = Buffer.from(JSON.stringify({ accountId, userId: reqUser.id })).toString('base64');
+    const url = `https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/authorize`
+      + `?client_id=${MS_CLIENT}`
+      + `&response_type=code`
+      + `&redirect_uri=${encodeURIComponent(MS_REDIRECT)}`
+      + `&scope=${encodeURIComponent(MS_SCOPES)}`
+      + `&state=${encodeURIComponent(state)}`
+      + `&prompt=select_account`;
+    res.redirect(url);
+  } catch (err) { res.status(500).send(err.message); }
+});
+
+// Step 2 — Microsoft redirects back with code
+app.get('/auth/microsoft/callback', async (req, res) => {
+  try {
+    const { code, state, error: msError } = req.query;
+    if (msError) return res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'${msError}'},'*');window.close();</script>`);
+    if (!code || !state) return res.status(400).send('Missing code or state');
+
+    const { accountId } = JSON.parse(Buffer.from(decodeURIComponent(state), 'base64').toString());
+
+    // Exchange code for tokens
+    const tokenRes = await fetch(`https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: MS_CLIENT,
+        client_secret: MS_SECRET,
+        code,
+        redirect_uri: MS_REDIRECT,
+        grant_type: 'authorization_code',
+        scope: MS_SCOPES
+      })
+    });
+    const tokens = await tokenRes.json();
+    if (tokens.error) return res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'${tokens.error_description}'},'*');window.close();</script>`);
+
+    const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
+
+    // Get the email address from Microsoft
+    const profileRes = await fetch('https://graph.microsoft.com/v1.0/me', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` }
+    });
+    const profile = await profileRes.json();
+    const emailAddress = profile.mail || profile.userPrincipalName || '';
+
+    // Store tokens
+    await supabase.from('microsoft_tokens').upsert({
+      email_account_id: accountId,
+      email_address: emailAddress,
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      expires_at: expiresAt,
+      updated_at: new Date()
+    }, { onConflict: 'email_account_id' });
+
+    // Mark email account as microsoft platform
+    await supabase.from('email_accounts').update({ platform: 'Microsoft', updated_at: new Date() }).eq('id', accountId);
+
+    res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_success',accountId:'${accountId}',email:'${emailAddress}'},'*');window.close();</script>`);
+  } catch (err) {
+    console.error('MS OAuth callback error:', err.message);
+    res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'${err.message}'},'*');window.close();</script>`);
+  }
+});
+
+// Helper — get a valid access token (refresh if expired)
+async function getMicrosoftToken(emailAccountId) {
+  const { data: tokenRow, error } = await supabase.from('microsoft_tokens')
+    .select('*').eq('email_account_id', emailAccountId).single();
+  if (error || !tokenRow) throw new Error('No Microsoft token found for this account. Please reconnect.');
+
+  const now = new Date();
+  const expiresAt = new Date(tokenRow.expires_at);
+  const bufferMs = 5 * 60 * 1000; // refresh 5 min before expiry
+
+  if (expiresAt.getTime() - now.getTime() > bufferMs) {
+    return tokenRow.access_token; // still valid
+  }
+
+  // Refresh the token
+  const refreshRes = await fetch(`https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: MS_CLIENT,
+      client_secret: MS_SECRET,
+      refresh_token: tokenRow.refresh_token,
+      grant_type: 'refresh_token',
+      scope: MS_SCOPES
+    })
+  });
+  const refreshed = await refreshRes.json();
+  if (refreshed.error) throw new Error('Token refresh failed: ' + refreshed.error_description);
+
+  const newExpiresAt = new Date(Date.now() + refreshed.expires_in * 1000).toISOString();
+  await supabase.from('microsoft_tokens').update({
+    access_token: refreshed.access_token,
+    refresh_token: refreshed.refresh_token || tokenRow.refresh_token,
+    expires_at: newExpiresAt,
+    updated_at: new Date()
+  }).eq('email_account_id', emailAccountId);
+
+  return refreshed.access_token;
+}
+
+// Send email via Microsoft Graph
+app.post('/emails/send-microsoft', auth, async (req, res) => {
+  try {
+    const { email_account_id, to_email, subject, body, email_id } = req.body;
+    if (!email_account_id || !to_email || !subject || !body) {
+      return res.status(400).json({ error: 'email_account_id, to_email, subject, body required' });
+    }
+
+    const accessToken = await getMicrosoftToken(email_account_id);
+
+    const message = {
+      message: {
+        subject,
+        body: { contentType: 'Text', content: body },
+        toRecipients: [{ emailAddress: { address: to_email } }]
+      },
+      saveToSentItems: true
+    };
+
+    const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(message)
+    });
+
+    if (!sendRes.ok) {
+      const errData = await sendRes.json().catch(() => ({}));
+      throw new Error(errData?.error?.message || `Send failed: ${sendRes.status}`);
+    }
+
+    // Mark email as sent if email_id provided
+    if (email_id) {
+      await supabase.from('emails').update({
+        status: 'sent', sent_at: today(), updated_at: new Date()
+      }).eq('id', email_id);
+    }
+
+    // Update send log
+    const todayDate = today();
+    const { data: acData } = await supabase.from('email_accounts').select('id').eq('id', email_account_id).single();
+    if (acData) {
+      const { data: logRow } = await supabase.from('email_send_log')
+        .select('emails_sent').eq('email_account_id', email_account_id).eq('send_date', todayDate).single();
+      await supabase.from('email_send_log').upsert({
+        email_account_id,
+        send_date: todayDate,
+        emails_sent: (logRow?.emails_sent || 0) + 1
+      }, { onConflict: 'email_account_id,send_date' });
+    }
+
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Check connection status for an email account
+app.get('/auth/microsoft/status/:accountId', auth, async (req, res) => {
+  try {
+    const { data } = await supabase.from('microsoft_tokens')
+      .select('email_address,expires_at').eq('email_account_id', req.params.accountId).single();
+    if (!data) return res.json({ connected: false });
+    const expired = new Date(data.expires_at) < new Date();
+    res.json({ connected: true, email_address: data.email_address, expired });
+  } catch { res.json({ connected: false }); }
+});
+
+// Disconnect Microsoft account
+app.delete('/auth/microsoft/:accountId', auth, async (req, res) => {
+  try {
+    if (!['admin','bd_lead'].includes(req.user.role)) return res.status(403).json({ error: 'Admin only' });
+    await supabase.from('microsoft_tokens').delete().eq('email_account_id', req.params.accountId);
+    await supabase.from('email_accounts').update({ platform: 'Gmail', updated_at: new Date() }).eq('id', req.params.accountId);
+    res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
