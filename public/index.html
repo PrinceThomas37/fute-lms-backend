@@ -467,6 +467,11 @@ var STATE = {
   aiPromptDefault: "Write a concise, professional cold outreach email (3-4 short paragraphs). Open with a personalised hook referencing their company or role. Briefly introduce Fute Global as a specialist staffing firm. Include a soft CTA asking for a 15-min call. Be warm but direct — no fluff.",
   emailSubj: "Opportunity regarding {{pos}} at {{company}}",
   emailBody: "Hi {{fn}},\n\nI came across {{company}} and was really impressed by what you're building in the {{ind}} space.\n\nAt Fute Global, we specialize in connecting organizations with top-tier talent. Given your role as {{desig}}, I believe we could be genuinely helpful with your {{pos}} search.\n\nWould you be open to a quick 15-minute call this week?\n\nWarm regards,\n{{sender}}\nFute Global LLC",
+  fu1Subj: "Re: Opportunity regarding {{pos}} at {{company}}",
+  fu1Body: "Hi {{fn}},\n\nJust following up on my previous email regarding {{pos}} at {{company}}. I wanted to make sure it didn't get buried.\n\nWe've helped similar companies fill roles like this quickly — happy to share some examples if useful.\n\nWould love to connect briefly this week.\n\nBest,\n{{sender}}\nFute Global LLC",
+  fu2Subj: "Re: Opportunity regarding {{pos}} at {{company}}",
+  fu2Body: "Hi {{fn}},\n\nI wanted to reach out one last time regarding {{pos}} at {{company}}. If the timing isn't right, no worries at all — happy to reconnect whenever it makes sense.\n\nBest,\n{{sender}}\nFute Global LLC",
+  appSettings: {},
   genEmail: null,
   aiGenerating: false,
   adminTab: "users",
@@ -1405,15 +1410,10 @@ function renderEmail(){
     var pendingRows=pending.map(function(e,idx){
       var isSelected=STATE.previewPendingId===e.id;
       var jname=(e.job&&e.job.position?e.job.position:'')+(e.job&&e.job.company?(' · '+e.job.company.name):'');
-      return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer;background:'+(isSelected?'var(--accent-l)':'')+'" onclick="previewPendingEmail(\''+e.id+'\')">'+
-        '<td style="padding:10px 12px;font-size:13px"><div style="font-weight:500">'+htmlEsc(e.to_email)+'</div>'+
-          '<div style="font-size:11px;color:var(--text3)">'+htmlEsc((e.contact&&e.contact.first_name?e.contact.first_name+' '+(e.contact.last_name||''):''))+'</div></td>'+
-        '<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+htmlEsc(jname)+'</td>'+
-        '<td style="padding:10px 12px;font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subject||'')+'</td>'+
-        '<td style="padding:10px 12px;white-space:nowrap">'+
-          '<span style="font-size:11px;padding:2px 8px;background:var(--amber-l);color:var(--amber);border-radius:8px;font-weight:600">'+htmlEsc(e.status)+'</span>'+
-        '</td>'+
-      '</tr>';
+      var fu=e.followup_type;
+      var rowBg=isSelected?'var(--accent-l)':fu==='fu2'?'#fff8f0':fu==='fu1'?'#fffdf0':'';
+      var fuBadge=fu==='fu1'?'<span style="font-size:10px;padding:2px 7px;background:#fef9c3;color:#92400e;border-radius:6px;font-weight:700;margin-left:6px">FU1</span>':fu==='fu2'?'<span style="font-size:10px;padding:2px 7px;background:#ffedd5;color:#9a3412;border-radius:6px;font-weight:700;margin-left:6px">FU2</span>':'';
+      return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer;background:'+rowBg+'" onclick="previewPendingEmail(\''+e.id+'\')">'+'<td style="padding:10px 12px;font-size:13px"><div style="font-weight:500">'+htmlEsc(e.to_email)+fuBadge+'</div>'+'<div style="font-size:11px;color:var(--text3)">'+htmlEsc((e.contact&&e.contact.first_name?e.contact.first_name+' '+(e.contact.last_name||''):''))+'</div></td>'+'<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+htmlEsc(jname)+'</td>'+'<td style="padding:10px 12px;font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subject||'')+'</td>'+'<td style="padding:10px 12px;white-space:nowrap">'+'<span style="font-size:11px;padding:2px 8px;background:var(--amber-l);color:var(--amber);border-radius:8px;font-weight:600">'+htmlEsc(e.status)+'</span>'+'</td>'+'</tr>';
     }).join('');
     if(!pendingRows)pendingRows='<tr><td colspan="4" style="padding:40px;text-align:center;color:var(--text3)">No pending emails. Assign leads to generate emails.</td></tr>';
 
@@ -1488,14 +1488,26 @@ function renderEmail(){
   var varChips=vars.map(function(v){
     return '<span onclick="insertVar(\''+v[0]+'\')" style="font-size:11.5px;padding:4px 10px;background:var(--accent-l);color:var(--accent);border-radius:6px;cursor:pointer;font-family:var(--mono);border:1px solid rgba(37,99,235,.2)">'+v[0]+'<span style="font-family:var(--font);font-size:10px;opacity:.7;margin-left:4px">'+v[1]+'</span></span>';
   }).join(' ');
-  var tmplHtml='<div class="card cp">'+
-    '<div class="fw6 mb1">AI Email Prompt Template</div>'+
-    '<div style="font-size:13px;color:var(--text2);margin-bottom:14px">This prompt guides the AI when generating emails. Variables in {{curly braces}} are replaced automatically.</div>'+
-    '<div class="flex gap1 flex-wrap mb3">'+varChips+'</div>'+
-    '<div class="fgrp"><label class="flbl">Subject line template</label><input class="inp" id="tmpl-subj" value="'+htmlEsc(STATE.emailSubj)+'" oninput="STATE.emailSubj=this.value"/></div>'+
-    '<div class="fgrp"><label class="flbl">Body template / AI context</label><textarea class="txta w100" style="min-height:200px" id="tmpl-body" oninput="STATE.emailBody=this.value">'+htmlEsc(STATE.emailBody)+'</textarea></div>'+
-    '<button class="btn btn-primary mt3" onclick="showToast(\'Template saved\',\'success\')">Save template</button>'+
-  '</div>';
+  function tmplBlock(title,color,subjId,bodyId,subjVal,bodyVal,saveKey){
+    return '<div class="card cp" style="margin-bottom:16px;border-left:4px solid '+color+'">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+        '<div class="fw6" style="font-size:14px">'+title+'</div>'+
+        '<div class="flex gap1 flex-wrap">'+varChips+'</div>'+
+      '</div>'+
+      '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="'+subjId+'" value="'+htmlEsc(subjVal)+'"/></div>'+
+      '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:160px" id="'+bodyId+'">'+htmlEsc(bodyVal)+'</textarea></div>'+
+      '<button class="btn btn-primary btn-sm mt2" onclick="saveEmailTemplate(\''+saveKey+'\',\''+subjId+'\',\''+bodyId+'\')" style="font-size:12px">Save</button>'+
+    '</div>';
+  }
+  var canEditTemplates=(u.role==='bd'||u.role==='bd_lead'||u.role==='admin');
+  var tmplHtml=canEditTemplates?
+    '<div>'+
+      '<div style="font-size:13px;color:var(--text2);margin-bottom:16px">Set templates for outreach and follow-up emails. Variables like <code>{{fn}}</code> are replaced automatically when emails are generated.</div>'+
+      tmplBlock('Outreach 1 — First Email','var(--accent)','tmpl-o1-subj','tmpl-o1-body',STATE.emailSubj,STATE.emailBody,'outreach')+
+      tmplBlock('Follow-up 1 — Day 3','#ca8a04','tmpl-fu1-subj','tmpl-fu1-body',STATE.fu1Subj,STATE.fu1Body,'fu1')+
+      tmplBlock('Follow-up 2 — Day 7','#ea580c','tmpl-fu2-subj','tmpl-fu2-body',STATE.fu2Subj,STATE.fu2Body,'fu2')+
+    '</div>':
+    '<div class="card cp"><div style="color:var(--text3);font-size:13px">Template editing is available to BD and Admin roles only.</div></div>';
 
   // ── COMPOSE TAB ──
   var myJobs=getMyJobs(u);
@@ -1737,11 +1749,26 @@ function renderAdmin(){
     '</div>';
   }).join('');
 
+  var outreachTime=(STATE.appSettings&&STATE.appSettings['outreach_send_time'])||'08:00';
+  var followupTime=(STATE.appSettings&&STATE.appSettings['followup_send_time'])||'08:30';
+  var enginePanel='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
+    '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Email Engine — Send Times (IST)</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'+
+      '<div class="fgrp"><label class="flbl">Outreach send time</label><input class="inp" type="time" id="admin-outreach-time" value="'+outreachTime+'"/></div>'+
+      '<div class="fgrp"><label class="flbl">Follow-up send time</label><input class="inp" type="time" id="admin-followup-time" value="'+followupTime+'"/></div>'+
+    '</div>'+
+    '<div style="display:flex;gap:10px;align-items:center">'+
+      '<button class="btn btn-primary btn-sm" onclick="saveAdminSendTimes()">Save times</button>'+
+      '<button class="btn btn-outline btn-sm" onclick="runFollowupEngineNow()" style="border-color:var(--amber);color:var(--amber)">▶ Run follow-up engine now</button>'+
+      '<span style="font-size:11.5px;color:var(--text3)">Use the manual run to test follow-up generation</span>'+
+    '</div>'+
+  '</div>';
+
   return '<div class="page">'+
     '<div class="ph"><div class="flex jb aic">'+
       '<div><div class="ptitle">Admin</div><div class="psub">'+STATE.users.length+' users · Fute Global LLC</div></div>'+
       '<button class="btn btn-primary btn-sm" onclick="openAddUser()">'+ico('plus',13)+'Add user</button>'+
-    '</div></div>'+sections+'</div>';
+    '</div></div>'+enginePanel+sections+'</div>';
 }
 
 function renderAdminUserDetail(userId){
@@ -2322,6 +2349,42 @@ window.exportXL=function(){
 }
 
 window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;render();}
+
+window.saveEmailTemplate=function(key,subjId,bodyId){
+  var subj=(document.getElementById(subjId)||{}).value||'';
+  var body=(document.getElementById(bodyId)||{}).value||'';
+  if(key==='outreach'){STATE.emailSubj=subj;STATE.emailBody=body;}
+  else if(key==='fu1'){STATE.fu1Subj=subj;STATE.fu1Body=body;}
+  else if(key==='fu2'){STATE.fu2Subj=subj;STATE.fu2Body=body;}
+  var saves=[
+    apiPost('/app-settings',{key:'template_'+key+'_subject',value:subj}),
+    apiPost('/app-settings',{key:'template_'+key+'_body',value:body})
+  ];
+  Promise.all(saves).then(function(){showToast('Template saved','success');}).catch(function(e){showToast('Save failed: '+e.message,'error');});
+};
+
+window.saveAdminSendTimes=function(){
+  var ot=(document.getElementById('admin-outreach-time')||{}).value||'08:00';
+  var ft=(document.getElementById('admin-followup-time')||{}).value||'08:30';
+  var saves=[
+    apiPost('/app-settings',{key:'outreach_send_time',value:ot}),
+    apiPost('/app-settings',{key:'followup_send_time',value:ft})
+  ];
+  Promise.all(saves).then(function(){
+    STATE.appSettings=STATE.appSettings||{};
+    STATE.appSettings['outreach_send_time']=ot;
+    STATE.appSettings['followup_send_time']=ft;
+    showToast('Send times saved','success');
+  }).catch(function(e){showToast('Save failed: '+e.message,'error');});
+};
+
+window.runFollowupEngineNow=function(){
+  showToast('Running follow-up engine...','info');
+  apiPost('/follow-ups/run',{}).then(function(r){
+    showToast('Done — FU1: '+r.fu1_queued+', FU2: '+r.fu2_queued+', Skipped quota: '+r.skipped_quota,'success');
+    apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];render();});
+  }).catch(function(e){showToast('Error: '+e.message,'error');});
+};
 window.previewEmail=function(id){
   var e=STATE.emails.find(function(x){return x.id===id;});
   STATE.previewEmail=e||null;
@@ -4962,6 +5025,15 @@ function loadAppData(){
       STATE.emails=(r[6]||[]);
       apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];render();}).catch(function(){STATE.sentEmails=[];});
     }
+    // Load app settings (send times + templates)
+    apiGet('/app-settings').then(function(s){
+      STATE.appSettings=s||{};
+      if(s['template_fu1_subject'])STATE.fu1Subj=s['template_fu1_subject'];
+      if(s['template_fu1_body'])STATE.fu1Body=s['template_fu1_body'];
+      if(s['template_fu2_subject'])STATE.fu2Subj=s['template_fu2_subject'];
+      if(s['template_fu2_body'])STATE.fu2Body=s['template_fu2_body'];
+      render();
+    }).catch(function(){});
     STATE.loading=false;render();
   }).catch(function(err){
     STATE.loading=false;STATE.user=null;STATE.token=null;
