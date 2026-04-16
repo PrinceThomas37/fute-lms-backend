@@ -1094,6 +1094,36 @@ app.get('/distribute/today-summary', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.post('/jobs/bulk-stage', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'bd', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Not allowed' });
+    const { job_ids, stage } = req.body;
+    if (!Array.isArray(job_ids) || !job_ids.length) return res.status(400).json({ error: 'job_ids required' });
+    const validStages = ['Unassigned', 'Assigned', 'Connected', 'Rejected', 'Future', 'In Discussion'];
+    if (!validStages.includes(stage)) return res.status(400).json({ error: 'Invalid stage' });
+
+    const updates = { stage, updated_at: new Date() };
+    // If resetting to Unassigned, clear assignment fields so it re-enters the pool
+    if (stage === 'Unassigned') {
+      updates.assigned_to_bd = null;
+      updates.sending_email_id = null;
+      updates.assigned_at = null;
+    }
+
+    const { error } = await supabase.from('jobs').update(updates).in('id', job_ids);
+    if (error) throw error;
+
+    for (const jid of job_ids) await logActivity(jid, null, req.user.id, 'stage_changed', `Stage changed to ${stage}`, null, { stage });
+
+    // If resetting to Unassigned, also delete any pending emails for these jobs
+    if (stage === 'Unassigned') {
+      await supabase.from('emails').delete().in('job_id', job_ids).eq('status', 'pending');
+    }
+
+    res.json({ success: true, updated: job_ids.length, stage });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/jobs/bulk-assign', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'ra_lead or admin only' });
