@@ -676,7 +676,15 @@ function periodLeads(user){
 }
 function fillEmail(tmpl,l,co,sender){
   return tmpl.replace(/{{(\w+)}}/g,function(m,k){
-    var map={fn:l.fn,ln:l.ln,company:co?co.name:"",ind:co?co.ind:"",pos:l.pos,desig:l.desig,loc:co?co.loc:"",sender:sender||STATE.user.name};
+    // Support both seed field names (fn/ln/pos) and production field names (first_name/position)
+    var fn=l.fn||l.first_name||"";
+    var ln=l.ln||l.last_name||"";
+    var pos=l.pos||l.position||"";
+    var desig=l.desig||l.designation||"";
+    var coName=co?co.name||co.company_name||"":l.company_name||"";
+    var coInd=co?co.ind||co.industry||"":l.company_ind||"";
+    var coLoc=co?co.loc||co.location||"":l.location||"";
+    var map={fn:fn,ln:ln,company:coName,ind:coInd,pos:pos,desig:desig,loc:coLoc,sender:sender||STATE.user.name};
     return map[k]!==undefined?map[k]:m;
   });
 }
@@ -2719,23 +2727,39 @@ window.setMergeLead=function(id){STATE.mergeLeadId=id;STATE.genEmail=null;render
 window.setPlatform=function(p){STATE.user.plt=p;render();}
 
 window.openEmailPreviewModal=function(){
-  // Build genEmail if not already set (fill template variables from selected lead)
+  // Build genEmail if not already set
   if(!STATE.genEmail){
-    // Use loose equality (==) so UUID strings match even if stored as different types
-    var ml=null;
-    if(STATE.mergeLeadId){
-      ml=STATE.leads.find(function(l){return l.id==STATE.mergeLeadId;});
-      if(!ml){console.warn('[preview] mergeLeadId not found in STATE.leads:',STATE.mergeLeadId);}
+    // Path 1: production — contact selected via composeContactId (contactId|jobId)
+    if(STATE.composeContactId){
+      var parts=STATE.composeContactId.split('|');
+      var cc=STATE.contacts.find(function(c){return c.id===parts[0];});
+      var cj=STATE.jobs.find(function(j){return j.id===parts[1];});
+      if(cc&&cj){
+        var co={name:cj.company_name||'',ind:cj.company_ind||'',loc:cj.location||''};
+        var l={first_name:cc.first_name,last_name:cc.last_name||'',designation:cc.designation||'',position:cj.position||''};
+        STATE.genEmail={
+          to:(cc.first_name||'')+' '+(cc.last_name||''),
+          email:cc.email,
+          subj:fillEmail(STATE.emailSubj,l,co,STATE.user.name),
+          body:fillEmail(STATE.emailBody,l,co,STATE.user.name),
+          lid:null
+        };
+      } else { showToast('Contact or job not found','warning');return; }
     }
-    if(ml){
-      // Prefer flat company fields from normaliseLead; fall back to STATE.companies lookup; final fallback to nested l.company
-      var co={
-        name:ml.coName||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).name||(ml.company&&ml.company.name)||'',
-        ind:ml.coInd||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).ind||(ml.company&&ml.company.industry)||'',
-        loc:ml.coLoc||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).loc||(ml.company&&ml.company.location)||''
-      };
-      STATE.genEmail={to:(ml.fn||'')+' '+(ml.ln||''),email:ml.email,subj:fillEmail(STATE.emailSubj,ml,co,STATE.user.name),body:fillEmail(STATE.emailBody,ml,co,STATE.user.name),lid:ml.id};
-    } else if(STATE.manualEmail){
+    // Path 2: seed/legacy lead via mergeLeadId
+    else if(STATE.mergeLeadId){
+      var ml=STATE.leads.find(function(l){return l.id==STATE.mergeLeadId;});
+      if(ml){
+        var co={
+          name:ml.coName||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).name||(ml.company&&ml.company.name)||'',
+          ind:ml.coInd||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).ind||(ml.company&&ml.company.industry)||'',
+          loc:ml.coLoc||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).loc||(ml.company&&ml.company.location)||''
+        };
+        STATE.genEmail={to:(ml.fn||'')+' '+(ml.ln||''),email:ml.email,subj:fillEmail(STATE.emailSubj,ml,co,STATE.user.name),body:fillEmail(STATE.emailBody,ml,co,STATE.user.name),lid:ml.id};
+      } else { showToast('Select a recipient first','warning');return; }
+    }
+    // Path 3: manual email — strip unfilled variables
+    else if(STATE.manualEmail){
       STATE.genEmail={to:STATE.manualEmail,email:STATE.manualEmail,subj:STATE.emailSubj.replace(/{{[\w]+}}/g,''),body:STATE.emailBody.replace(/{{[\w]+}}/g,''),lid:null};
     } else {
       showToast('Select a recipient first','warning');return;
@@ -2867,14 +2891,30 @@ window.sendEmail=function(){
   // If no generated email, build one from template + current recipient
   var ge=STATE.genEmail;
   if(!ge){
-    var toEmail=STATE.manualEmail||(STATE.mergeLeadId?STATE.leads.find(function(l){return l.id===STATE.mergeLeadId}):null);
-    if(!toEmail){showToast("Select a recipient first","warning");return;}
-    if(typeof toEmail==="object"){
-      var l=toEmail;var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
-      ge={to:l.fn+" "+l.ln,email:l.email,subj:fillEmail(STATE.emailSubj,l,co,STATE.user.name),body:fillEmail(STATE.emailBody,l,co,STATE.user.name),lid:l.id};
-    } else {
-      ge={to:STATE.manualEmailName||STATE.manualEmail,email:STATE.manualEmail,subj:STATE.emailSubj.replace(/{{[\w]+}}/g,""),body:STATE.emailBody.replace(/{{[\w]+}}/g,""),lid:null};
+    // Path 1: production contact selected via composeContactId
+    if(STATE.composeContactId){
+      var parts=STATE.composeContactId.split('|');
+      var cc=STATE.contacts.find(function(c){return c.id===parts[0];});
+      var cj=STATE.jobs.find(function(j){return j.id===parts[1];});
+      if(cc&&cj){
+        var co={name:cj.company_name||'',ind:cj.company_ind||'',loc:cj.location||''};
+        var l={first_name:cc.first_name,last_name:cc.last_name||'',designation:cc.designation||'',position:cj.position||''};
+        ge={to:(cc.first_name||'')+' '+(cc.last_name||''),email:cc.email,subj:fillEmail(STATE.emailSubj,l,co,STATE.user.name),body:fillEmail(STATE.emailBody,l,co,STATE.user.name),lid:null};
+      } else {showToast('Contact or job not found','warning');return;}
     }
+    // Path 2: manual email
+    else if(STATE.manualEmail){
+      ge={to:STATE.manualEmailName||STATE.manualEmail,email:STATE.manualEmail,subj:STATE.emailSubj.replace(/{{[\w]+}}/g,''),body:STATE.emailBody.replace(/{{[\w]+}}/g,''),lid:null};
+    }
+    // Path 3: legacy lead via mergeLeadId
+    else if(STATE.mergeLeadId){
+      var ml=STATE.leads.find(function(l){return l.id===STATE.mergeLeadId;});
+      if(ml){
+        var co=STATE.companies.find(function(c){return c.id===ml.coid;})||{};
+        ge={to:(ml.fn||'')+' '+(ml.ln||''),email:ml.email,subj:fillEmail(STATE.emailSubj,ml,co,STATE.user.name),body:fillEmail(STATE.emailBody,ml,co,STATE.user.name),lid:ml.id};
+      } else {showToast('Select a recipient first','warning');return;}
+    }
+    else {showToast('Select a recipient first','warning');return;}
   }
   // Attach from email if selected
   var fromEmail=null;
