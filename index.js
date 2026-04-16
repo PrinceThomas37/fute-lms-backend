@@ -1324,10 +1324,23 @@ app.get('/auth/microsoft/callback', async (req, res) => {
     const profileRes = await fetch('https://graph.microsoft.com/v1.0/me', { headers: { Authorization: `Bearer ${tokens.access_token}` } });
     const profile = await profileRes.json();
     const emailAddress = profile.mail || profile.userPrincipalName || '';
-    await supabase.from('microsoft_tokens').upsert({ user_email_id: userEmailId, user_id: userId, email_address: emailAddress, access_token: tokens.access_token, refresh_token: tokens.refresh_token, expires_at: expiresAt }, { onConflict: 'user_email_id' });
+
+    // Try insert first, fall back to update if row exists (avoids upsert onConflict issues)
+    const { error: upsertErr } = await supabase.from('microsoft_tokens').upsert(
+      { user_email_id: userEmailId, user_id: userId, email_address: emailAddress, access_token: tokens.access_token, refresh_token: tokens.refresh_token, expires_at: expiresAt },
+      { onConflict: 'user_email_id', ignoreDuplicates: false }
+    );
+    if (upsertErr) {
+      console.error('microsoft_tokens upsert error:', upsertErr);
+      return res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'DB save failed: ${upsertErr.message}'},'*');window.close();</scr`+`ipt>`);
+    }
+
     await supabase.from('user_emails').update({ platform: 'Microsoft' }).eq('id', userEmailId);
-    res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_success',userEmailId:'${userEmailId}',email:'${emailAddress}'},'*');window.close();</script>`);
-  } catch (err) { res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'${err.message}'},'*');window.close();</script>`); }
+    res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_success',userEmailId:'${userEmailId}',email:'${emailAddress}'},'*');window.close();</scr`+`ipt>`);
+  } catch (err) {
+    console.error('Microsoft OAuth callback error:', err);
+    res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'${err.message}'},'*');window.close();</scr`+`ipt>`);
+  }
 });
 
 async function getMicrosoftToken(userEmailId) {
@@ -1363,6 +1376,16 @@ app.get('/auth/microsoft/status/:userEmailId', auth, async (req, res) => {
     if (!data) return res.json({ connected: false });
     res.json({ connected: true, email_address: data.email_address, expired: new Date(data.expires_at) < new Date() });
   } catch { res.json({ connected: false }); }
+});
+
+app.get('/auth/microsoft/schema-check', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
+    // Check what columns microsoft_tokens actually has by trying a select
+    const { data, error } = await supabase.from('microsoft_tokens').select('*').eq('user_id', req.user.id);
+    if (error) return res.json({ error: error.message, hint: error.hint, details: error.details });
+    res.json({ rows: data, count: (data||[]).length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/auth/microsoft/debug', auth, async (req, res) => {
