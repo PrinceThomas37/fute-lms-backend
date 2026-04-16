@@ -1433,7 +1433,7 @@ function renderEmail(){
             '<button class="btn-icon" onclick="STATE.previewPendingId=null;render()">'+ico('x',13)+'</button>'+
           '</div>'+
           '<div style="padding:12px 14px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text2)">'+
-            '<div><strong>To:</strong> '+htmlEsc(pe.to_email)+'</div>'+
+            '<div><strong>From:</strong> '+((pe.job&&pe.job.sending_email)?htmlEsc(pe.job.sending_email.display_name||pe.sender&&pe.sender.name||'')+' &lt;'+htmlEsc(pe.job.sending_email.email_address)+'&gt;':(pe.from_email?htmlEsc(pe.sender&&pe.sender.name||'')+' &lt;'+htmlEsc(pe.from_email)+'&gt;':'—'))+'</div>'+'<div class="mt1"><strong>To:</strong> '+htmlEsc(pe.to_email)+'</div>'+
             '<div class="mt1"><strong>Subject:</strong> '+htmlEsc(pe.subject||'')+'</div>'+
           '</div>'+
           '<div style="padding:14px;font-size:13px;line-height:1.7;white-space:pre-wrap;max-height:360px;overflow-y:auto">'+htmlEsc(pe.body||'')+'</div>'+
