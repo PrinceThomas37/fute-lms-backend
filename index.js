@@ -767,7 +767,7 @@ app.post('/emails/queue-all', auth, async (req, res) => {
         failed++;
         failDetails.push({ id: email.id, to: email.to_email, error: e.message });
         // Mark as failed so it's visible in UI
-        await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id).catch(() => {});
+        try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
       }
     }
 
