@@ -1102,11 +1102,22 @@ app.post('/jobs/bulk-assign', auth, async (req, res) => {
     if (!assigned_to_bd) return res.status(400).json({ error: 'assigned_to_bd required' });
     const { data: bd } = await supabase.from('users').select('id,name').eq('id', assigned_to_bd).single();
     if (!bd) return res.status(400).json({ error: 'BD user not found' });
+
+    // Get BD's primary active email ID for sending
+    const { data: bdEmails } = await supabase.from('user_emails')
+      .select('id,email_address,is_primary')
+      .eq('user_id', assigned_to_bd)
+      .eq('is_active', true)
+      .order('is_primary', { ascending: false });
+    const sendingEmailId = (bdEmails && bdEmails.length) ? bdEmails[0].id : null;
+
     const now = new Date();
-    const { error } = await supabase.from('jobs').update({ assigned_to_bd, assigned_at: now, stage: 'Assigned', updated_at: now }).in('id', job_ids);
+    const updatePayload = { assigned_to_bd, assigned_at: now, stage: 'Assigned', updated_at: now };
+    if (sendingEmailId) updatePayload.sending_email_id = sendingEmailId;
+    const { error } = await supabase.from('jobs').update(updatePayload).in('id', job_ids);
     if (error) throw error;
     for (const jid of job_ids) await logActivity(jid, null, req.user.id, 'bulk_assigned', `Bulk assigned to BD: ${bd.name}`, null, { assigned_to_bd, bd_name: bd.name });
-    res.json({ success: true, assigned: job_ids.length, bd_name: bd.name });
+    res.json({ success: true, assigned: job_ids.length, bd_name: bd.name, sending_email_id: sendingEmailId });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
