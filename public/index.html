@@ -1418,7 +1418,9 @@ function renderEmail(){
       var fu=e.followup_type;
       var rowBg=isSelected?'var(--accent-l)':fu==='fu2'?'#fff8f0':fu==='fu1'?'#fffdf0':'';
       var fuBadge=fu==='fu1'?'<span style="font-size:10px;padding:2px 7px;background:#fef9c3;color:#92400e;border-radius:6px;font-weight:700;margin-left:6px">FU1</span>':fu==='fu2'?'<span style="font-size:10px;padding:2px 7px;background:#ffedd5;color:#9a3412;border-radius:6px;font-weight:700;margin-left:6px">FU2</span>':'';
-      return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer;background:'+rowBg+'" onclick="previewPendingEmail(\''+e.id+'\')">'+'<td style="padding:10px 12px;font-size:13px"><div style="font-weight:500">'+htmlEsc(e.to_email)+fuBadge+'</div>'+'<div style="font-size:11px;color:var(--text3)">'+htmlEsc((e.contact&&e.contact.first_name?e.contact.first_name+' '+(e.contact.last_name||''):''))+'</div></td>'+'<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+htmlEsc(jname)+'</td>'+'<td style="padding:10px 12px;font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subject||'')+'</td>'+'<td style="padding:10px 12px;white-space:nowrap">'+'<span style="font-size:11px;padding:2px 8px;background:var(--amber-l);color:var(--amber);border-radius:8px;font-weight:600">'+htmlEsc(e.status)+'</span>'+'</td>'+'</tr>';
+      var ePlat=(e.job&&e.job.sending_email&&e.job.sending_email.platform)||'Microsoft';
+      var platBadge=ePlat.toLowerCase()==='gmail'||ePlat.toLowerCase()==='google'?'<span style="font-size:10px;padding:2px 7px;background:#fef3c7;color:#92400e;border-radius:5px;font-weight:600;margin-left:5px">Gmail</span>':'<span style="font-size:10px;padding:2px 7px;background:#dbeafe;color:#1e40af;border-radius:5px;font-weight:600;margin-left:5px">Outlook</span>';
+      return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer;background:'+rowBg+'" onclick="previewPendingEmail(\''+e.id+'\')">'+'<td style="padding:10px 12px;font-size:13px"><div style="font-weight:500">'+htmlEsc(e.to_email)+fuBadge+'</div>'+'<div style="font-size:11px;color:var(--text3)">'+htmlEsc((e.contact&&e.contact.first_name?e.contact.first_name+' '+(e.contact.last_name||''):''))+'</div></td>'+'<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+htmlEsc(jname)+'</td>'+'<td style="padding:10px 12px;font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subject||'')+'</td>'+'<td style="padding:10px 12px;white-space:nowrap">'+platBadge+'</td>'+'</tr>';
     }).join('');
     if(!pendingRows)pendingRows='<tr><td colspan="4" style="padding:40px;text-align:center"><div style="color:var(--text3);margin-bottom:12px">No pending emails yet.</div><button onclick="generatePendingEmails()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer">⚡ Generate emails for assigned leads</button></td></tr>';
 
@@ -1454,7 +1456,7 @@ function renderEmail(){
         '<div style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
           '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
             '<thead style="background:var(--bg);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
-              '<tr><th style="padding:10px 12px;text-align:left">Recipient</th><th style="padding:10px 12px;text-align:left">Job</th><th style="padding:10px 12px;text-align:left">Subject</th><th style="padding:10px 12px;text-align:left">Status</th></tr>'+
+              '<tr><th style="padding:10px 12px;text-align:left">Recipient</th><th style="padding:10px 12px;text-align:left">Job</th><th style="padding:10px 12px;text-align:left">Subject</th><th style="padding:10px 12px;text-align:left">Via</th></tr>'+
             '</thead>'+
             '<tbody>'+pendingRows+'</tbody>'+
           '</table>'+
@@ -4640,15 +4642,63 @@ window.openSendAllConfirm=function(){
 
 window.submitSendAll=function(){
   closeModal();
+  // Show sending progress toast
   showToast('Sending emails via Microsoft Outlook…','info');
   apiPost('/emails/queue-all',{}).then(function(res){
-    if(res.failed&&res.failed>0){
-      showToast(res.sent+' sent · '+res.failed+' failed — check email setup','warning');
-    } else {
-      showToast(res.sent+' emails sent successfully via Outlook','success');
-    }
-    STATE.pendingEmails=[];
-    return apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];render();});
+    // Reload pending (sent/failed ones are gone)
+    return apiGet('/emails?status=pending').then(function(d){
+      STATE.pendingEmails=d||[];
+      // Build results modal
+      var sentCount=res.sent||0;
+      var failedCount=res.failed||0;
+      var failDetails=res.failDetails||[];
+      var failRows=failDetails.map(function(f){
+        return '<tr style="border-bottom:1px solid var(--border)">'+
+          '<td style="padding:8px 10px;font-size:12px;color:var(--text2)">'+htmlEsc(f.to||'')+'</td>'+
+          '<td style="padding:8px 10px;font-size:11px;color:var(--text3)">'+htmlEsc(f.from||'—')+'</td>'+
+          '<td style="padding:8px 10px;font-size:12px;color:var(--red)">'+htmlEsc(f.error||'Unknown error')+'</td>'+
+          '</tr>';
+      }).join('');
+      STATE.modal='<div class="modal modal-w600">'+
+        '<div class="mh">'+
+          '<div class="mt">Send Results</div>'+
+          '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button>'+
+        '</div>'+
+        '<div class="mb_">'+
+          '<div style="display:flex;gap:12px;margin-bottom:16px">'+
+            '<div style="flex:1;padding:14px 16px;background:var(--green-l);border:1px solid #bbf7d0;border-radius:var(--r2);text-align:center">'+
+              '<div style="font-size:28px;font-weight:700;color:var(--green)">'+sentCount+'</div>'+
+              '<div style="font-size:12px;color:var(--green);margin-top:2px">Sent successfully</div>'+
+            '</div>'+
+            '<div style="flex:1;padding:14px 16px;background:'+(failedCount?'var(--red-l)':'var(--bg)')+';border:1px solid '+(failedCount?'#fecaca':'var(--border)')+';border-radius:var(--r2);text-align:center">'+
+              '<div style="font-size:28px;font-weight:700;color:'+(failedCount?'var(--red)':'var(--text3)')+'">'+failedCount+'</div>'+
+              '<div style="font-size:12px;color:'+(failedCount?'var(--red)':'var(--text3)')+';margin-top:2px">Failed</div>'+
+            '</div>'+
+          '</div>'+
+          (failedCount?
+            '<div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:8px">Failed emails</div>'+
+            '<div style="border:1px solid var(--border);border-radius:var(--r);overflow:hidden;max-height:280px;overflow-y:auto">'+
+              '<table style="width:100%;border-collapse:collapse">'+
+                '<thead><tr style="background:var(--bg)">'+
+                  '<th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">To</th>'+
+                  '<th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">From</th>'+
+                  '<th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Reason</th>'+
+                '</tr></thead>'+
+                '<tbody>'+failRows+'</tbody>'+
+              '</table>'+
+            '</div>'
+          :
+            '<div style="padding:14px;background:var(--green-l);border-radius:var(--r2);font-size:13px;color:var(--green);text-align:center">'+
+              '🎉 All emails sent successfully via Microsoft Outlook!'+
+            '</div>'
+          )+
+        '</div>'+
+        '<div class="mf">'+
+          '<button class="btn btn-primary" onclick="closeModal()">Done</button>'+
+        '</div>'+
+      '</div>';
+      render();
+    });
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
