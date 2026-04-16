@@ -5422,10 +5422,13 @@ window.submitBulkAssign=function(){
   apiPost('/jobs/bulk-assign',{job_ids:selIds,assigned_to_bd:bdId}).then(function(res){
     showToast(res.assigned+' leads assigned to '+res.bd_name,'success');
     STATE.assignSel={};STATE.assignTargetBD='';
-    // Generate AI emails in background
+    // Generate emails then reload both jobs and pending emails
     return apiPost('/emails/generate',{job_ids:selIds}).then(function(genRes){
-      showToast('Generating '+genRes.generated+' emails for '+res.bd_name+'...','info');
-      return refreshJobs();
+      showToast(genRes.generated+' emails generated for '+res.bd_name,'success');
+      return Promise.all([
+        refreshJobs(),
+        apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];})
+      ]).then(function(){render();});
     });
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
