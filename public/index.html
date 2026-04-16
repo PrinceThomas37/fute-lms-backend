@@ -1420,7 +1420,7 @@ function renderEmail(){
       var fuBadge=fu==='fu1'?'<span style="font-size:10px;padding:2px 7px;background:#fef9c3;color:#92400e;border-radius:6px;font-weight:700;margin-left:6px">FU1</span>':fu==='fu2'?'<span style="font-size:10px;padding:2px 7px;background:#ffedd5;color:#9a3412;border-radius:6px;font-weight:700;margin-left:6px">FU2</span>':'';
       return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer;background:'+rowBg+'" onclick="previewPendingEmail(\''+e.id+'\')">'+'<td style="padding:10px 12px;font-size:13px"><div style="font-weight:500">'+htmlEsc(e.to_email)+fuBadge+'</div>'+'<div style="font-size:11px;color:var(--text3)">'+htmlEsc((e.contact&&e.contact.first_name?e.contact.first_name+' '+(e.contact.last_name||''):''))+'</div></td>'+'<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+htmlEsc(jname)+'</td>'+'<td style="padding:10px 12px;font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subject||'')+'</td>'+'<td style="padding:10px 12px;white-space:nowrap">'+'<span style="font-size:11px;padding:2px 8px;background:var(--amber-l);color:var(--amber);border-radius:8px;font-weight:600">'+htmlEsc(e.status)+'</span>'+'</td>'+'</tr>';
     }).join('');
-    if(!pendingRows)pendingRows='<tr><td colspan="4" style="padding:40px;text-align:center;color:var(--text3)">No pending emails. Assign leads to generate emails.</td></tr>';
+    if(!pendingRows)pendingRows='<tr><td colspan="4" style="padding:40px;text-align:center"><div style="color:var(--text3);margin-bottom:12px">No pending emails yet.</div><button onclick="generatePendingEmails()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer">⚡ Generate emails for assigned leads</button></td></tr>';
 
     // Preview panel
     var previewPanel='';
@@ -2696,6 +2696,20 @@ window.saveAdminSendTimes=function(){
     closeModal();
     showToast('Send times saved','success');
   }).catch(function(e){showToast('Save failed: '+e.message,'error');});
+};
+
+window.generatePendingEmails=function(){
+  // Get all assigned job IDs
+  var assignedJobs=STATE.jobs.filter(function(j){return j.stage==='Assigned';});
+  if(!assignedJobs.length){showToast('No assigned leads found','warning');return;}
+  var jobIds=assignedJobs.map(function(j){return j.id;});
+  showToast('Generating emails for '+jobIds.length+' leads...','info');
+  apiPost('/emails/generate',{job_ids:jobIds}).then(function(r){
+    showToast(r.generated+' emails generated','success');
+    apiGet('/emails?status=pending').then(function(d){
+      STATE.pendingEmails=d||[];render();
+    });
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
 window.runFollowupEngineNow=function(){
