@@ -2624,16 +2624,18 @@ window.connectMicrosoftAccount=function(accountId){
 window.saveOutreachTemplate=function(key,subjId,bodyId){
   var subj=(document.getElementById(subjId)||{}).value||'';
   var body=(document.getElementById(bodyId)||{}).value||'';
+  // Normalise key: 'outreach' -> 'o1' so it matches the DB key used everywhere
+  var dbKey=key==='outreach'?'o1':key;
   // Update local STATE
   if(key==='outreach'){STATE.emailSubj=subj;STATE.emailBody=body;}
   else if(key==='fu1'){STATE.fu1Subj=subj;STATE.fu1Body=body;}
   else if(key==='fu2'){STATE.fu2Subj=subj;STATE.fu2Body=body;}
   STATE.myOutreachPlan=STATE.myOutreachPlan||{};
-  STATE.myOutreachPlan['tmpl_'+key+'_subject']=subj;
-  STATE.myOutreachPlan['tmpl_'+key+'_body']=body;
+  STATE.myOutreachPlan['tmpl_'+dbKey+'_subject']=subj;
+  STATE.myOutreachPlan['tmpl_'+dbKey+'_body']=body;
   var saves=[
-    apiPost('/outreach-plan',{key:'tmpl_'+key+'_subject',value:subj}),
-    apiPost('/outreach-plan',{key:'tmpl_'+key+'_body',value:body})
+    apiPost('/outreach-plan',{key:'tmpl_'+dbKey+'_subject',value:subj}),
+    apiPost('/outreach-plan',{key:'tmpl_'+dbKey+'_body',value:body})
   ];
   Promise.all(saves).then(function(){showToast('Template saved','success');}).catch(function(e){showToast('Save failed: '+e.message,'error');});
 };
