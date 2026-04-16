@@ -4684,8 +4684,12 @@ window.submitSendAll=function(){
   showToast('Sending emails via Microsoft Outlook…','info');
   apiPost('/emails/queue-all',{}).then(function(res){
     // Reload pending (sent/failed ones are gone)
-    return apiGet('/emails?status=pending').then(function(d){
-      STATE.pendingEmails=d||[];
+    return Promise.all([
+      apiGet('/emails?status=pending'),
+      apiGet('/emails?status=sent')
+    ]).then(function(results){
+      STATE.pendingEmails=results[0]||[];
+      STATE.sentEmails=results[1]||[];
       // Build results modal
       var sentCount=res.sent||0;
       var failedCount=res.failed||0;
