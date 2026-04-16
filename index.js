@@ -714,14 +714,72 @@ app.post('/emails/generate', auth, async (req, res) => {
 
 app.post('/emails/queue-all', auth, async (req, res) => {
   try {
-    const { error } = await supabase.from('emails').update({ status: 'queued' }).eq('sent_by', req.user.id).eq('status', 'pending');
-    if (error) throw error;
-    const { data: queued } = await supabase.from('emails').select('contact_id, job_id').eq('sent_by', req.user.id).eq('status', 'queued');
-    const contactIds = [...new Set((queued || []).map(e => e.contact_id).filter(Boolean))];
-    if (contactIds.length) await supabase.from('contacts').update({ email_sent_at: today(), updated_at: new Date() }).in('id', contactIds);
-    const jobIds = [...new Set((queued || []).map(e => e.job_id).filter(Boolean))];
-    for (const jid of jobIds) await logActivity(jid, null, req.user.id, 'emails_queued', 'Emails queued for sending', null, null);
-    res.json({ success: true, queued: contactIds.length });
+    // Fetch all pending emails for this user, joining job -> sending_email_id
+    const { data: pendingEmails, error: fetchErr } = await supabase
+      .from('emails')
+      .select('id, to_email, subject, body, contact_id, job_id, job:jobs(sending_email_id)')
+      .eq('sent_by', req.user.id)
+      .eq('status', 'pending');
+    if (fetchErr) throw fetchErr;
+    if (!pendingEmails || !pendingEmails.length) return res.json({ success: true, sent: 0, failed: 0 });
+
+    let sent = 0;
+    let failed = 0;
+    const failDetails = [];
+    const sentContactIds = [];
+    const sentJobIds = [];
+
+    for (const email of pendingEmails) {
+      const userEmailId = email.job?.sending_email_id;
+      if (!userEmailId) {
+        failed++;
+        failDetails.push({ id: email.id, to: email.to_email, error: 'No sending email configured for this job' });
+        continue;
+      }
+      try {
+        const accessToken = await getMicrosoftToken(userEmailId);
+        const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: {
+              subject: email.subject,
+              body: { contentType: 'Text', content: email.body },
+              toRecipients: [{ emailAddress: { address: email.to_email } }]
+            },
+            saveToSentItems: true
+          })
+        });
+        if (!sendRes.ok) {
+          const errData = await sendRes.json().catch(() => ({}));
+          throw new Error(errData?.error?.message || `HTTP ${sendRes.status}`);
+        }
+        // Mark as sent
+        await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email.id);
+        // Update send log
+        const todayDate = today();
+        const { data: logRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', userEmailId).eq('send_date', todayDate).single();
+        await supabase.from('email_send_log').upsert({ user_email_id: userEmailId, send_date: todayDate, emails_sent: (logRow?.emails_sent || 0) + 1 }, { onConflict: 'user_email_id,send_date' });
+        if (email.contact_id) sentContactIds.push(email.contact_id);
+        if (email.job_id) sentJobIds.push(email.job_id);
+        sent++;
+      } catch (e) {
+        failed++;
+        failDetails.push({ id: email.id, to: email.to_email, error: e.message });
+        // Mark as failed so it's visible in UI
+        await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id).catch(() => {});
+      }
+    }
+
+    // Update contact email_sent_at for successful sends
+    const uniqueContactIds = [...new Set(sentContactIds.filter(Boolean))];
+    if (uniqueContactIds.length) await supabase.from('contacts').update({ email_sent_at: today() }).in('id', uniqueContactIds);
+
+    // Log activity per job
+    const uniqueJobIds = [...new Set(sentJobIds.filter(Boolean))];
+    for (const jid of uniqueJobIds) await logActivity(jid, null, req.user.id, 'emails_sent', `${sent} email(s) sent via Microsoft`, null, null);
+
+    res.json({ success: true, sent, failed, failDetails });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
