@@ -1410,7 +1410,10 @@ function renderEmail(){
   var pendingHtml='';
   if(STATE.emailTab==='pending'){
     var totalRecipients=pending.length;
-    var sendAllBtn='<button onclick="openSendAllConfirm()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer'+(totalRecipients?'':';opacity:.4;cursor:not-allowed')+'"'+(totalRecipients?'':'disabled')+'>Send all pending ('+totalRecipients+')</button>';
+    var sendAllBtn='<div style="display:flex;gap:8px;align-items:center">'+
+      '<button onclick="openSendAllConfirm()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer'+(totalRecipients?'':';opacity:.4;cursor:not-allowed')+'"'+(totalRecipients?'':'disabled')+'>Send all pending ('+totalRecipients+')</button>'+
+      '<button onclick="runMsDebug()" style="background:var(--bg);color:var(--text2);border:1px solid var(--border2);padding:7px 12px;border-radius:8px;font-size:12px;cursor:pointer" title="Debug Microsoft token status">🔍 Debug</button>'+
+    '</div>';
 
     var pendingRows=pending.map(function(e,idx){
       var isSelected=STATE.previewPendingId===e.id;
@@ -4601,6 +4604,55 @@ function loadReminders(){
 // EMAIL ACTIONS — Drop F
 // ════════════════════════════════════════════════
 window.previewPendingEmail=function(id){STATE.previewPendingId=id;render();};
+
+window.runMsDebug=function(){
+  apiGet('/auth/microsoft/debug').then(function(res){
+    var ue=(res.user_emails||[]).map(function(e){
+      return '<tr style="border-bottom:1px solid var(--border)">'+
+        '<td style="padding:6px 10px;font-size:12px">'+htmlEsc(e.email_address)+'</td>'+
+        '<td style="padding:6px 10px;font-size:12px">'+htmlEsc(e.platform||'—')+'</td>'+
+        '<td style="padding:6px 10px;font-size:12px">'+(e.is_active?'<span style="color:var(--green)">Active</span>':'<span style="color:var(--red)">Inactive</span>')+'</td>'+
+        '<td style="padding:6px 10px;font-size:11px;font-family:monospace">'+htmlEsc(e.id.slice(0,8))+'…</td>'+
+      '</tr>';
+    }).join('');
+    var tk=(res.tokens||[]).map(function(t){
+      return '<tr style="border-bottom:1px solid var(--border)">'+
+        '<td style="padding:6px 10px;font-size:12px">'+htmlEsc(t.email_address)+'</td>'+
+        '<td style="padding:6px 10px;font-size:11px;font-family:monospace">'+htmlEsc(t.user_email_id.slice(0,8))+'…</td>'+
+        '<td style="padding:6px 10px;font-size:12px">'+(t.expired?'<span style="color:var(--red)">Expired</span>':'<span style="color:var(--green)">Valid</span>')+'</td>'+
+      '</tr>';
+    }).join('');
+    var jb=(res.jobs||[]).map(function(j){
+      return '<tr style="border-bottom:1px solid var(--border)">'+
+        '<td style="padding:6px 10px;font-size:12px">'+htmlEsc(j.position||'—')+'</td>'+
+        '<td style="padding:6px 10px;font-size:12px">'+htmlEsc(j.sending_email||'—')+'</td>'+
+        '<td style="padding:6px 10px;font-size:12px">'+(j.has_token?'<span style="color:var(--green)">✓ Has token</span>':'<span style="color:var(--red)">✗ No token</span>')+'</td>'+
+      '</tr>';
+    }).join('');
+    STATE.modal='<div class="modal" style="max-width:680px;width:90vw">'+
+      '<div class="mh"><div class="mt">Microsoft OAuth Debug</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+      '<div class="mb_" style="max-height:70vh;overflow-y:auto">'+
+        '<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Your Email IDs (user_emails)</div>'+
+        '<table style="width:100%;border-collapse:collapse;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:16px">'+
+          '<thead><tr style="background:var(--bg)"><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">Email</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">Platform</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">Status</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">ID</th></tr></thead>'+
+          '<tbody>'+(ue||'<tr><td colspan="4" style="padding:10px;text-align:center;color:var(--text3)">None</td></tr>')+'</tbody>'+
+        '</table>'+
+        '<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Saved Microsoft Tokens</div>'+
+        '<table style="width:100%;border-collapse:collapse;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:16px">'+
+          '<thead><tr style="background:var(--bg)"><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">Email</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">user_email_id</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">Token</th></tr></thead>'+
+          '<tbody>'+(tk||'<tr><td colspan="3" style="padding:10px;text-align:center;color:var(--red)">No tokens found — Microsoft not connected</td></tr>')+'</tbody>'+
+        '</table>'+
+        '<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Jobs → Token Match</div>'+
+        '<table style="width:100%;border-collapse:collapse;border:1px solid var(--border);border-radius:var(--r);overflow:hidden">'+
+          '<thead><tr style="background:var(--bg)"><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">Job</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">Sending Email</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">Token</th></tr></thead>'+
+          '<tbody>'+(jb||'<tr><td colspan="3" style="padding:10px;text-align:center;color:var(--text3)">No jobs</td></tr>')+'</tbody>'+
+        '</table>'+
+      '</div>'+
+      '<div class="mf"><button class="btn btn-primary" onclick="closeModal()">Close</button></div>'+
+    '</div>';
+    render();
+  }).catch(function(e){showToast('Debug failed: '+e.message,'error');});
+};
 
 window.openSendAllConfirm=function(){
   var pending=STATE.pendingEmails||[];
