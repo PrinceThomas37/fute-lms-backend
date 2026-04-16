@@ -4815,25 +4815,58 @@ window.confirmAssignToManager=function(){
   if(!ratio||!managerId)return;
   var m=STATE.users.find(function(u){return u.id===managerId;})||{name:'Manager'};
   var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
+  var totalCapacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
   var now=new Date();
   var dateStr=now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
   var timeStr=now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+
+  // Build email IDs breakdown
+  var perEmail=emailAccounts.length>0?Math.ceil(ratio.total_to_send/emailAccounts.length):0;
+  var emailIDRows=emailAccounts.length?
+    emailAccounts.map(function(a,idx){
+      var count=idx===emailAccounts.length-1
+        ?ratio.total_to_send-perEmail*(emailAccounts.length-1)
+        :perEmail;
+      count=Math.max(0,Math.min(count,a.daily_send_limit||150));
+      return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--card);border-radius:var(--r);margin-bottom:6px;border:1px solid var(--border)">'+
+        '<span style="font-size:10px;padding:2px 7px;border-radius:5px;font-weight:600;background:'+(a.platform==='Microsoft'?'#e0f2fe':'#f0fdf4')+';color:'+(a.platform==='Microsoft'?'#0369a1':'#166534')+'">'+htmlEsc(a.platform||'Email')+'</span>'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(a.display_name||a.email_address)+'</div>'+
+          '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(a.email_address)+'</div>'+
+        '</div>'+
+        '<div style="text-align:right;flex-shrink:0">'+
+          '<div style="font-size:14px;font-weight:700;color:var(--accent)">'+count+'</div>'+
+          '<div style="font-size:10px;color:var(--text3)">emails</div>'+
+        '</div>'+
+      '</div>';
+    }).join(''):
+    '<div style="font-size:12px;color:var(--red);padding:8px">No active email IDs found for this manager.</div>';
 
   STATE.modal='<div class="modal modal-w480">'+
     '<div class="mh"><div class="mt">Confirm assignment</div>'+
     '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
     '<div class="mb_">'+
-      '<div style="padding:16px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:12px">'+
-        '<div style="font-size:24px;font-weight:700;color:var(--accent);margin-bottom:2px">'+ratio.total_to_send+' leads</div>'+
-        '<div style="font-size:14px;color:var(--text2)">\u2192 <strong>'+htmlEsc(m.name)+'</strong></div>'+
-        '<div style="font-size:12px;color:var(--text3);margin-top:4px">'+dateStr+' \u00b7 '+timeStr+'</div>'+
+      '<div style="padding:14px 16px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:14px;display:flex;align-items:center;gap:14px">'+
+        '<div style="flex:1">'+
+          '<div style="font-size:22px;font-weight:700;color:var(--accent);line-height:1">'+ratio.total_to_send+' leads</div>'+
+          '<div style="font-size:13px;color:var(--text2);margin-top:3px">→ <strong>'+htmlEsc(m.name)+'</strong></div>'+
+          '<div style="font-size:11px;color:var(--text3);margin-top:3px">'+dateStr+' · '+timeStr+'</div>'+
+        '</div>'+
+        '<div style="text-align:center;padding:10px 14px;background:var(--card);border-radius:var(--r2);border:1px solid rgba(37,99,235,.15)">'+
+          '<div style="font-size:18px;font-weight:700;color:var(--accent)">'+emailAccounts.length+'</div>'+
+          '<div style="font-size:10px;color:var(--text3);margin-top:2px">email ID'+(emailAccounts.length!==1?'s':'')+'</div>'+
+          '<div style="font-size:10px;color:var(--text3)">'+totalCapacity+'/day cap</div>'+
+        '</div>'+
       '</div>'+
-      '<div style="font-size:13px;color:var(--text2);margin-bottom:10px">'+htmlEsc(ratio.summary||'')+'</div>'+
-      '<div style="font-size:12px;color:var(--text3)">Emails will be distributed across <strong>'+emailAccounts.length+' email ID'+(emailAccounts.length!==1?'s':'')+'</strong> and generated automatically by AI.</div>'+
+      '<div style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Sending via</div>'+
+      emailIDRows+
+      '<div style="font-size:12px;color:var(--text3);margin-top:10px;padding:8px 10px;background:var(--bg);border-radius:var(--r)">'+
+        htmlEsc(ratio.summary||'AI-generated emails will be sent for each contact.')+
+      '</div>'+
     '</div>'+
     '<div class="mf">'+
       '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
-      '<button class="btn btn-primary" onclick="submitAssignToManager()">Confirm & Assign</button>'+
+      '<button class="btn btn-primary" '+(emailAccounts.length?'':'disabled style="opacity:.5;cursor:not-allowed"')+' onclick="submitAssignToManager()">Confirm &amp; Assign</button>'+
     '</div>'+
   '</div>';
   render();
