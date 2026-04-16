@@ -714,7 +714,7 @@ app.post('/emails/generate', auth, async (req, res) => {
 
 app.post('/emails/queue-all', auth, async (req, res) => {
   try {
-    const { error } = await supabase.from('emails').update({ status: 'queued', updated_at: new Date() }).eq('sent_by', req.user.id).eq('status', 'pending');
+    const { error } = await supabase.from('emails').update({ status: 'queued' }).eq('sent_by', req.user.id).eq('status', 'pending');
     if (error) throw error;
     const { data: queued } = await supabase.from('emails').select('contact_id, job_id').eq('sent_by', req.user.id).eq('status', 'queued');
     const contactIds = [...new Set((queued || []).map(e => e.contact_id).filter(Boolean))];
@@ -728,7 +728,7 @@ app.post('/emails/queue-all', auth, async (req, res) => {
 app.patch('/emails/:id', auth, async (req, res) => {
   try {
     const { subject, body } = req.body;
-    const updates = { updated_at: new Date() };
+    const updates = {};
     if (subject !== undefined) updates.subject = subject;
     if (body !== undefined) updates.body = body;
     const { data, error } = await supabase.from('emails').update(updates).eq('id', req.params.id).eq('sent_by', req.user.id).select().single();
@@ -1277,7 +1277,7 @@ app.post('/emails/send-microsoft', auth, async (req, res) => {
     const accessToken = await getMicrosoftToken(user_email_id);
     const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', { method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: { subject, body: { contentType: 'Text', content: body }, toRecipients: [{ emailAddress: { address: to_email } }] }, saveToSentItems: true }) });
     if (!sendRes.ok) { const errData = await sendRes.json().catch(() => ({})); throw new Error(errData?.error?.message || `Send failed: ${sendRes.status}`); }
-    if (email_id) await supabase.from('emails').update({ status: 'sent', sent_at: today(), updated_at: new Date() }).eq('id', email_id);
+    if (email_id) await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email_id);
     const todayDate = today();
     const { data: logRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', user_email_id).eq('send_date', todayDate).single();
     await supabase.from('email_send_log').upsert({ user_email_id, send_date: todayDate, emails_sent: (logRow?.emails_sent || 0) + 1 }, { onConflict: 'user_email_id,send_date' });
