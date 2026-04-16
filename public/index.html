@@ -2589,23 +2589,9 @@ window.removeAssignment=function(event,assignmentId){
 };
 
 window.connectMicrosoftAccount=function(accountId){
-  var url=API_URL+'/auth/microsoft/connect?accountId='+accountId;
-  var popup=window.open(url,'ms_oauth','width=600,height=700,scrollbars=yes');
-  showToast('Complete Microsoft login in the popup window','info');
-  window._msOAuthHandler=function(event){
-    if(event.data&&event.data.type==='ms_oauth_success'){
-      window.removeEventListener('message',window._msOAuthHandler);
-      STATE.emailAccounts=STATE.emailAccounts.map(function(x){
-        return x.id===event.data.accountId?Object.assign({},x,{platform:'Microsoft',ms_connected:true}):x;
-      });
-      showToast('Microsoft connected: '+event.data.email,'success');
-      render();
-    } else if(event.data&&event.data.type==='ms_oauth_error'){
-      window.removeEventListener('message',window._msOAuthHandler);
-      showToast('Connection failed: '+event.data.error,'error');
-    }
-  };
-  window.addEventListener('message',window._msOAuthHandler);
+  // Legacy shim — delegates to the correct connectMicrosoftUserEmail
+  // accountId here is actually a user_email id, so pass current user id + email id
+  connectMicrosoftUserEmail(STATE.user.id, accountId);
 };
 
 window.saveOutreachTemplate=function(key,subjId,bodyId){
