@@ -1324,8 +1324,8 @@ app.get('/auth/microsoft/callback', async (req, res) => {
     const profileRes = await fetch('https://graph.microsoft.com/v1.0/me', { headers: { Authorization: `Bearer ${tokens.access_token}` } });
     const profile = await profileRes.json();
     const emailAddress = profile.mail || profile.userPrincipalName || '';
-    await supabase.from('microsoft_tokens').upsert({ user_email_id: userEmailId, user_id: userId, email_address: emailAddress, access_token: tokens.access_token, refresh_token: tokens.refresh_token, expires_at: expiresAt, updated_at: new Date() }, { onConflict: 'user_email_id' });
-    await supabase.from('user_emails').update({ platform: 'Microsoft', updated_at: new Date() }).eq('id', userEmailId);
+    await supabase.from('microsoft_tokens').upsert({ user_email_id: userEmailId, user_id: userId, email_address: emailAddress, access_token: tokens.access_token, refresh_token: tokens.refresh_token, expires_at: expiresAt }, { onConflict: 'user_email_id' });
+    await supabase.from('user_emails').update({ platform: 'Microsoft' }).eq('id', userEmailId);
     res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_success',userEmailId:'${userEmailId}',email:'${emailAddress}'},'*');window.close();</script>`);
   } catch (err) { res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'${err.message}'},'*');window.close();</script>`); }
 });
@@ -1338,7 +1338,7 @@ async function getMicrosoftToken(userEmailId) {
   const refreshRes = await fetch(`https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/token`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: MS_CLIENT, client_secret: MS_SECRET, refresh_token: tokenRow.refresh_token, grant_type: 'refresh_token', scope: MS_SCOPES }) });
   const refreshed = await refreshRes.json();
   if (refreshed.error) throw new Error('Token refresh failed: ' + refreshed.error_description);
-  await supabase.from('microsoft_tokens').update({ access_token: refreshed.access_token, refresh_token: refreshed.refresh_token || tokenRow.refresh_token, expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(), updated_at: new Date() }).eq('user_email_id', userEmailId);
+  await supabase.from('microsoft_tokens').update({ access_token: refreshed.access_token, refresh_token: refreshed.refresh_token || tokenRow.refresh_token, expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString() }).eq('user_email_id', userEmailId);
   return refreshed.access_token;
 }
 
@@ -1363,6 +1363,28 @@ app.get('/auth/microsoft/status/:userEmailId', auth, async (req, res) => {
     if (!data) return res.json({ connected: false });
     res.json({ connected: true, email_address: data.email_address, expired: new Date(data.expires_at) < new Date() });
   } catch { res.json({ connected: false }); }
+});
+
+app.get('/auth/microsoft/debug', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
+    // All user_emails for this user
+    const { data: userEmails } = await supabase.from('user_emails').select('id,email_address,display_name,platform,is_active').eq('user_id', req.user.id);
+    // All microsoft_tokens for this user
+    const { data: tokens } = await supabase.from('microsoft_tokens').select('user_email_id,email_address,expires_at').eq('user_id', req.user.id);
+    // Jobs assigned to this user with their sending_email_id
+    const { data: jobs } = await supabase.from('jobs').select('id,position,sending_email_id,sending_email:user_emails!sending_email_id(id,email_address,platform)').eq('assigned_to_bd', req.user.id).is('deleted_at', null);
+    // Cross-reference: which job sending_email_ids have tokens
+    const tokenIds = new Set((tokens||[]).map(t => t.user_email_id));
+    const jobSummary = (jobs||[]).map(j => ({
+      job_id: j.id, position: j.position,
+      sending_email_id: j.sending_email_id,
+      sending_email: j.sending_email?.email_address,
+      platform: j.sending_email?.platform,
+      has_token: j.sending_email_id ? tokenIds.has(j.sending_email_id) : false
+    }));
+    res.json({ user_emails: userEmails, tokens: (tokens||[]).map(t => ({ ...t, expired: new Date(t.expires_at) < new Date() })), jobs: jobSummary });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/auth/microsoft/:userEmailId', auth, async (req, res) => {
