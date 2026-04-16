@@ -1325,14 +1325,14 @@ app.get('/auth/microsoft/callback', async (req, res) => {
     const profile = await profileRes.json();
     const emailAddress = profile.mail || profile.userPrincipalName || '';
 
-    // Try insert first, fall back to update if row exists (avoids upsert onConflict issues)
-    const { error: upsertErr } = await supabase.from('microsoft_tokens').upsert(
-      { user_email_id: userEmailId, user_id: userId, email_address: emailAddress, access_token: tokens.access_token, refresh_token: tokens.refresh_token, expires_at: expiresAt },
-      { onConflict: 'user_email_id', ignoreDuplicates: false }
+    // Delete existing token row for this user_email_id, then insert fresh
+    await supabase.from('microsoft_tokens').delete().eq('user_email_id', userEmailId);
+    const { error: insertErr } = await supabase.from('microsoft_tokens').insert(
+      { user_email_id: userEmailId, user_id: userId, email_address: emailAddress, access_token: tokens.access_token, refresh_token: tokens.refresh_token, expires_at: expiresAt, updated_at: new Date() }
     );
-    if (upsertErr) {
-      console.error('microsoft_tokens upsert error:', upsertErr);
-      return res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'DB save failed: ${upsertErr.message}'},'*');window.close();</scr`+`ipt>`);
+    if (insertErr) {
+      console.error('microsoft_tokens insert error:', insertErr);
+      return res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'DB save failed: ${insertErr.message}'},'*');window.close();</scr`+`ipt>`);
     }
 
     await supabase.from('user_emails').update({ platform: 'Microsoft' }).eq('id', userEmailId);
@@ -1351,7 +1351,7 @@ async function getMicrosoftToken(userEmailId) {
   const refreshRes = await fetch(`https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/token`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: MS_CLIENT, client_secret: MS_SECRET, refresh_token: tokenRow.refresh_token, grant_type: 'refresh_token', scope: MS_SCOPES }) });
   const refreshed = await refreshRes.json();
   if (refreshed.error) throw new Error('Token refresh failed: ' + refreshed.error_description);
-  await supabase.from('microsoft_tokens').update({ access_token: refreshed.access_token, refresh_token: refreshed.refresh_token || tokenRow.refresh_token, expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString() }).eq('user_email_id', userEmailId);
+  await supabase.from('microsoft_tokens').update({ access_token: refreshed.access_token, refresh_token: refreshed.refresh_token || tokenRow.refresh_token, expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(), updated_at: new Date() }).eq('user_email_id', userEmailId);
   return refreshed.access_token;
 }
 
