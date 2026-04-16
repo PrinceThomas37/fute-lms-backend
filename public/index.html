@@ -509,6 +509,7 @@ var STATE = {
   composeContactId: null,
   composeCompanyId: null,
   composeFromEmailId: null,
+  jobsSel: {},
   showAIPanel: false,
   raForm: {
     coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',
@@ -1060,7 +1061,9 @@ function renderJobs(){
     var cs=jobContacts(j.id);
     var primary=cs[0]||{};
     var stageColor={Unassigned:"#94a3b8",Assigned:"#3b82f6",Connected:"#8b5cf6",Rejected:"#ef4444",Future:"#f59e0b",Qualified:"#10b981"}[j.stage]||"#64748b";
-    return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer" onclick="openJob(\''+j.id+'\')">'+
+    var isChk=!!(STATE.jobsSel&&STATE.jobsSel[j.id]);
+    return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer;background:'+(isChk?'var(--accent-l)':'')+'" onclick="openJob(\''+j.id+'\')">'+
+      '<td style="padding:12px;width:36px" onclick="event.stopPropagation()"><input type="checkbox" '+(isChk?'checked':'')+' onchange="toggleJobSel(\''+j.id+'\',this.checked)" style="width:15px;height:15px;cursor:pointer;accent-color:var(--accent)"/></td>'+
       '<td style="padding:12px"><div style="font-weight:600;color:var(--text)">'+escHtml(j.company_name)+(j.is_duplicate?'<span style="margin-left:6px;background:#fef9c3;color:#b45309;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">DUP</span>':'')+(j.freshness==='Old'?'<span style="margin-left:6px;background:#fef2f2;color:#dc2626;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">OLD</span>':'')+(j.freshness==='New'?'<span style="margin-left:6px;background:#f0fdf4;color:#16a34a;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">NEW</span>':'')+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.company_ind)+'</div></td>'+
       '<td style="padding:12px"><div style="font-weight:500">'+escHtml(j.position)+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.location||"—")+'</div></td>'+
       '<td style="padding:12px"><div>'+escHtml((primary.first_name||"")+" "+(primary.last_name||""))+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(primary.email||"—")+'</div></td>'+
@@ -1070,7 +1073,7 @@ function renderJobs(){
     '</tr>';
   }).join("");
 
-  if(!rows)rows='<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">No leads found yet.</td></tr>';
+  if(!rows)rows='<tr><td colspan="9" style="padding:40px;text-align:center;color:var(--text3)">No leads found yet.</td></tr>';
 
   // RA sees form at top + their leads below; others see search/filter + table
   var isRA=(u.role==='ra');
@@ -1168,10 +1171,23 @@ function renderJobs(){
         '<input type="file" id="xl-import" accept=".xlsx,.xls" style="display:none" onchange="importXL(this)"/>'+
       '</div>'+
     '</div>'+
+    (Object.keys(STATE.jobsSel||{}).filter(function(k){return STATE.jobsSel[k];}).length?
+      '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--accent-l);border:1.5px solid var(--accent);border-radius:10px;margin-bottom:10px;flex-wrap:wrap">'+
+        '<div style="font-size:13px;font-weight:600;color:var(--accent)">'+Object.keys(STATE.jobsSel).filter(function(k){return STATE.jobsSel[k];}).length+' selected</div>'+
+        '<div style="flex:1"></div>'+
+        '<label style="font-size:12px;color:var(--text2);font-weight:500">Change stage to:</label>'+
+        '<select id="bulk-job-stage" style="padding:6px 10px;border:1.5px solid var(--border2);border-radius:7px;font-size:13px;background:var(--card);color:var(--text);cursor:pointer">'+
+          '<option value="">— Pick stage —</option>'+
+          ['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'].map(function(s){return'<option value="'+s+'">'+s+'</option>';}).join('')+
+        '</select>'+
+        '<button onclick="applyBulkJobStage()" style="background:var(--accent);color:#fff;border:0;padding:7px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">Apply</button>'+
+        '<button onclick="STATE.jobsSel={};render()" style="background:transparent;color:var(--text2);border:1px solid var(--border2);padding:7px 12px;border-radius:7px;font-size:12px;cursor:pointer">Clear</button>'+
+      '</div>'
+    :'')+
     '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden">'+
       '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
         '<thead style="background:var(--bg3);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
-          '<tr><th style="padding:12px;text-align:left">Company</th><th style="padding:12px;text-align:left">Position</th><th style="padding:12px;text-align:left">Primary Contact</th><th style="padding:12px;text-align:center">Contacts</th><th style="padding:12px;text-align:left">Stage</th><th style="padding:12px;text-align:left">Assigned BD</th><th style="padding:12px;text-align:left">Created</th></tr>'+
+          '<tr><th style="padding:12px;width:36px"><input type="checkbox" id="jobs-sel-all" onchange="toggleAllJobs(this.checked)" onclick="event.stopPropagation()" style="width:15px;height:15px;cursor:pointer;accent-color:var(--accent)"/></th><th style="padding:12px;text-align:left">Company</th><th style="padding:12px;text-align:left">Position</th><th style="padding:12px;text-align:left">Primary Contact</th><th style="padding:12px;text-align:center">Contacts</th><th style="padding:12px;text-align:left">Stage</th><th style="padding:12px;text-align:left">Assigned BD</th><th style="padding:12px;text-align:left">Created</th></tr>'+
         '</thead>'+
         '<tbody>'+rows+'</tbody>'+
       '</table>'+
@@ -5586,6 +5602,47 @@ window.loginAs=function(){showToast('Use email + password to log in','warning');
 window.doLogout=function(){STATE.user=null;STATE.token=null;localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');STATE.jobs=[];STATE.contacts=[];STATE.page='login';render();};
 
 // ── Jobs (wired) ───────────────────────────────
+window.toggleJobSel=function(id,v){
+  STATE.jobsSel=STATE.jobsSel||{};
+  STATE.jobsSel[id]=v;
+  render();
+};
+
+window.toggleAllJobs=function(v){
+  STATE.jobsSel=STATE.jobsSel||{};
+  var u=STATE.user;
+  var jobs=getMyJobs(u);
+  var f=STATE.jobsFilter;
+  var _tp=Math.max(1,Math.ceil(jobs.length/20));
+  var _pg=Math.min(STATE.leadsPage||0,_tp-1);
+  var pageJobs=jobs.slice(_pg*20,(_pg+1)*20);
+  pageJobs.forEach(function(j){STATE.jobsSel[j.id]=v;});
+  render();
+};
+
+window.applyBulkJobStage=function(){
+  var sel=document.getElementById('bulk-job-stage');
+  if(!sel||!sel.value){showToast('Pick a stage first','warning');return;}
+  var stage=sel.value;
+  var ids=Object.keys(STATE.jobsSel||{}).filter(function(k){return STATE.jobsSel[k];});
+  if(!ids.length){showToast('No leads selected','warning');return;}
+  apiPost('/jobs/bulk-stage',{job_ids:ids,stage:stage}).then(function(res){
+    showToast(res.updated+' leads moved to '+stage,'success');
+    STATE.jobsSel={};
+    // If changed to Unassigned, clear assigned_to_bd on local state
+    STATE.jobs=STATE.jobs.map(function(j){
+      if(ids.indexOf(j.id)>-1){
+        var updated=Object.assign({},j,{stage:stage});
+        if(stage==='Unassigned'){updated.assigned_to_bd=null;updated.assigned_bd_name='';updated.sending_email_id=null;}
+        return updated;
+      }
+      return j;
+    });
+    // Reload pending emails in case stage change affects them
+    return apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];render();});
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
 window.changeJobStage=function(jid,st){
   var j=jobById(jid);if(!j)return;var old=j.stage;j.stage=st;render();
   apiPut('/jobs/'+jid,{stage:st}).then(function(){showToast('Stage updated','success');}).catch(function(e){j.stage=old;showToast('Failed: '+e.message,'error');render();});
