@@ -641,7 +641,7 @@ app.patch('/contacts/:id/email-status', auth, async (req, res) => {
 app.get('/emails', auth, async (req, res) => {
   try {
     const { status } = req.query;
-    let query = supabase.from('emails').select(`*, contact:contacts(id,first_name,last_name,email,designation), job:jobs(id,position,company_id,company:companies(name,industry,location)), sender:users!sent_by(id,name,email)`).order('created_at', { ascending: false });
+    let query = supabase.from('emails').select(`*, contact:contacts(id,first_name,last_name,email,designation), job:jobs(id,position,company_id,company:companies(name,industry,location),sending_email:user_emails!sending_email_id(id,email_address,display_name)), sender:users!sent_by(id,name,email)`).order('created_at', { ascending: false });
     if (!hasRole(req, 'admin', 'ra_lead')) query = query.eq('sent_by', req.user.id);
     if (status) query = query.eq('status', status);
     const { data, error } = await query;
@@ -675,7 +675,7 @@ app.post('/emails/generate', auth, async (req, res) => {
     if (!hasRole(req, 'admin', 'ra_lead', 'bd', 'bd_lead')) return res.status(403).json({ error: 'Not allowed' });
     const { job_ids } = req.body;
     if (!Array.isArray(job_ids) || !job_ids.length) return res.status(400).json({ error: 'job_ids required' });
-    const { data: jobs, error: jErr } = await supabase.from('jobs').select('id, position, assigned_to_bd, company:companies(name,industry,location), contacts(*)').in('id', job_ids);
+    const { data: jobs, error: jErr } = await supabase.from('jobs').select('id, position, assigned_to_bd, sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name), company:companies(name,industry,location), contacts(*)').in('id', job_ids);
     if (jErr) throw jErr;
     const bdIds = [...new Set(jobs.map(j => j.assigned_to_bd).filter(Boolean))];
     const { data: bdUsers } = bdIds.length ? await supabase.from('users').select('id,name,email').in('id', bdIds) : { data: [] };
@@ -702,7 +702,8 @@ app.post('/emails/generate', auth, async (req, res) => {
             subject = `Staffing Partnership — ${job.company?.name || job.position}`;
             body = `Hi ${contact.first_name},\n\nI came across ${job.company?.name || 'your company'} and noticed you're hiring for ${job.position}. At Fute Global, we specialize in placing top-tier talent for roles exactly like this.\n\nWould you be open to a quick 15-minute call this week?\n\nBest regards,\n${bd.name}\nFute Global LLC`;
           }
-          emailsToInsert.push({ contact_id: contact.id, job_id: job.id, to_email: contact.email, subject, body, platform: 'Outlook', sent_by: bd.id, from_email: bd.email, status: 'pending' });
+          const sendingEmail = job.sending_email?.email_address || bd.email;
+          emailsToInsert.push({ contact_id: contact.id, job_id: job.id, to_email: contact.email, subject, body, platform: 'Outlook', sent_by: bd.id, from_email: sendingEmail, status: 'pending' });
           generated.push({ contact_id: contact.id, email: contact.email });
         } catch(e) { failed.push({ contact_id: contact.id, email: contact.email, error: e.message }); }
       }
