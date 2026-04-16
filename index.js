@@ -715,10 +715,10 @@ app.post('/emails/generate', auth, async (req, res) => {
 
 app.post('/emails/queue-all', auth, async (req, res) => {
   try {
-    // Fetch all pending emails for this user, joining job -> sending_email_id
+    // Fetch all pending emails for this user, joining job -> sending_email_id + platform
     const { data: pendingEmails, error: fetchErr } = await supabase
       .from('emails')
-      .select('id, to_email, subject, body, contact_id, job_id, job:jobs(sending_email_id)')
+      .select('id, to_email, subject, body, contact_id, job_id, from_email, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
       .eq('sent_by', req.user.id)
       .eq('status', 'pending');
     if (fetchErr) throw fetchErr;
@@ -732,11 +732,24 @@ app.post('/emails/queue-all', auth, async (req, res) => {
 
     for (const email of pendingEmails) {
       const userEmailId = email.job?.sending_email_id;
+      const sendingEmail = email.job?.sending_email;
+      const platform = (sendingEmail?.platform || 'Microsoft').toLowerCase();
+
       if (!userEmailId) {
         failed++;
-        failDetails.push({ id: email.id, to: email.to_email, error: 'No sending email configured for this job' });
+        failDetails.push({ id: email.id, to: email.to_email, from: email.from_email || '—', error: 'No sending email configured for this job' });
+        try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
         continue;
       }
+
+      // Gmail not yet supported — skip and mark failed
+      if (platform === 'gmail' || platform === 'google') {
+        failed++;
+        failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: 'Gmail sending not connected yet — please connect Google OAuth' });
+        try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
+        continue;
+      }
+
       try {
         const accessToken = await getMicrosoftToken(userEmailId);
         const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
@@ -766,7 +779,7 @@ app.post('/emails/queue-all', auth, async (req, res) => {
         sent++;
       } catch (e) {
         failed++;
-        failDetails.push({ id: email.id, to: email.to_email, error: e.message });
+        failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: e.message });
         // Mark as failed so it's visible in UI
         try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
       }
