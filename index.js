@@ -405,6 +405,34 @@ app.get('/jobs', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.get('/jobs/today-summary', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'Not allowed' });
+    const todayStr = today();
+    const { data: todayJobs, error } = await supabase
+      .from('jobs')
+      .select('id, position, industry, location, freshness, is_duplicate, timezone, company:companies(name, industry), contacts(id, designation)')
+      .gte('created_at', todayStr + 'T00:00:00Z')
+      .is('deleted_at', null);
+    if (error) throw error;
+    const total = todayJobs.length;
+    const duplicates = todayJobs.filter(j => j.is_duplicate).length;
+    const clean = total - duplicates;
+    const byIndustry = {};
+    todayJobs.forEach(j => { const ind = j.industry || j.company?.industry || 'Unknown'; byIndustry[ind] = (byIndustry[ind] || 0) + 1; });
+    const byFreshness = {};
+    todayJobs.forEach(j => { const f = j.freshness || 'Normal'; byFreshness[f] = (byFreshness[f] || 0) + 1; });
+    const byTimezone = {};
+    todayJobs.forEach(j => { const tz = j.timezone || 'EST'; byTimezone[tz] = (byTimezone[tz] || 0) + 1; });
+    const byPosition = {};
+    todayJobs.forEach(j => { byPosition[j.position] = (byPosition[j.position] || 0) + 1; });
+    const topPositions = Object.entries(byPosition).sort((a,b) => b[1]-a[1]).slice(0,5).map(([k,v]) => `${k} (${v})`);
+    const totalContacts = todayJobs.reduce((s, j) => s + (j.contacts?.length || 0), 0);
+    const { count: poolSize } = await supabase.from('jobs').select('id', { count: 'exact', head: true }).eq('stage', 'Unassigned').is('deleted_at', null);
+    res.json({ date: todayStr, total, clean, duplicates, totalContacts, byIndustry, byFreshness, byTimezone, topPositions, poolSize: poolSize || 0 });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/jobs/:id', auth, async (req, res) => {
   try {
     const { data, error } = await supabase.from('jobs').select(JOB_SELECT).eq('id', req.params.id).is('deleted_at', null).single();
@@ -1229,66 +1257,6 @@ app.post('/jobs/bulk-stage', auth, async (req, res) => {
     }
 
     res.json({ success: true, updated: job_ids.length, stage });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/jobs/today-summary', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'Not allowed' });
-    const todayStr = today();
-
-    // Jobs created today
-    const { data: todayJobs, error } = await supabase
-      .from('jobs')
-      .select('id, position, industry, location, freshness, is_duplicate, timezone, company:companies(name, industry), contacts(id, designation)')
-      .gte('created_at', todayStr + 'T00:00:00Z')
-      .is('deleted_at', null);
-    if (error) throw error;
-
-    const total = todayJobs.length;
-    const duplicates = todayJobs.filter(j => j.is_duplicate).length;
-    const clean = total - duplicates;
-
-    // Industry breakdown
-    const byIndustry = {};
-    todayJobs.forEach(j => {
-      const ind = j.industry || j.company?.industry || 'Unknown';
-      byIndustry[ind] = (byIndustry[ind] || 0) + 1;
-    });
-
-    // Freshness breakdown
-    const byFreshness = {};
-    todayJobs.forEach(j => {
-      const f = j.freshness || 'Normal';
-      byFreshness[f] = (byFreshness[f] || 0) + 1;
-    });
-
-    // Timezone breakdown
-    const byTimezone = {};
-    todayJobs.forEach(j => {
-      const tz = j.timezone || 'EST';
-      byTimezone[tz] = (byTimezone[tz] || 0) + 1;
-    });
-
-    // Top positions
-    const byPosition = {};
-    todayJobs.forEach(j => {
-      byPosition[j.position] = (byPosition[j.position] || 0) + 1;
-    });
-    const topPositions = Object.entries(byPosition).sort((a,b) => b[1]-a[1]).slice(0,5).map(([k,v]) => `${k} (${v})`);
-
-    // Contact count
-    const totalContacts = todayJobs.reduce((s, j) => s + (j.contacts?.length || 0), 0);
-
-    // Current pool size (all unassigned)
-    const { count: poolSize } = await supabase.from('jobs').select('id', { count: 'exact', head: true }).eq('stage', 'Unassigned').is('deleted_at', null);
-
-    res.json({
-      date: todayStr,
-      total, clean, duplicates, totalContacts,
-      byIndustry, byFreshness, byTimezone, topPositions,
-      poolSize: poolSize || 0
-    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
