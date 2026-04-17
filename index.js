@@ -762,6 +762,9 @@ app.post('/emails/send-selected', auth, async (req, res) => {
     if (fetchErr) throw fetchErr;
     if (!pendingEmails || !pendingEmails.length) return res.json({ success: true, sent: 0, failed: 0 });
 
+    // Respond immediately — send loop runs in background with delays
+    res.json({ success: true, queued: pendingEmails.length, message: `Sending ${pendingEmails.length} emails with random delays. Check Sent tab for progress.` });
+
     let sent = 0, failed = 0;
     const failDetails = [], sentContactIds = [], sentJobIds = [];
 
@@ -797,6 +800,8 @@ app.post('/emails/send-selected', auth, async (req, res) => {
         if (email.contact_id) sentContactIds.push(email.contact_id);
         if (email.job_id) sentJobIds.push(email.job_id);
         sent++;
+        // Random delay before next email
+        if (sent + failed < pendingEmails.length) await randomDelay(1, 120);
       } catch (e) {
         failed++;
         failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: e.message });
@@ -808,9 +813,8 @@ app.post('/emails/send-selected', auth, async (req, res) => {
     if (uniqueContactIds.length) await supabase.from('contacts').update({ email_sent_at: today() }).in('id', uniqueContactIds);
     const uniqueJobIds = [...new Set(sentJobIds.filter(Boolean))];
     for (const jid of uniqueJobIds) await logActivity(jid, null, req.user.id, 'emails_sent', `${sent} email(s) sent via Microsoft`, null, null);
-
-    res.json({ success: true, sent, failed, failDetails });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    console.log(`[SendSelected] Completed: ${sent} sent, ${failed} failed`);
+  } catch (err) { console.error('[SendSelected] Error:', err.message); }
 });
 
 app.post('/emails/queue-all', auth, async (req, res) => {
@@ -823,6 +827,10 @@ app.post('/emails/queue-all', auth, async (req, res) => {
       .eq('status', 'pending');
     if (fetchErr) throw fetchErr;
     if (!pendingEmails || !pendingEmails.length) return res.json({ success: true, sent: 0, failed: 0 });
+
+    // Respond immediately so browser doesn't time out — send loop runs in background
+    const totalCount = pendingEmails.length;
+    res.json({ success: true, queued: totalCount, message: `Sending ${totalCount} emails with random delays (up to 120s between each). Check Sent tab for progress.` });
 
     let sent = 0;
     let failed = 0;
@@ -877,6 +885,8 @@ app.post('/emails/queue-all', auth, async (req, res) => {
         if (email.contact_id) sentContactIds.push(email.contact_id);
         if (email.job_id) sentJobIds.push(email.job_id);
         sent++;
+        // Random delay before next email (skip delay after last email)
+        if (sent + failed < pendingEmails.length) await randomDelay(1, 120);
       } catch (e) {
         failed++;
         failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: e.message });
@@ -892,9 +902,8 @@ app.post('/emails/queue-all', auth, async (req, res) => {
     // Log activity per job
     const uniqueJobIds = [...new Set(sentJobIds.filter(Boolean))];
     for (const jid of uniqueJobIds) await logActivity(jid, null, req.user.id, 'emails_sent', `${sent} email(s) sent via Microsoft`, null, null);
-
-    res.json({ success: true, sent, failed, failDetails });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    console.log(`[SendAll] Completed: ${sent} sent, ${failed} failed`);
+  } catch (err) { console.error('[SendAll] Error:', err.message); }
 });
 
 app.delete('/emails/:id', auth, async (req, res) => {
@@ -1495,6 +1504,12 @@ app.get('/auth/microsoft/callback', async (req, res) => {
     res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'${err.message}'},'*');window.close();</scr`+`ipt>`);
   }
 });
+
+// Random delay between emails to avoid domain flagging (1–120 seconds)
+function randomDelay(minSec = 1, maxSec = 120) {
+  const ms = Math.floor(Math.random() * (maxSec - minSec + 1) + minSec) * 1000;
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 async function getMicrosoftToken(userEmailId) {
   const { data: tokenRow, error } = await supabase.from('microsoft_tokens').select('*').eq('user_email_id', userEmailId).single();
