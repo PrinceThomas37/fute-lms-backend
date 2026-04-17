@@ -1435,8 +1435,12 @@ function renderEmail(){
   var pendingHtml='';
   if(STATE.emailTab==='pending'){
     var totalRecipients=pending.length;
+    var selPendingCount=Object.keys(STATE.pendingEmailsSel||{}).filter(function(k){return STATE.pendingEmailsSel[k];}).length;
     var sendAllBtn='<div style="display:flex;gap:8px;align-items:center">'+
-      '<button onclick="openSendAllConfirm()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer'+(totalRecipients?'':';opacity:.4;cursor:not-allowed')+'"'+(totalRecipients?'':'disabled')+'>Send all pending ('+totalRecipients+')</button>'+
+      (selPendingCount?
+        '<button onclick="openSendSelectedConfirm()" style="background:var(--teal);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer">'+ico('send',13)+' Send selected ('+selPendingCount+')</button>'
+      :'')+
+      '<button onclick="openSendAllConfirm()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer'+(totalRecipients?'':';opacity:.4;cursor:not-allowed')+'"'+(totalRecipients?'':'disabled')+'>Send all ('+totalRecipients+')</button>'+
       '<button onclick="runMsDebug()" style="background:var(--bg);color:var(--text2);border:1px solid var(--border2);padding:7px 12px;border-radius:8px;font-size:12px;cursor:pointer" title="Debug Microsoft token status">🔍 Debug</button>'+
     '</div>';
 
@@ -4727,6 +4731,112 @@ window.runMsDebug=function(){
   }).catch(function(e){showToast('Debug failed: '+e.message,'error');});
 };
 
+// Update ratio total_to_send when count input changes
+window.updateAssignCount=function(val){
+  var n=parseInt(val,10);
+  if(!n||n<1)return;
+  var pool=STATE.distributePoolStats||{total:0};
+  n=Math.min(n,pool.total);
+  if(STATE._assignRatio){
+    STATE._assignRatio=Object.assign({},STATE._assignRatio,{total_to_send:n});
+    showRatioPreview(STATE._assignRatio);
+  } else {
+    // No ratio yet — trigger auto with this count
+    var managerId=STATE._assignManagerId;
+    var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
+    var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
+    var ps=Object.assign({},pool,{capacity:capacity});
+    apiPost('/distribute/generate-ratio',{priority_text:'balanced auto distribution',pool_stats:ps,manager_id:managerId}).then(function(ratio){
+      ratio.total_to_send=n;
+      showRatioPreview(ratio);
+    }).catch(function(){});
+  }
+};
+
+window.useAllLeads=function(){
+  var pool=STATE.distributePoolStats||{total:0};
+  var el=document.getElementById('assign-count');
+  if(el)el.value=pool.total;
+  updateAssignCount(pool.total);
+};
+
+// Send only selected pending emails
+window.openSendSelectedConfirm=function(){
+  var ids=Object.keys(STATE.pendingEmailsSel||{}).filter(function(k){return STATE.pendingEmailsSel[k];});
+  if(!ids.length){showToast('Select emails first','warning');return;}
+  var selected=ids.map(function(id){return (STATE.pendingEmails||[]).find(function(e){return e.id===id;});}).filter(Boolean);
+  var now=new Date();
+  var dateStr=now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  var timeStr=now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  STATE.modal='<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Send selected emails</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div style="padding:16px;background:var(--teal-l);border:1px solid rgba(13,148,136,.2);border-radius:var(--r2);margin-bottom:12px">'+
+        '<div style="font-size:28px;font-weight:700;color:var(--teal);margin-bottom:4px">'+selected.length+'</div>'+
+        '<div style="font-size:13px;color:var(--text2)">selected emails will be sent</div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:4px">'+dateStr+' · '+timeStr+'</div>'+
+      '</div>'+
+      '<div style="font-size:13px;color:var(--text2)">Only the <strong>'+selected.length+' checked emails</strong> will be sent via Microsoft Outlook. The rest remain pending.</div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="submitSendSelected()" style="background:var(--teal)">Confirm & Send</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+
+window.submitSendSelected=function(){
+  var ids=Object.keys(STATE.pendingEmailsSel||{}).filter(function(k){return STATE.pendingEmailsSel[k];});
+  closeModal();
+  showToast('Sending '+ids.length+' emails via Microsoft Outlook…','info');
+  apiPost('/emails/send-selected',{email_ids:ids}).then(function(res){
+    return Promise.all([
+      apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];}),
+      apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];})
+    ]).then(function(){
+      STATE.pendingEmailsSel={};
+      if(res.failed&&res.failed>0){
+        showToast(res.sent+' sent · '+res.failed+' failed','warning');
+      } else {
+        showToast(res.sent+' emails sent successfully','success');
+      }
+      // Show results modal same as send all
+      var failRows=(res.failDetails||[]).map(function(f){
+        return '<tr style="border-bottom:1px solid var(--border)">'+
+          '<td style="padding:8px 10px;font-size:12px">'+htmlEsc(f.to||'')+'</td>'+
+          '<td style="padding:8px 10px;font-size:11px;color:var(--text3)">'+htmlEsc(f.from||'—')+'</td>'+
+          '<td style="padding:8px 10px;font-size:12px;color:var(--red)">'+htmlEsc(f.error||'')+'</td>'+
+        '</tr>';
+      }).join('');
+      STATE.modal='<div class="modal modal-w600">'+
+        '<div class="mh"><div class="mt">Send Results</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+        '<div class="mb_">'+
+          '<div style="display:flex;gap:12px;margin-bottom:16px">'+
+            '<div style="flex:1;padding:14px;background:var(--green-l);border:1px solid #bbf7d0;border-radius:var(--r2);text-align:center">'+
+              '<div style="font-size:28px;font-weight:700;color:var(--green)">'+(res.sent||0)+'</div>'+
+              '<div style="font-size:12px;color:var(--green);margin-top:2px">Sent successfully</div>'+
+            '</div>'+
+            '<div style="flex:1;padding:14px;background:'+(res.failed?'var(--red-l)':'var(--bg)')+';border:1px solid '+(res.failed?'#fecaca':'var(--border)')+';border-radius:var(--r2);text-align:center">'+
+              '<div style="font-size:28px;font-weight:700;color:'+(res.failed?'var(--red)':'var(--text3)')+'">'+(res.failed||0)+'</div>'+
+              '<div style="font-size:12px;color:'+(res.failed?'var(--red)':'var(--text3)')+';margin-top:2px">Failed</div>'+
+            '</div>'+
+          '</div>'+
+          (res.failed?
+            '<div style="border:1px solid var(--border);border-radius:var(--r);overflow:hidden;max-height:240px;overflow-y:auto">'+
+            '<table style="width:100%;border-collapse:collapse">'+
+            '<thead><tr style="background:var(--bg)"><th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text3)">To</th><th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text3)">From</th><th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text3)">Reason</th></tr></thead>'+
+            '<tbody>'+failRows+'</tbody></table></div>'
+          :
+            '<div style="padding:12px;background:var(--green-l);border-radius:var(--r2);font-size:13px;color:var(--green);text-align:center">🎉 All selected emails sent!</div>')+
+        '</div>'+
+        '<div class="mf"><button class="btn btn-primary" onclick="closeModal()">Done</button></div>'+
+      '</div>';
+      render();
+    });
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
 window.openSendAllConfirm=function(){
   var pending=STATE.pendingEmails||[];
   if(!pending.length){showToast('No pending emails','warning');return;}
@@ -4939,6 +5049,14 @@ window.openAssignToManager=function(managerId){
         '<label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:6px">Describe your priorities</label>'+
         '<textarea id="assign-priority-text" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:13px;min-height:80px;resize:vertical;font-family:inherit" placeholder="e.g. Focus on old leads first, prioritise healthcare and legal, send mostly to EST timezone, exclude duplicates..."></textarea>'+
         '<button onclick="generateAssignRatio()" style="margin-top:8px;background:var(--purple);color:#fff;border:0;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer" id="gen-ratio-btn">\u2728 Generate ratio with AI</button>'+
+      '</div>'+
+      '<div style="margin-top:12px;margin-bottom:4px">'+
+        '<label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:6px">How many leads to assign?</label>'+
+        '<div style="display:flex;align-items:center;gap:10px">'+
+          '<input type="number" id="assign-count" min="1" max="'+pool.total+'" placeholder="e.g. 10" oninput="updateAssignCount(this.value)" style="width:110px;padding:8px 12px;border:1.5px solid var(--border2);border-radius:8px;font-size:14px;font-weight:600;text-align:center;background:var(--card);color:var(--text)"/>'+
+          '<span style="font-size:12px;color:var(--text3)">of '+pool.total+' available</span>'+
+          '<button onclick="useAllLeads()" style="font-size:12px;padding:6px 12px;border:1px solid var(--border2);background:var(--bg);border-radius:7px;cursor:pointer;color:var(--text2)">Use all</button>'+
+        '</div>'+
       '</div>'+
       '<div id="assign-ratio-preview" style="display:none"></div>'+
     '</div>'+
