@@ -1466,7 +1466,8 @@ function renderEmail(){
             '<div class="mt1"><strong>Subject:</strong> '+htmlEsc(pe.subject||'')+'</div>'+
           '</div>'+
           '<div style="padding:14px;font-size:13px;line-height:1.7;white-space:pre-wrap;max-height:360px;overflow-y:auto">'+htmlEsc(pe.body||'')+'</div>'+
-          '<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">'+
+          '<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'+
+            '<button class="btn btn-sm" onclick="deletePendingEmail(\''+pe.id+'\')" style="color:var(--red);border:1px solid var(--red);background:transparent;padding:5px 11px;border-radius:7px;font-size:12px;cursor:pointer">🗑 Delete</button>'+
             '<button class="btn btn-outline btn-sm" onclick="openEditPendingEmail(\''+pe.id+'\')">✒ Edit email</button>'+
           '</div>'+
           '</div>'+
@@ -4799,6 +4800,16 @@ window.submitSendAll=function(){
       '</div>';
       render();
     });
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.deletePendingEmail=function(id){
+  if(!confirm('Delete this pending email?'))return;
+  apiFetch('DELETE','/emails/'+id).then(function(){
+    STATE.pendingEmails=(STATE.pendingEmails||[]).filter(function(e){return e.id!==id;});
+    STATE.previewPendingId=null;
+    showToast('Email deleted','success');
+    render();
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
