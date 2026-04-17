@@ -5061,11 +5061,8 @@ window.getTodaySummary=function(){
       return;
     }
 
-    // Build a structured prompt for Claude to write a natural language summary
-    var prompt = 'You are an assistant for Fute Global LLC, a staffing and recruitment firm. Write a short natural language daily briefing for the BD team based on today\'s lead import data. Warm, clear, professional tone — like a manager summarising in a message. No bullet points or lists. Plain prose, 3-4 sentences. Include: leads imported, top industries, freshness, duplicates flagged, and total pool size.\n\nData: Date: '+data.date+', Total imported: '+data.total+', Clean: '+data.clean+', Duplicates: '+data.duplicates+', Contacts: '+data.totalContacts+', Industries: '+JSON.stringify(data.byIndustry)+', Freshness: '+JSON.stringify(data.byFreshness)+', Top positions: '+data.topPositions.join(', ')+', Total unassigned pool: '+data.poolSize;
-
-    // Call Claude AI via backend
-    apiPost('/ai/generate-summary',{prompt:prompt}).then(function(res){
+    // Call Claude AI via backend — prompt is built server-side
+    apiPost('/ai/generate-summary',{data:data}).then(function(res){
       var summaryText=res.summary||'Summary unavailable.';
       STATE.modal='<div class="modal modal-w540">'+
         '<div class="mh"><div class="mt">📋 Today\'s Lead Summary</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
