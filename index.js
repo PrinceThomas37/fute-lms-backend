@@ -709,6 +709,9 @@ app.post('/emails/generate', auth, async (req, res) => {
       for (const contact of contacts) {
         try {
           let subject, body;
+          // sender = display name on the sending Outlook account (what recipient sees)
+          // Falls back to BD user name if no display name set
+          const senderDisplayName = job.sending_email?.display_name || bd.name || '';
           const vars = {
             fn: contact.first_name || '',
             ln: contact.last_name || '',
@@ -717,7 +720,7 @@ app.post('/emails/generate', auth, async (req, res) => {
             ind: job.company?.industry || '',
             loc: job.company?.location || '',
             desig: contact.designation || 'Hiring Manager',
-            sender: bd.name || ''
+            sender: senderDisplayName
           };
 
           if (savedSubj && savedBody) {
@@ -726,7 +729,7 @@ app.post('/emails/generate', auth, async (req, res) => {
             body = fillTmpl(savedBody, vars);
           } else if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== 'your_anthropic_api_key_here') {
             // No saved template — use AI to generate
-            const prompt = `Write a hyper-personalized cold outreach email from ${bd.name} at Fute Global LLC (a staffing/recruitment firm) to ${contact.first_name} ${contact.last_name || ''}, ${contact.designation || 'Hiring Manager'} at ${job.company?.name || ''} (${job.company?.industry || ''}, ${job.company?.location || ''}).\n\nThey are hiring for: ${job.position}\n\nInstructions: 3 short paragraphs, warm but professional tone, no fluff, end with a clear call to action.\n\nFormat strictly as:\nSubject: [subject line]\n\n[email body]`;
+            const prompt = `Write a hyper-personalized cold outreach email from ${senderDisplayName} at Fute Global LLC (a staffing/recruitment firm) to ${contact.first_name} ${contact.last_name || ''}, ${contact.designation || 'Hiring Manager'} at ${job.company?.name || ''} (${job.company?.industry || ''}, ${job.company?.location || ''}).\n\nThey are hiring for: ${job.position}\n\nInstructions: 3 short paragraphs, warm but professional tone, no fluff, end with a clear call to action.\n\nFormat strictly as:\nSubject: [subject line]\n\n[email body]`;
             const aiResp = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 500, messages: [{ role: 'user', content: prompt }] }) });
             const aiData = await aiResp.json();
             const text = aiData.content?.[0]?.text || '';
@@ -1405,7 +1408,8 @@ async function runFollowupEngine() {
         const contact = fu.contact;
         if (!contact?.email) continue;
         const bdId = job.assigned_to_bd;
-        const senderName = bdMap[bdId] || 'Fute Global';
+        // Use sending email display_name so signature matches the From address
+        const senderName = job.sending_email?.display_name || bdMap[bdId] || 'Fute Global';
         const vars = { fn: contact.first_name || '', ln: contact.last_name || '', company: job.company?.name || '', pos: job.position || '', desig: contact.designation || '', ind: job.company?.industry || '', loc: job.company?.location || '', sender: senderName };
         const subjTmpl = isFu2
           ? getBDTemplate(bdId, 'tmpl_fu2_subject', 'template_fu2_subject', 'Re: Staffing Partnership — {{company}}')
