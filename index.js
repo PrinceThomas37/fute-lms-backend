@@ -1324,15 +1324,37 @@ app.post('/ai/generate-email', auth, async (req, res) => {
 app.post('/ai/generate-summary', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'Not allowed' });
-    const { prompt } = req.body;
-    if (!prompt) return res.status(400).json({ error: 'prompt required' });
+    const { data } = req.body;
+    if (!data) return res.status(400).json({ error: 'data required' });
+
     if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY === 'your_anthropic_api_key_here') {
       return res.json({ summary: 'AI summary unavailable — no API key configured.' });
     }
+
+    // Build top industries string
+    const indEntries = Object.entries(data.byIndustry || {}).sort((a,b) => b[1]-a[1]);
+    const topInds = indEntries.slice(0,4).map(([k,v]) => `${k} (${v})`).join(', ');
+    const freshEntries = Object.entries(data.byFreshness || {});
+    const freshStr = freshEntries.map(([k,v]) => `${v} ${k}`).join(', ');
+    const tzEntries = Object.entries(data.byTimezone || {}).sort((a,b) => b[1]-a[1]);
+    const topTz = tzEntries.slice(0,3).map(([k,v]) => `${k} (${v})`).join(', ');
+
+    const prompt = `You are writing a daily lead import briefing for the BD (Business Development) team at Fute Global LLC, a staffing/recruitment firm. Write a warm, professional 3-4 sentence summary in plain prose — no bullet points, no headers, no lists. Make it feel like a helpful manager giving context to the team before they start their day.
+
+Cover these points naturally:
+- Total leads imported today (${data.total}) with ${data.clean} clean and ${data.duplicates > 0 ? data.duplicates + ' flagged as duplicates' : 'no duplicates'}
+- Top industries: ${topInds || 'mixed industries'}
+- Freshness mix: ${freshStr || 'normal'}
+- Timezone spread: ${topTz || 'EST'}
+- Top positions being hired: ${(data.topPositions || []).slice(0,3).join(', ')}
+- Total unassigned pool now has ${data.poolSize} leads ready to work
+
+Keep it concise, informative and actionable. End with one sentence about what the team should focus on today based on the data.`;
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 300, messages: [{ role: 'user', content: prompt }] })
+      body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 400, messages: [{ role: 'user', content: prompt }] })
     });
     const aiData = await response.json();
     const summary = aiData.content?.[0]?.text?.trim() || 'Summary unavailable.';
