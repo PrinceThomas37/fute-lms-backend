@@ -4816,51 +4816,25 @@ window.openSendSelectedConfirm=function(){
 window.submitSendSelected=function(){
   var ids=Object.keys(STATE.pendingEmailsSel||{}).filter(function(k){return STATE.pendingEmailsSel[k];});
   closeModal();
-  showToast('Sending '+ids.length+' emails via Microsoft Outlook…','info');
+  showToast('Queuing '+ids.length+' emails with random delays…','info');
   apiPost('/emails/send-selected',{email_ids:ids}).then(function(res){
+    STATE.pendingEmailsSel={};
+    STATE.modal='<div class="modal modal-w480">'+
+      '<div class="mh"><div class="mt">Sending in progress</div></div>'+
+      '<div class="mb_">'+
+        '<div style="padding:20px;text-align:center">'+
+          '<div style="font-size:36px;margin-bottom:12px">📤</div>'+
+          '<div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px">'+(res.queued||ids.length)+' emails queued</div>'+
+          '<div style="font-size:13px;color:var(--text2);line-height:1.6">Emails are being sent with a random delay of <strong>1–120 seconds</strong> between each one to protect your domain reputation.</div>'+
+          '<div style="font-size:12px;color:var(--text3);margin-top:12px">Check the <strong>Sent</strong> tab to see emails as they arrive.</div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="mf"><button class="btn btn-primary" onclick="closeModal();refreshPendingAndSent()">Got it</button></div>'+
+    '</div>';
     return Promise.all([
       apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];}),
       apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];})
-    ]).then(function(){
-      STATE.pendingEmailsSel={};
-      if(res.failed&&res.failed>0){
-        showToast(res.sent+' sent · '+res.failed+' failed','warning');
-      } else {
-        showToast(res.sent+' emails sent successfully','success');
-      }
-      // Show results modal same as send all
-      var failRows=(res.failDetails||[]).map(function(f){
-        return '<tr style="border-bottom:1px solid var(--border)">'+
-          '<td style="padding:8px 10px;font-size:12px">'+htmlEsc(f.to||'')+'</td>'+
-          '<td style="padding:8px 10px;font-size:11px;color:var(--text3)">'+htmlEsc(f.from||'—')+'</td>'+
-          '<td style="padding:8px 10px;font-size:12px;color:var(--red)">'+htmlEsc(f.error||'')+'</td>'+
-        '</tr>';
-      }).join('');
-      STATE.modal='<div class="modal modal-w600">'+
-        '<div class="mh"><div class="mt">Send Results</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
-        '<div class="mb_">'+
-          '<div style="display:flex;gap:12px;margin-bottom:16px">'+
-            '<div style="flex:1;padding:14px;background:var(--green-l);border:1px solid #bbf7d0;border-radius:var(--r2);text-align:center">'+
-              '<div style="font-size:28px;font-weight:700;color:var(--green)">'+(res.sent||0)+'</div>'+
-              '<div style="font-size:12px;color:var(--green);margin-top:2px">Sent successfully</div>'+
-            '</div>'+
-            '<div style="flex:1;padding:14px;background:'+(res.failed?'var(--red-l)':'var(--bg)')+';border:1px solid '+(res.failed?'#fecaca':'var(--border)')+';border-radius:var(--r2);text-align:center">'+
-              '<div style="font-size:28px;font-weight:700;color:'+(res.failed?'var(--red)':'var(--text3)')+'">'+(res.failed||0)+'</div>'+
-              '<div style="font-size:12px;color:'+(res.failed?'var(--red)':'var(--text3)')+';margin-top:2px">Failed</div>'+
-            '</div>'+
-          '</div>'+
-          (res.failed?
-            '<div style="border:1px solid var(--border);border-radius:var(--r);overflow:hidden;max-height:240px;overflow-y:auto">'+
-            '<table style="width:100%;border-collapse:collapse">'+
-            '<thead><tr style="background:var(--bg)"><th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text3)">To</th><th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text3)">From</th><th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text3)">Reason</th></tr></thead>'+
-            '<tbody>'+failRows+'</tbody></table></div>'
-          :
-            '<div style="padding:12px;background:var(--green-l);border-radius:var(--r2);font-size:13px;color:var(--green);text-align:center">🎉 All selected emails sent!</div>')+
-        '</div>'+
-        '<div class="mf"><button class="btn btn-primary" onclick="closeModal()">Done</button></div>'+
-      '</div>';
-      render();
-    });
+    ]).then(function(){render();});
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
@@ -4890,10 +4864,23 @@ window.openSendAllConfirm=function(){
 
 window.submitSendAll=function(){
   closeModal();
-  // Show sending progress toast
-  showToast('Sending emails via Microsoft Outlook…','info');
+  showToast('Sending emails via Microsoft Outlook with random delays…','info');
   apiPost('/emails/queue-all',{}).then(function(res){
-    // Reload pending (sent/failed ones are gone)
+    // Backend responds immediately — emails send in background
+    // Show progress modal and start polling
+    STATE.modal='<div class="modal modal-w480">'+
+      '<div class="mh"><div class="mt">Sending in progress</div></div>'+
+      '<div class="mb_">'+
+        '<div style="padding:20px;text-align:center">'+
+          '<div style="font-size:36px;margin-bottom:12px">📤</div>'+
+          '<div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px)">'+(res.queued||0)+' emails queued</div>'+
+          '<div style="font-size:13px;color:var(--text2);line-height:1.6">Emails are being sent with a random delay of <strong>1–120 seconds</strong> between each one to protect your domain reputation.</div>'+
+          '<div style="font-size:12px;color:var(--text3);margin-top:12px">Check the <strong>Sent</strong> tab to see emails as they arrive.</div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="mf"><button class="btn btn-primary" onclick="closeModal();refreshPendingAndSent()">Got it</button></div>'+
+    '</div>';
+    render();
     return Promise.all([
       apiGet('/emails?status=pending'),
       apiGet('/emails?status=sent')
@@ -4952,6 +4939,13 @@ window.submitSendAll=function(){
       render();
     });
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.refreshPendingAndSent=function(){
+  Promise.all([
+    apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];}),
+    apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];})
+  ]).then(function(){render();}).catch(function(){});
 };
 
 window.togglePendingEmailSel=function(id,v){
