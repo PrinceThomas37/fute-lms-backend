@@ -511,6 +511,7 @@ var STATE = {
   composeFromEmailId: null,
   jobsSel: {},
   pendingEmailsSel: {},
+  pendingPage: 0,
   showAIPanel: false,
   raForm: {
     coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',
@@ -1444,7 +1445,12 @@ function renderEmail(){
       '<button onclick="runMsDebug()" style="background:var(--bg);color:var(--text2);border:1px solid var(--border2);padding:7px 12px;border-radius:8px;font-size:12px;cursor:pointer" title="Debug Microsoft token status">🔍 Debug</button>'+
     '</div>';
 
-    var pendingRows=pending.map(function(e,idx){
+    var _pPage=Math.max(0,STATE.pendingPage||0);
+    var _pTotal=Math.max(1,Math.ceil(pending.length/20));
+    _pPage=Math.min(_pPage,_pTotal-1);
+    var pagePending=pending.slice(_pPage*20,(_pPage+1)*20);
+
+    var pendingRows=pagePending.map(function(e,idx){
       var isSelected=STATE.previewPendingId===e.id;
       var jname=(e.job&&e.job.position?e.job.position:'')+(e.job&&e.job.company?(' · '+e.job.company.name):'');
       var fu=e.followup_type;
@@ -1457,6 +1463,26 @@ function renderEmail(){
       return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer;background:'+rowBg+'" onclick="previewPendingEmail(\''+e.id+'\')">'+'<td style="padding:10px 12px;width:36px" onclick="event.stopPropagation()"><input type="checkbox" '+(isPendingSel?'checked':'')+' onchange="togglePendingEmailSel(\''+e.id+'\',this.checked)" style="width:15px;height:15px;cursor:pointer;accent-color:var(--red)"/></td>'+'<td style="padding:10px 12px;font-size:13px"><div style="font-weight:500">'+htmlEsc(e.to_email)+fuBadge+'</div>'+'<div style="font-size:11px;color:var(--text3)">'+htmlEsc((e.contact&&e.contact.first_name?e.contact.first_name+' '+(e.contact.last_name||''):''))+'</div></td>'+'<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+htmlEsc(jname)+'</td>'+'<td style="padding:10px 12px;font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subject||'')+'</td>'+'<td style="padding:10px 12px;white-space:nowrap">'+platBadge+'</td>'+'</tr>';
     }).join('');
     if(!pendingRows)pendingRows='<tr><td colspan="5" style="padding:40px;text-align:center"><div style="color:var(--text3);margin-bottom:12px">No pending emails yet.</div><button onclick="generatePendingEmails()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer">⚡ Generate emails for assigned leads</button></td></tr>';
+
+    // Pagination bar — show up to 4 page numbers + prev/next
+    var paginationBar='';
+    if(_pTotal>1){
+      var pageNums='';
+      var startPage=Math.max(0,Math.min(_pPage-1,_pTotal-4));
+      var endPage=Math.min(_pTotal-1,startPage+3);
+      for(var pn=startPage;pn<=endPage;pn++){
+        var isAct=pn===_pPage;
+        pageNums+='<button onclick="STATE.pendingPage='+pn+';STATE.previewPendingId=null;render()" style="padding:5px 11px;border:1px solid '+(isAct?'var(--accent)':'var(--border2)')+';border-radius:7px;background:'+(isAct?'var(--accent)':'var(--card)')+';color:'+(isAct?'#fff':'var(--text2)')+';font-size:12px;font-weight:'+(isAct?'700':'400')+';cursor:pointer">'+( pn+1)+'</button>';
+      }
+      paginationBar='<div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;flex-wrap:wrap;gap:8px">'+
+        '<div style="font-size:12px;color:var(--text3)">'+pending.length+' email'+(pending.length!==1?'s':'')+' · page '+(_pPage+1)+' of '+_pTotal+'</div>'+
+        '<div style="display:flex;gap:5px;align-items:center">'+
+          '<button onclick="STATE.pendingPage=Math.max(0,(STATE.pendingPage||0)-1);STATE.previewPendingId=null;render()" style="padding:5px 11px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer" '+(_pPage===0?'disabled':'')+'>← Prev</button>'+
+          pageNums+
+          '<button onclick="STATE.pendingPage=Math.min('+(  _pTotal-1)+',( STATE.pendingPage||0)+1);STATE.previewPendingId=null;render()" style="padding:5px 11px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer" '+(_pPage>=_pTotal-1?'disabled':'')+'>Next →</button>'+
+        '</div>'+
+      '</div>';
+    }
 
     // Preview panel
     var previewPanel='';
@@ -1509,6 +1535,7 @@ function renderEmail(){
         '</div>'+
         previewPanel+
       '</div>'+
+      paginationBar+
     '</div>';
   }
 
@@ -2459,7 +2486,7 @@ window.exportXL=function(){
   }catch(e){showToast("Export failed: "+e.message,"error");}
 }
 
-window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;STATE.composeFromEmailId=null;STATE.pendingEmailsSel={};STATE.previewPendingId=null;render();}
+window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;STATE.composeFromEmailId=null;STATE.pendingEmailsSel={};STATE.previewPendingId=null;STATE.pendingPage=0;render();}
 
 // ── Manager Users functions ──────────────────────────────────
 window.loadUserEmails=function(userId){
@@ -4935,7 +4962,10 @@ window.togglePendingEmailSel=function(id,v){
 
 window.toggleAllPendingEmails=function(v){
   STATE.pendingEmailsSel=STATE.pendingEmailsSel||{};
-  (STATE.pendingEmails||[]).forEach(function(e){STATE.pendingEmailsSel[e.id]=v;});
+  // Only select/deselect the current page
+  var pg=STATE.pendingPage||0;
+  var pagePending=(STATE.pendingEmails||[]).slice(pg*20,(pg+1)*20);
+  pagePending.forEach(function(e){STATE.pendingEmailsSel[e.id]=v;});
   render();
 };
 
