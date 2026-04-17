@@ -5040,6 +5040,83 @@ function refreshPoolStats(){
   }).catch(function(){});
 }
 
+window.getTodaySummary=function(){
+  // Show loading modal
+  STATE.modal='<div class="modal modal-w540">'+
+    '<div class="mh"><div class="mt">📋 Today's Lead Summary</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_" style="text-align:center;padding:30px">'+
+      '<div style="font-size:13px;color:var(--text3)">✨ Generating summary\u2026</div>'+
+    '</div>'+
+  '</div>';
+  render();
+
+  apiGet('/jobs/today-summary').then(function(data){
+    if(!data.total){
+      STATE.modal='<div class="modal modal-w540">'+
+        '<div class="mh"><div class="mt">📋 Today's Lead Summary</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+        '<div class="mb_"><div style="padding:20px;text-align:center;color:var(--text3);font-size:13px">No leads imported today yet.</div></div>'+
+        '<div class="mf"><button class="btn btn-primary" onclick="closeModal()">Close</button></div>'+
+      '</div>';
+      render();
+      return;
+    }
+
+    // Build a structured prompt for Claude to write a natural language summary
+    var prompt = 'You are an assistant for Fute Global LLC, a staffing and recruitment firm. Write a short, natural language daily briefing for the BD (Business Development) team based on today's lead import data. The tone should be warm, clear and professional — like a team manager summarising the day's work in a message. Do NOT use bullet points, headers, or lists. Write in plain prose, 3-4 sentences max. Include: how many leads came in, the top industries, freshness (new/normal/old), any duplicates flagged, and how many total leads are now waiting in the unassigned pool ready to be worked.
+
+Data:
+- Date: '+data.date+'
+- Total leads imported today: '+data.total+'
+- Clean leads: '+data.clean+', Duplicates flagged: '+data.duplicates+'
+- Total contacts: '+data.totalContacts+'
+- Industry breakdown: '+JSON.stringify(data.byIndustry)+'
+- Freshness: '+JSON.stringify(data.byFreshness)+'
+- Timezones: '+JSON.stringify(data.byTimezone)+'
+- Top positions: '+data.topPositions.join(', ')+'
+- Total unassigned pool (all time): '+data.poolSize;
+
+    // Call Claude AI via backend
+    apiPost('/ai/generate-summary',{prompt:prompt}).then(function(res){
+      var summaryText=res.summary||'Summary unavailable.';
+      STATE.modal='<div class="modal modal-w540">'+
+        '<div class="mh"><div class="mt">📋 Today's Lead Summary</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+        '<div class="mb_">'+
+          '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">'+data.date+' · '+data.total+' leads imported</div>'+
+          '<div style="background:var(--purple-l);border:1px solid rgba(124,58,237,.2);border-radius:var(--r2);padding:16px 18px;font-size:14px;line-height:1.8;color:var(--text)">'+
+            htmlEsc(summaryText)+
+          '</div>'+
+          '<div style="display:flex;gap:16px;margin-top:14px;flex-wrap:wrap">'+
+            '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:10px 14px;flex:1;min-width:120px;text-align:center">'+
+              '<div style="font-size:22px;font-weight:700;color:var(--accent)">'+data.total+'</div>'+
+              '<div style="font-size:11px;color:var(--text3);margin-top:2px">Today's imports</div>'+
+            '</div>'+
+            '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:10px 14px;flex:1;min-width:120px;text-align:center">'+
+              '<div style="font-size:22px;font-weight:700;color:var(--green)">'+data.clean+'</div>'+
+              '<div style="font-size:11px;color:var(--text3);margin-top:2px">Clean leads</div>'+
+            '</div>'+
+            (data.duplicates?'<div style="background:var(--amber-l);border:1px solid rgba(217,119,6,.2);border-radius:var(--r2);padding:10px 14px;flex:1;min-width:120px;text-align:center">'+
+              '<div style="font-size:22px;font-weight:700;color:var(--amber)">'+data.duplicates+'</div>'+
+              '<div style="font-size:11px;color:var(--text3);margin-top:2px">Duplicates flagged</div>'+
+            '</div>':'')+
+            '<div style="background:var(--accent-l);border:1px solid rgba(37,99,235,.15);border-radius:var(--r2);padding:10px 14px;flex:1;min-width:120px;text-align:center">'+
+              '<div style="font-size:22px;font-weight:700;color:var(--accent)">'+data.poolSize+'</div>'+
+              '<div style="font-size:11px;color:var(--text3);margin-top:2px">Total in pool</div>'+
+            '</div>'+
+          '</div>'+
+        '</div>'+
+        '<div class="mf"><button class="btn btn-primary" onclick="closeModal()">Done</button></div>'+
+      '</div>';
+      render();
+    }).catch(function(e){
+      showToast('Failed to generate summary: '+e.message,'error');
+      closeModal();
+    });
+  }).catch(function(e){
+    showToast('Failed to fetch data: '+e.message,'error');
+    closeModal();
+  });
+};
+
 window.openAssignToManager=function(managerId){
   var m=STATE.users.find(function(u){return u.id===managerId;})||{name:'Manager'};
   var pool=STATE.distributePoolStats||{total:0};
@@ -5571,7 +5648,10 @@ function renderAssignLeads(){
     '<div class="ph"><div class="flex jb aic">'+
       '<div><div class="ptitle">Assign Leads</div>'+
         '<div class="psub">'+poolStats.total+' unassigned leads in pool \u00b7 '+managers.length+' managers</div></div>'+
-      '<button onclick="refreshPoolStats()" style="background:transparent;border:1px solid var(--border);color:var(--text2);padding:7px 13px;border-radius:8px;font-size:12px;cursor:pointer">\u21bb Refresh pool</button>'+
+      '<div style="display:flex;gap:8px">'+
+        '<button onclick="getTodaySummary()" style="background:var(--purple);color:#fff;border:0;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">📋 Today's lead summary</button>'+
+        '<button onclick="refreshPoolStats()" style="background:transparent;border:1px solid var(--border);color:var(--text2);padding:7px 13px;border-radius:8px;font-size:12px;cursor:pointer">\u21bb Refresh pool</button>'+
+      '</div>'+
     '</div></div>'+
     poolBar+
     '<div style="font-weight:600;font-size:13px;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Managers</div>'+
