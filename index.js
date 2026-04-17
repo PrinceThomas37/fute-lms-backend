@@ -682,8 +682,17 @@ app.post('/emails/generate', auth, async (req, res) => {
     const bdMap = {};
     (bdUsers || []).forEach(u => { bdMap[u.id] = u; });
 
-    // Load saved templates for all BD users involved
+    // Pre-fetch primary sending email for each BD (used as fallback if job.sending_email_id is null)
     const allBdIds = [...new Set([req.user.id, ...bdIds])];
+    const { data: bdEmailRows } = allBdIds.length
+      ? await supabase.from('user_emails').select('id,user_id,email_address,display_name,is_primary').eq('is_active', true).in('user_id', allBdIds).order('is_primary', { ascending: false })
+      : { data: [] };
+    const bdPrimaryEmailMap = {};
+    (bdEmailRows || []).forEach(e => {
+      if (!bdPrimaryEmailMap[e.user_id]) bdPrimaryEmailMap[e.user_id] = e; // first = primary (ordered desc)
+    });
+
+    // Load saved templates for all BD users involved
     const tmplKeys = allBdIds.flatMap(id => [
       `u_${id}_tmpl_o1_subject`, `u_${id}_tmpl_o1_body`
     ]);
@@ -710,8 +719,8 @@ app.post('/emails/generate', auth, async (req, res) => {
         try {
           let subject, body;
           // sender = display name on the sending Outlook account (what recipient sees)
-          // Falls back to BD user name if no display name set
-          const senderDisplayName = job.sending_email?.display_name || bd.name || '';
+          // Use job's sending email first, then BD's primary outreach email, never login name alone
+          const senderDisplayName = job.sending_email?.display_name || bdPrimaryEmailMap[bd.id]?.display_name || bd.name || '';
           const vars = {
             fn: contact.first_name || '',
             ln: contact.last_name || '',
@@ -740,8 +749,18 @@ app.post('/emails/generate', auth, async (req, res) => {
             subject = fillTmpl(savedSubj || 'Staffing Partnership — {{company}}', vars);
             body = fillTmpl(savedBody || `Hi {{fn}},\n\nI came across {{company}} and noticed you're hiring for {{pos}}. At Fute Global, we specialize in placing top-tier talent for roles exactly like this.\n\nWould you be open to a quick 15-minute call this week?\n\nBest regards,\n{{sender}}\nFute Global LLC`, vars);
           }
-          const sendingEmail = job.sending_email?.email_address || bd.email;
-          emailsToInsert.push({ contact_id: contact.id, job_id: job.id, to_email: contact.email, subject, body, platform: 'Outlook', sent_by: bd.id, from_email: sendingEmail, status: 'pending' });
+          // Use job's assigned sending email, or fall back to BD's primary outreach email
+          // Never fall back to bd.email (login email) — that's not an outreach account
+          const jobSendingEmail = job.sending_email;
+          const bdPrimaryEmail = bdPrimaryEmailMap[bd.id];
+          const resolvedSendingEmail = jobSendingEmail || bdPrimaryEmail;
+          const sendingEmailAddress = resolvedSendingEmail?.email_address || '';
+          const sendingDisplayName = resolvedSendingEmail?.display_name || bd.name || '';
+          // If job has no sending_email_id, update it now so future sends use the right account
+          if (!job.sending_email_id && bdPrimaryEmail) {
+            supabase.from('jobs').update({ sending_email_id: bdPrimaryEmail.id }).eq('id', job.id).then(() => {}).catch(() => {});
+          }
+          emailsToInsert.push({ contact_id: contact.id, job_id: job.id, to_email: contact.email, subject, body, platform: 'Outlook', sent_by: bd.id, from_email: sendingEmailAddress, status: 'pending' });
           generated.push({ contact_id: contact.id, email: contact.email });
         } catch(e) { failed.push({ contact_id: contact.id, email: contact.email, error: e.message }); }
       }
