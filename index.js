@@ -1232,6 +1232,66 @@ app.post('/jobs/bulk-stage', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.get('/jobs/today-summary', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'Not allowed' });
+    const todayStr = today();
+
+    // Jobs created today
+    const { data: todayJobs, error } = await supabase
+      .from('jobs')
+      .select('id, position, industry, location, freshness, is_duplicate, timezone, company:companies(name, industry), contacts(id, designation)')
+      .gte('created_at', todayStr + 'T00:00:00Z')
+      .is('deleted_at', null);
+    if (error) throw error;
+
+    const total = todayJobs.length;
+    const duplicates = todayJobs.filter(j => j.is_duplicate).length;
+    const clean = total - duplicates;
+
+    // Industry breakdown
+    const byIndustry = {};
+    todayJobs.forEach(j => {
+      const ind = j.industry || j.company?.industry || 'Unknown';
+      byIndustry[ind] = (byIndustry[ind] || 0) + 1;
+    });
+
+    // Freshness breakdown
+    const byFreshness = {};
+    todayJobs.forEach(j => {
+      const f = j.freshness || 'Normal';
+      byFreshness[f] = (byFreshness[f] || 0) + 1;
+    });
+
+    // Timezone breakdown
+    const byTimezone = {};
+    todayJobs.forEach(j => {
+      const tz = j.timezone || 'EST';
+      byTimezone[tz] = (byTimezone[tz] || 0) + 1;
+    });
+
+    // Top positions
+    const byPosition = {};
+    todayJobs.forEach(j => {
+      byPosition[j.position] = (byPosition[j.position] || 0) + 1;
+    });
+    const topPositions = Object.entries(byPosition).sort((a,b) => b[1]-a[1]).slice(0,5).map(([k,v]) => `${k} (${v})`);
+
+    // Contact count
+    const totalContacts = todayJobs.reduce((s, j) => s + (j.contacts?.length || 0), 0);
+
+    // Current pool size (all unassigned)
+    const { count: poolSize } = await supabase.from('jobs').select('id', { count: 'exact', head: true }).eq('stage', 'Unassigned').is('deleted_at', null);
+
+    res.json({
+      date: todayStr,
+      total, clean, duplicates, totalContacts,
+      byIndustry, byFreshness, byTimezone, topPositions,
+      poolSize: poolSize || 0
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/jobs/bulk-assign', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'ra_lead or admin only' });
@@ -1293,6 +1353,25 @@ app.post('/ai/generate-email', auth, async (req, res) => {
 // ══════════════════════════════════════════════════════════════
 // APP SETTINGS
 // ══════════════════════════════════════════════════════════════
+app.post('/ai/generate-summary', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'Not allowed' });
+    const { prompt } = req.body;
+    if (!prompt) return res.status(400).json({ error: 'prompt required' });
+    if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY === 'your_anthropic_api_key_here') {
+      return res.json({ summary: 'AI summary unavailable — no API key configured.' });
+    }
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 300, messages: [{ role: 'user', content: prompt }] })
+    });
+    const aiData = await response.json();
+    const summary = aiData.content?.[0]?.text?.trim() || 'Summary unavailable.';
+    res.json({ summary });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/app-settings', auth, async (req, res) => {
   try {
     const { data, error } = await supabase.from('app_settings').select('key,value');
