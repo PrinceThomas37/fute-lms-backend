@@ -748,6 +748,71 @@ app.post('/emails/generate', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.post('/emails/send-selected', auth, async (req, res) => {
+  try {
+    const { email_ids } = req.body;
+    if (!Array.isArray(email_ids) || !email_ids.length) return res.status(400).json({ error: 'email_ids required' });
+
+    const { data: pendingEmails, error: fetchErr } = await supabase
+      .from('emails')
+      .select('id, to_email, subject, body, contact_id, job_id, from_email, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
+      .eq('sent_by', req.user.id)
+      .eq('status', 'pending')
+      .in('id', email_ids);
+    if (fetchErr) throw fetchErr;
+    if (!pendingEmails || !pendingEmails.length) return res.json({ success: true, sent: 0, failed: 0 });
+
+    let sent = 0, failed = 0;
+    const failDetails = [], sentContactIds = [], sentJobIds = [];
+
+    for (const email of pendingEmails) {
+      const userEmailId = email.job?.sending_email_id;
+      const sendingEmail = email.job?.sending_email;
+      const platform = (sendingEmail?.platform || 'Microsoft').toLowerCase();
+
+      if (!userEmailId) {
+        failed++;
+        failDetails.push({ id: email.id, to: email.to_email, from: email.from_email || '—', error: 'No sending email configured for this job' });
+        try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
+        continue;
+      }
+      if (platform === 'gmail' || platform === 'google') {
+        failed++;
+        failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || '—', error: 'Gmail sending not connected yet' });
+        try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
+        continue;
+      }
+      try {
+        const accessToken = await getMicrosoftToken(userEmailId);
+        const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: { subject: email.subject, body: { contentType: 'Text', content: email.body }, toRecipients: [{ emailAddress: { address: email.to_email } }] }, saveToSentItems: true })
+        });
+        if (!sendRes.ok) { const e = await sendRes.json().catch(() => ({})); throw new Error(e?.error?.message || `HTTP ${sendRes.status}`); }
+        await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email.id);
+        const todayDate = today();
+        const { data: logRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', userEmailId).eq('send_date', todayDate).single();
+        await supabase.from('email_send_log').upsert({ user_email_id: userEmailId, send_date: todayDate, emails_sent: (logRow?.emails_sent || 0) + 1 }, { onConflict: 'user_email_id,send_date' });
+        if (email.contact_id) sentContactIds.push(email.contact_id);
+        if (email.job_id) sentJobIds.push(email.job_id);
+        sent++;
+      } catch (e) {
+        failed++;
+        failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: e.message });
+        try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
+      }
+    }
+
+    const uniqueContactIds = [...new Set(sentContactIds.filter(Boolean))];
+    if (uniqueContactIds.length) await supabase.from('contacts').update({ email_sent_at: today() }).in('id', uniqueContactIds);
+    const uniqueJobIds = [...new Set(sentJobIds.filter(Boolean))];
+    for (const jid of uniqueJobIds) await logActivity(jid, null, req.user.id, 'emails_sent', `${sent} email(s) sent via Microsoft`, null, null);
+
+    res.json({ success: true, sent, failed, failDetails });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/emails/queue-all', auth, async (req, res) => {
   try {
     // Fetch all pending emails for this user, joining job -> sending_email_id + platform
