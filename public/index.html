@@ -1,1693 +1,5966 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const { createClient } = require('@supabase/supabase-js');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Fute Global — Lead Management</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+--bg:#F5F7FA;--card:#FFFFFF;--border:#E2E8F0;--border2:#CBD5E1;
+--text:#0F172A;--text2:#475569;--text3:#94A3B8;
+--accent:#2563EB;--accent-l:#EFF6FF;--accent-m:#3B82F6;
+--teal:#0D9488;--teal-l:#F0FDFA;
+--green:#16A34A;--green-l:#F0FDF4;
+--amber:#D97706;--amber-l:#FFFBEB;
+--red:#DC2626;--red-l:#FEF2F2;
+--purple:#7C3AED;--purple-l:#F5F3FF;
+--r:8px;--r2:12px;--r3:16px;
+--sh:0 1px 3px rgba(0,0,0,.07),0 1px 2px rgba(0,0,0,.04);
+--sh2:0 4px 16px rgba(0,0,0,.09),0 2px 4px rgba(0,0,0,.05);
+--sh3:0 20px 40px rgba(0,0,0,.12);
+--font:'DM Sans',system-ui,sans-serif;
+--display:'Sora',system-ui,sans-serif;
+--mono:'DM Mono',monospace;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.5}
+*{-webkit-font-smoothing:antialiased}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
+input,select,textarea,button{font-family:var(--font);font-size:14px;color:inherit}
+button{cursor:pointer;border:none;background:none;outline:none}
+a{color:inherit;text-decoration:none}
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+/* LAYOUT */
+#app{display:flex;height:100vh;overflow:hidden}
+@media(max-width:640px){
+  #sidebar{width:200px;min-width:200px}
+  .page{padding:16px 14px}
+  .g2,.g3,.g4{grid-template-columns:1fr}
+  .span2,.span3{grid-column:span 1}
+  .stat-grid{grid-template-columns:1fr 1fr}
+  .banner-stats{gap:12px}
+  .bstat-val{font-size:18px}
+  .detail-panel{width:100%;min-width:0;position:fixed;inset:0;z-index:50;overflow-y:auto}
+  .tbl-wrap{font-size:12px}
+  th,td{padding:8px 8px}
+}
+#sidebar{width:228px;min-width:228px;background:var(--card);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+#topbar{height:54px;min-height:54px;background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 24px;gap:12px}
+#content{flex:1;overflow-y:auto;overflow-x:auto}
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+/* SIDEBAR */
+.sb-brand{padding:18px 18px 14px;border-bottom:1px solid var(--border)}
+.sb-logo{display:flex;align-items:center;gap:10px}
+.sb-icon{width:34px;height:34px;background:var(--accent);border-radius:9px;display:flex;align-items:center;justify-content:center;color:#fff;font-family:var(--display);font-weight:700;font-size:13px;flex-shrink:0}
+.sb-name{font-family:var(--display);font-weight:600;font-size:14.5px}
+.sb-sub{font-size:10px;color:var(--text3)}
+.sb-nav{padding:10px 10px 4px}
+.sb-lbl{font-size:10px;font-weight:600;color:var(--text3);letter-spacing:.07em;text-transform:uppercase;padding:0 8px;margin-bottom:3px}
+.nav-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--r);color:var(--text2);cursor:pointer;font-size:13.5px;transition:all .12s;margin-bottom:1px;user-select:none}
+.nav-item:hover{background:var(--bg);color:var(--text)}
+.nav-item.active{background:var(--accent-l);color:var(--accent);font-weight:500}
+.nav-icon{width:15px;height:15px;flex-shrink:0;opacity:.55}
+.nav-item.active .nav-icon{opacity:1}
+.nav-badge{margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;font-family:var(--mono)}
+.sb-footer{margin-top:auto;padding:12px;border-top:1px solid var(--border)}
+.user-row{display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:var(--r2);cursor:pointer;transition:background .12s}
+.user-row:hover{background:var(--bg)}
+.u-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.u-role{font-size:11px;color:var(--text3)}
+.signout{font-size:11.5px;color:var(--text3);cursor:pointer;padding:3px 2px;transition:color .12s;display:inline-block}
+.signout:hover{color:var(--red)}
 
-// ── MIDDLEWARE ─────────────────────────────────────────────────
-app.use(cors({ origin: '*', methods: ['GET','POST','PUT','PATCH','DELETE'], allowedHeaders: ['Content-Type','Authorization'] }));
-app.use(express.json({ limit: '5mb' }));
+/* AVATAR */
+.av{border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:600;flex-shrink:0;font-family:var(--display)}
+.av-32{width:32px;height:32px;font-size:12px}
+.av-28{width:28px;height:28px;font-size:11px}
+.av-40{width:40px;height:40px;font-size:14px}
+.av-48{width:48px;height:48px;font-size:16px}
+.av-admin{background:#EDE9FE;color:#5B21B6}
+.av-bd{background:#DBEAFE;color:#1D4ED8}
+.av-ra{background:#DCFCE7;color:#166534}
+.av-sp{background:#FCE7F3;color:#9D174D}
 
-function auth(req, res, next) {
-  const header = req.headers.authorization;
-  if (!header) return res.status(401).json({ error: 'No token' });
-  try {
-    req.user = jwt.verify(header.replace('Bearer ', ''), process.env.JWT_SECRET);
-    next();
-  } catch { res.status(401).json({ error: 'Invalid token' }); }
+/* TOPBAR */
+.tb-title{font-family:var(--display);font-weight:600;font-size:15.5px}
+.tb-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.tb-date{font-size:12px;color:var(--text3);font-family:var(--mono)}
+.switcher{display:flex;gap:5px;padding:4px 8px;background:var(--bg);border-radius:var(--r2);border:1px solid var(--border)}
+.sw-av{cursor:pointer;transition:opacity .12s;border-radius:50%;border:2px solid transparent}
+.sw-av:hover{border-color:var(--accent)}
+.sw-av.me{border-color:var(--accent)}
+
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 15px;border-radius:var(--r);font-weight:500;font-size:13.5px;transition:all .12s;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:#1D4ED8}
+.btn-outline{background:var(--card);color:var(--text);border:1px solid var(--border2)}
+.btn-outline:hover{background:var(--bg)}
+.btn-ghost{color:var(--text2)}
+.btn-ghost:hover{background:var(--bg);color:var(--text)}
+.btn-danger{background:var(--red-l);color:var(--red);border:1px solid rgba(220,38,38,.15)}
+.btn-danger:hover{background:#FCA5A5}
+.btn-sm{padding:5px 11px;font-size:12.5px}
+/* Email preview panel — visible only on very wide screens */
+.email-preview-panel{width:360px;flex-shrink:0;display:block}
+@media(max-width:1380px){.email-preview-panel{display:none !important}}
+.tab{padding:9px 18px;font-size:13.5px;font-weight:500;color:var(--text3);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;user-select:none;white-space:nowrap}
+.tab:hover{color:var(--text);background:var(--bg);border-radius:var(--r) var(--r) 0 0}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.btn-xs{padding:3px 8px;font-size:12px}
+.btn-icon{width:28px;height:28px;padding:0;border-radius:var(--r);display:inline-flex;align-items:center;justify-content:center;color:var(--text3)}
+.btn-icon:hover{background:var(--bg);color:var(--text)}
+
+/* CARDS */
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--r3);box-shadow:var(--sh)}
+.cp{padding:20px 22px}
+
+/* BADGE */
+.bdg{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:11.5px;font-weight:500;white-space:nowrap}
+.bdg-blue{background:var(--accent-l);color:var(--accent)}
+.bdg-green{background:var(--green-l);color:var(--green)}
+.bdg-amber{background:var(--amber-l);color:var(--amber)}
+.bdg-red{background:var(--red-l);color:var(--red)}
+.bdg-purple{background:var(--purple-l);color:var(--purple)}
+.bdg-teal{background:var(--teal-l);color:var(--teal)}
+.bdg-gray{background:var(--bg);color:var(--text2)}
+
+/* STAGE */
+.st-Active{background:#DCFCE7;color:#15803D}
+.st-No_Response{background:#FEF9C3;color:#A16207}
+.st-Negative{background:#FEE2E2;color:#B91C1C}
+.st-Positive{background:#D1FAE5;color:#065F46}
+.st-Connected{background:#DBEAFE;color:#1D4ED8}
+.st-Future{background:#EDE9FE;color:#6D28D9}
+.st-Out_of_Office{background:#E0F2FE;color:#0369A1}
+.st-Deactivated{background:#F1F5F9;color:#64748B}
+.st-Referred{background:#FDF4FF;color:#9333EA}
+
+/* INPUTS */
+.inp{background:var(--card);border:1px solid var(--border2);border-radius:var(--r);padding:8px 11px;color:var(--text);outline:none;width:100%;transition:border-color .12s,box-shadow .12s;font-size:13.5px}
+.inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+.sel{background:var(--card);border:1px solid var(--border2);border-radius:var(--r);padding:7px 11px;color:var(--text);outline:none;cursor:pointer;width:100%;transition:border-color .12s;font-size:13.5px}
+.sel:focus{border-color:var(--accent)}
+.sel option{background:#fff}
+.txta{background:var(--card);border:1px solid var(--border2);border-radius:var(--r);padding:8px 11px;color:var(--text);outline:none;width:100%;resize:vertical;font-size:13.5px;line-height:1.6}
+.txta:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+.flbl{display:block;font-size:12px;font-weight:500;color:var(--text2);margin-bottom:4px}
+.fgrp{display:flex;flex-direction:column;margin-bottom:12px}
+.ferr{font-size:11px;color:var(--red);margin-top:3px}
+
+/* TABLE */
+.tbl-wrap{overflow-x:auto;border-radius:var(--r3);border:1px solid var(--border);background:var(--card)}
+table{width:100%;border-collapse:collapse}
+th{background:#F8FAFC;padding:9px 13px;text-align:left;font-size:11px;font-weight:600;color:var(--text3);letter-spacing:.07em;text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:11px 13px;border-bottom:1px solid var(--border);font-size:13.5px;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#FAFBFC}
+tr.sel-row td{background:var(--accent-l)}
+.td1{font-weight:500}
+.td2{font-size:12px;color:var(--text3)}
+.td-trunc{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* MODAL */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(2px)}
+.modal{background:var(--card);border-radius:var(--r3);box-shadow:var(--sh3);max-width:92vw;max-height:90vh;overflow-y:auto;animation:mIn .18s ease}
+@keyframes mIn{from{transform:scale(.95) translateY(8px);opacity:0}to{transform:scale(1) translateY(0);opacity:1}}
+.modal-w480{width:480px}
+.modal-w640{width:640px}
+.modal-w860{width:860px}
+.mh{display:flex;align-items:center;justify-content:space-between;padding:18px 22px 14px}
+.mt{font-family:var(--display);font-weight:600;font-size:16.5px}
+.mb_{padding:0 22px 18px}
+.mf{display:flex;justify-content:flex-end;gap:9px;padding:14px 22px;border-top:1px solid var(--border)}
+
+/* TOAST */
+.toast-wrap{position:fixed;top:14px;right:14px;z-index:200;display:flex;flex-direction:column;gap:7px;pointer-events:none}
+.toast{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:11px 15px;font-size:13.5px;display:flex;align-items:center;gap:9px;box-shadow:var(--sh2);animation:tIn .2s ease;min-width:260px;max-width:340px;pointer-events:all}
+@keyframes tIn{from{transform:translateX(20px);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* GRID */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:13px}
+.g4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px}
+.span2{grid-column:span 2}
+.span3{grid-column:span 3}
+.flex{display:flex}.aic{align-items:center}.jb{justify-content:space-between}.jc{justify-content:center}
+.gap1{gap:4px}.gap2{gap:8px}.gap3{gap:12px}.gap4{gap:16px}
+.mt1{margin-top:4px}.mt2{margin-top:8px}.mt3{margin-top:12px}.mt4{margin-top:16px}.mt5{margin-top:20px}.mt6{margin-top:24px}
+.mb2{margin-bottom:8px}.mb3{margin-bottom:12px}.mb4{margin-bottom:16px}.mb5{margin-bottom:20px}
+.w100{width:100%}.fw5{font-weight:500}.fw6{font-weight:600}
+.f12{font-size:12px}.f13{font-size:13px}.f11{font-size:11px}.text3{color:var(--text3)}.text2{color:var(--text2)}
+.hr{height:1px;background:var(--border);margin:14px 0}
+.page{padding:22px 26px}
+.ph{margin-bottom:18px}
+.ptitle{font-family:var(--display);font-weight:700;font-size:20px;letter-spacing:-.3px}
+.psub{font-size:12.5px;color:var(--text3);margin-top:2px}
+.empty{text-align:center;padding:56px 20px;color:var(--text3)}
+.empty-ico{width:48px;height:48px;background:var(--bg);border-radius:var(--r2);display:flex;align-items:center;justify-content:center;margin:0 auto 12px}
+.empty-t{font-size:15px;font-weight:600;color:var(--text2);margin-bottom:5px}
+
+/* FILTER CHIPS */
+.fc{display:inline-flex;align-items:center;padding:5px 11px;background:var(--card);border:1px solid var(--border2);border-radius:20px;font-size:12.5px;color:var(--text2);cursor:pointer;transition:all .12s}
+.fc:hover,.fc.on{background:var(--accent-l);border-color:var(--accent);color:var(--accent)}
+.fsel{background:var(--card);border:1px solid var(--border2);border-radius:20px;padding:5px 11px;font-size:12.5px;color:var(--text2);outline:none;cursor:pointer}
+.fsel:focus{border-color:var(--accent)}
+
+/* WELCOME BANNER */
+.banner{background:linear-gradient(130deg,#2563EB 0%,#0D9488 100%);border-radius:var(--r3);padding:22px 26px;color:#fff;margin-bottom:18px;position:relative}
+.banner::after{content:'';position:absolute;right:-30px;top:-30px;width:180px;height:180px;background:rgba(255,255,255,.06);border-radius:50%}
+.banner-name{font-family:var(--display);font-size:19px;font-weight:700}
+.banner-sub{font-size:12.5px;opacity:.82;margin-top:3px}
+.banner-stats{display:flex;align-items:center;gap:20px;margin-top:16px;flex-wrap:wrap}
+.bstat-val{font-family:var(--display);font-size:24px;font-weight:700;line-height:1}
+.bstat-lbl{font-size:11px;opacity:.78;margin-top:4px}
+
+/* STAT CARD */
+.stat-ico{width:36px;height:36px;border-radius:var(--r);display:flex;align-items:center;justify-content:center;margin-bottom:10px}
+.stat-val{font-family:var(--display);font-size:28px;font-weight:700;letter-spacing:-.5px;line-height:1}
+.stat-lbl{font-size:12px;color:var(--text3);margin-top:4px}
+
+/* DETAIL PANEL */
+.detail-panel{background:var(--card);border-left:1px solid var(--border);width:380px;min-width:380px;display:flex;flex-direction:column;overflow:hidden}
+.dp-head{padding:16px 18px;border-bottom:1px solid var(--border)}
+.dp-body{flex:1;overflow-y:auto;padding:14px 18px}
+.dp-sec{margin-bottom:18px}
+.dp-sec-t{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text3);margin-bottom:9px}
+.dp-row{display:flex;gap:8px;margin-bottom:7px;font-size:13px}
+.dp-k{color:var(--text3);min-width:100px;flex-shrink:0}
+.dp-v{color:var(--text);flex:1;word-break:break-word}
+.act-item{display:flex;gap:9px;padding:7px 0;border-bottom:1px solid var(--border)}
+.act-item:last-child{border-bottom:none}
+.act-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:5px}
+.act-txt{font-size:13px}
+.act-meta{font-size:11.5px;color:var(--text3);margin-top:1px}
+
+/* CONTACT PILL */
+.cpill{display:flex;align-items:center;gap:7px;padding:6px 9px;background:var(--bg);border-radius:var(--r);margin-bottom:6px;font-size:13px}
+.ctype{font-size:10.5px;background:var(--border);padding:1px 6px;border-radius:4px;color:var(--text3);min-width:46px;text-align:center}
+
+/* INDUSTRY BAR */
+.ind-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)}
+.ind-row:last-child{border-bottom:none}
+.ind-bg{flex:1;height:5px;background:var(--bg);border-radius:3px;overflow:hidden}
+.ind-fill{height:100%;border-radius:3px;transition:width .5s ease}
+
+/* LOGIN */
+.login-wrap{min-height:100vh;background:linear-gradient(150deg,#EFF6FF 0%,#F5F7FA 40%,#F0FDFA 100%);display:flex;align-items:center;justify-content:center;padding:16px}
+.login-card{background:var(--card);border:1px solid var(--border);border-radius:20px;box-shadow:var(--sh3);width:100%;max-width:440px;overflow:visible}
+.login-top{background:linear-gradient(130deg,#2563EB 0%,#0D9488 100%);padding:24px 28px 20px;color:#fff;border-radius:20px 20px 0 0}
+.login-body{padding:22px 28px 26px;border-radius:0 0 20px 20px}
+.google-btn{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;padding:10px;border:1.5px solid var(--border2);border-radius:var(--r2);background:var(--card);font-size:13.5px;font-weight:500;cursor:pointer;transition:all .15s;margin-bottom:14px}
+.google-btn:hover{background:var(--bg);border-color:var(--accent)}
+.or-div{display:flex;align-items:center;gap:10px;margin:14px 0;font-size:12px;color:var(--text3)}
+.or-div::before,.or-div::after{content:'';flex:1;height:1px;background:var(--border)}
+.demo-picks{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+
+/* EMAIL */
+.email-card{background:var(--bg);border-radius:var(--r2);padding:13px;margin-bottom:9px}
+.email-subj{font-weight:500;font-size:13.5px}
+.email-prev{font-size:12.5px;color:var(--text3);margin-top:4px;line-height:1.5}
+
+/* BAR CHART */
+.bar-chart{display:flex;align-items:flex-end;gap:7px;height:80px}
+.bar-col{flex:1;display:flex;flex-direction:column;align-items:center}
+.bar-fill{width:100%;border-radius:4px 4px 0 0;transition:height .4s ease;min-height:3px}
+.bar-lbl{font-size:10.5px;color:var(--text3);margin-top:4px;text-align:center}
+</style>
+</head>
+<body>
+<div id="app"><div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;color:#64748B">Loading Fute Global LMS...</div></div>
+
+<script>
+// ════════════════════════════════════════════════
+// SEED DATA
+// ════════════════════════════════════════════════
+var USERS = [
+  // BD Team
+  {id:"u1",name:"Prince Thomas",  email:"prince@futeglobal.com", role:"admin",empId:"FG-001",desig:"Business Development Manager",bdm:null,av:"PT",avc:"av-admin",plt:"Gmail"},
+  {id:"u2",name:"Ash Sayyad",     email:"ash@futeglobal.com",    role:"bd",   empId:"FG-002",desig:"Business Development Manager",bdm:null,av:"AS",avc:"av-bd",  plt:"Gmail"},
+  {id:"u3",name:"Pranay Narayan", email:"pranay@futeglobal.com", role:"bd",   empId:"FG-003",desig:"Business Development Manager",bdm:null,av:"PN",avc:"av-bd",  plt:"Gmail"},
+  {id:"u4",name:"Sarah Smith",    email:"sarah@futeglobal.com",  role:"bd",   empId:"FG-004",desig:"Business Development Manager",bdm:null,av:"SS",avc:"av-bd",  plt:"Gmail"},
+  {id:"u5",name:"Patrick Wilson", email:"patrick@futeglobal.com",role:"bd",   empId:"FG-005",desig:"Business Development Manager",bdm:null,av:"PW",avc:"av-bd",  plt:"Gmail"},
+  {id:"u6",name:"Michael Smith",  email:"michael@futeglobal.com",role:"bd",   empId:"FG-006",desig:"Business Development Manager",bdm:null,av:"MS",avc:"av-bd",  plt:"Gmail"},
+  {id:"u7",name:"Gregg Daniels",  email:"gregg@futeglobal.com",  role:"bd",   empId:"FG-007",desig:"Business Development Manager",bdm:null,av:"GD",avc:"av-bd",  plt:"Gmail"},
+  // RA Team (unassigned — assign via Admin tab)
+  {id:"u8", name:"Steven Parker",  email:"steven@futeglobal.com",  role:"ra",empId:"FG-008",desig:"Research Analyst",bdm:null,av:"SP",avc:"av-ra",plt:"Gmail"},
+  {id:"u9", name:"Mick Thompson",  email:"mick@futeglobal.com",    role:"ra",empId:"FG-009",desig:"Research Analyst",bdm:null,av:"MT",avc:"av-ra",plt:"Gmail"},
+  {id:"u10",name:"Dan Johnson",    email:"dan@futeglobal.com",     role:"ra",empId:"FG-010",desig:"Research Analyst",bdm:null,av:"DJ",avc:"av-ra",plt:"Gmail"},
+  {id:"u11",name:"Amy Hernandez",  email:"amy@futeglobal.com",     role:"ra",empId:"FG-011",desig:"Research Analyst",bdm:null,av:"AH",avc:"av-ra",plt:"Gmail"},
+  {id:"u12",name:"Jessica Davis",  email:"jessica@futeglobal.com", role:"ra",empId:"FG-012",desig:"Research Analyst",bdm:null,av:"JD",avc:"av-ra",plt:"Gmail"},
+  {id:"u13",name:"Nancy Parker",   email:"nancy@futeglobal.com",   role:"ra",empId:"FG-013",desig:"Research Analyst",bdm:null,av:"NP",avc:"av-ra",plt:"Gmail"},
+  {id:"u14",name:"Julia Jens",     email:"julia@futeglobal.com",   role:"ra",empId:"FG-014",desig:"Research Analyst",bdm:null,av:"JJ",avc:"av-ra",plt:"Gmail"},
+  {id:"u15",name:"Diana Davis",    email:"diana@futeglobal.com",   role:"ra",empId:"FG-015",desig:"Research Analyst",bdm:null,av:"DD",avc:"av-ra",plt:"Gmail"},
+  {id:"u16",name:"Anna Harper",    email:"anna@futeglobal.com",    role:"ra",empId:"FG-016",desig:"Research Analyst",bdm:null,av:"AH",avc:"av-ra",plt:"Gmail"},
+  {id:"u17",name:"Justin Clark",   email:"justin@futeglobal.com",  role:"ra",empId:"FG-017",desig:"Research Analyst",bdm:null,av:"JC",avc:"av-ra",plt:"Gmail"},
+  {id:"u18",name:"Lisa Anderson",  email:"lisa@futeglobal.com",    role:"ra",empId:"FG-018",desig:"Research Analyst",bdm:null,av:"LA",avc:"av-ra",plt:"Gmail"},
+  {id:"u19",name:"Kristy Scott",   email:"kristy@futeglobal.com",  role:"ra",empId:"FG-019",desig:"Research Analyst",bdm:null,av:"KS",avc:"av-ra",plt:"Gmail"},
+  {id:"u20",name:"Stephan Hunter", email:"stephan@futeglobal.com", role:"ra",empId:"FG-020",desig:"Research Analyst",bdm:null,av:"SH",avc:"av-ra",plt:"Gmail"},
+  {id:"u21",name:"Melissa White",  email:"melissa@futeglobal.com", role:"ra",empId:"FG-021",desig:"Research Analyst",bdm:null,av:"MW",avc:"av-ra",plt:"Gmail"},
+  {id:"u22",name:"David Miller",   email:"david@futeglobal.com",   role:"ra",empId:"FG-022",desig:"Research Analyst",bdm:null,av:"DM",avc:"av-ra",plt:"Gmail"},
+  {id:"u23",name:"Daniel James",   email:"daniel@futeglobal.com",  role:"ra",empId:"FG-023",desig:"Research Analyst",bdm:null,av:"DJ",avc:"av-ra",plt:"Gmail"},
+  {id:"u24",name:"Sharon Moss",    email:"sharon@futeglobal.com",  role:"ra",empId:"FG-024",desig:"Research Analyst",bdm:null,av:"SM",avc:"av-ra",plt:"Gmail"},
+  {id:"u25",name:"Neal Patrick",   email:"neal@futeglobal.com",    role:"ra",empId:"FG-025",desig:"Research Analyst",bdm:null,av:"NP",avc:"av-ra",plt:"Gmail"}
+];
+
+var COMPANIES = [
+  {id:"c1",name:"TechNova Solutions",web:"technova.io",ind:"Technology",loc:"Bangalore"},
+  {id:"c2",name:"FinEdge Capital",web:"finedge.com",ind:"Finance",loc:"Mumbai"},
+  {id:"c3",name:"HealthFirst Clinics",web:"healthfirst.in",ind:"Healthcare",loc:"Hyderabad"},
+  {id:"c4",name:"BuildMax Infra",web:"buildmax.co.in",ind:"Manufacturing",loc:"Delhi"},
+  {id:"c5",name:"RetailPro India",web:"retailpro.in",ind:"Retail",loc:"Chennai"},
+  {id:"c6",name:"EduSpark",web:"eduspark.io",ind:"Education",loc:"Pune"},
+  {id:"c7",name:"Nexus Consulting",web:"nexusconsult.com",ind:"Consulting",loc:"Bangalore"},
+  {id:"c8",name:"MediaFlow",web:"mediaflow.in",ind:"Media",loc:"Mumbai"},
+  {id:"c9",name:"LogiTrans",web:"logitrans.co.in",ind:"Logistics",loc:"Delhi"},
+  {id:"c10",name:"LegalEdge",web:"legaledge.in",ind:"Legal",loc:"Hyderabad"},
+  {id:"c11",name:"PropVault Realty",web:"propvault.in",ind:"Real Estate",loc:"Noida"},
+  {id:"c12",name:"DataSense AI",web:"datasense.ai",ind:"Technology",loc:"Bangalore"}
+];
+
+var STAGES = ["Active","No Response","Negative","Positive","Connected","Future","Out of Office","Deactivated","Referred"];
+var INDUSTRIES = ["Technology","Finance","Healthcare","Manufacturing","Retail","Education","Consulting","Media","Logistics","Legal","Real Estate"];
+var SOURCES = ["LinkedIn","Indeed","Naukri","Company Website","Glassdoor","AngelList","Referral","Other"];
+var POSITIONS = ["CTO","VP of Engineering","Head of Product","Procurement Director","Head of Digital","CFO","Director HR","VP Sales","Head of Operations","CMO","CHRO"];
+var FIRSTNAMES = ["Arjun","Sunita","Vikram","Pooja","Rahul","Priya","Aditya","Sneha","Rohan","Meera","Karan","Divya","Amit","Neha"];
+var LASTNAMES = ["Kapoor","Rao","Nair","Desai","Sharma","Singh","Mehta","Patel","Gupta","Kumar","Joshi","Verma"];
+var RA_IDS = ["u8","u9","u10","u11","u12","u13","u14","u15","u16","u17","u18","u19","u20","u21","u22","u23","u24","u25"];
+var RA_BD = {"u8":"u1","u9":"u1","u10":"u2","u11":"u2","u12":"u3","u13":"u3","u14":"u4","u15":"u4","u16":"u5","u17":"u5","u18":"u6","u19":"u6","u20":"u7","u21":"u7","u22":"u1","u23":"u2","u24":"u3","u25":"u4"};
+
+function rp(arr){return arr[Math.floor(Math.random()*arr.length)]}
+function rd(days){var d=new Date();d.setDate(d.getDate()-Math.floor(Math.random()*days));return d.toISOString().split("T")[0]}
+function todayIST(){var n=new Date();return new Date(n.getTime()+5.5*3600000).toISOString().split("T")[0]}
+function fmtDate(d){if(!d)return"—";var p=d.split("-");return p[2]+"/"+p[1]+"/"+p[0]}
+function uname(id,users){var u=users.find(function(x){return x.id===id});return u?u.name:"—"}
+function stageClass(s){return"st-"+s.replace(/ /g,"_")}
+
+function genLeads(){
+  var leads=[];var lid=1;
+  COMPANIES.forEach(function(co){
+    var n=Math.floor(Math.random()*4)+2;
+    for(var j=0;j<n;j++){
+      var aid=rp(RA_IDS);var bid=RA_BD[aid];
+      var st=rp(STAGES);var dt=rd(30);
+      var fn=rp(FIRSTNAMES);var ln=rp(LASTNAMES);
+      leads.push({
+        id:"l"+lid++,coid:co.id,pos:rp(POSITIONS),
+        fn:fn,ln:ln,desig:rp(["CTO","VP Ops","Head of Digital","Director","CFO","CHRO"]),
+        email:fn.toLowerCase()+"."+ln.toLowerCase()+"@"+co.web,
+        phone:"+91 9"+Math.floor(Math.random()*8+1)+String(Math.random()).slice(2,10),
+        li:"https://linkedin.com/in/"+fn.toLowerCase()+ln.toLowerCase(),
+        src:rp(SOURCES),aid:aid,bid:bid,stage:st,date:dt,
+        sent:st!=="Active"&&Math.random()>.3?dt:null,
+        plt:rp(["Gmail","Outlook",null]),notes:"",del:null
+      });
+    }
+  });
+  return leads;
 }
 
-// Role helper — works with both old single role and new roles array
-function hasRole(req, ...roles) {
-  const u = req.user;
-  if (!u) return false;
-  // New: roles array
-  if (Array.isArray(u.roles) && u.roles.length) {
-    return roles.some(r => u.roles.includes(r));
-  }
-  // Legacy: single role field
-  return roles.includes(u.role);
+function genActs(leads){
+  var acts=[];
+  leads.forEach(function(l){
+    acts.push({id:"a"+acts.length,lid:l.id,uid:l.aid,type:"created",txt:"Lead created",dt:l.date});
+    if(l.sent)acts.push({id:"a"+acts.length,lid:l.id,uid:l.aid,type:"email",txt:"Email sent via "+(l.plt||"Gmail"),dt:l.sent});
+    if(l.stage!=="Active")acts.push({id:"a"+acts.length,lid:l.id,uid:l.bid,type:"stage",txt:'Stage → "'+l.stage+'"',dt:l.date});
+  });
+  return acts;
 }
 
-const today = () => new Date().toISOString().split('T')[0];
+// ════════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════════
 
-async function logActivity(job_id, contact_id, user_id, action_type, description, old_value, new_value) {
-  try {
-    await supabase.from('activity_log').insert({
-      job_id: job_id || null, contact_id: contact_id || null, user_id: user_id || null,
-      action_type, description: description || null,
-      old_value: old_value || null, new_value: new_value || null
+// ════════════════════════════════════════════════
+// JOBS / CONTACTS MODEL  (matches backend index.js)
+// ════════════════════════════════════════════════
+function genJobs(seedLeads, companies){
+  // Group seedLeads by (company + position) -> 1 job + N contacts
+  var jobs = [], contacts = [], jmap = {};
+  var stages = ["Active","In Progress","Interview","Closed","Lost"];
+  for (var i=0;i<seedLeads.length;i++){
+    var l = seedLeads[i];
+    var key = l.coid + "||" + l.pos;
+    var jid = jmap[key];
+    if (!jid){
+      jid = "j" + (jobs.length+1);
+      jmap[key] = jid;
+      var co = companies.find(function(c){return c.id===l.coid;}) || {};
+      jobs.push({
+        id: jid,
+        company_id: l.coid,
+        company_name: co.name || "",
+        company_ind: co.ind || "",
+        company_web: co.web || "",
+        position: l.pos,
+        location: l.loc || "",
+        source: l.src || "LinkedIn",
+        job_url: "",
+        stage: stages[Math.floor(Math.random()*3)],
+        notes: "",
+        created_by: l.aid,
+        assigned_to: l.aid,
+        created_date: l.created || new Date().toISOString().slice(0,10),
+        created_at: new Date().toISOString()
+      });
+    }
+    contacts.push({
+      id: "c" + (contacts.length+1),
+      job_id: jid,
+      first_name: l.fn,
+      last_name: l.ln || "",
+      designation: l.desig || "",
+      email: l.email || "",
+      phone: l.phone || "",
+      linkedin: "",
+      is_primary: contacts.filter(function(c){return c.job_id===jid;}).length===0,
+      email_sent_at: l.sent || null
     });
-  } catch (e) { console.error('activity_log insert failed:', e.message); }
+  }
+  return { jobs: jobs, contacts: contacts };
+}
+function getMyJobs(u){
+  if (!u) return [];
+  if (userHasAnyRole(u,'admin','ra_lead')) return STATE.jobs.slice();
+  if (userHasRole(u,'bd_lead')) return STATE.jobs.filter(function(j){return j.assigned_to_bd!==null;});
+  if (userHasRole(u,'bd')) return STATE.jobs.filter(function(j){return j.assigned_to_bd===u.id;});
+  // ra: only jobs they created
+  return STATE.jobs.filter(function(j){return j.created_by===u.id;});
+}
+function jobContacts(jid){
+  return STATE.contacts.filter(function(c){return c.job_id===jid;})
+    .sort(function(a,b){return (b.is_primary?1:0)-(a.is_primary?1:0);});
+}
+function jobById(id){ return STATE.jobs.find(function(j){return j.id===id;}); }
+function escAttr(v){ return String(v==null?"":v).replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
+function escHtml(v){ return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+var STATE = {
+
+  user: null,
+  page: "dashboard",
+  users: JSON.parse(JSON.stringify(USERS)),
+  leads: genLeads(),
+  companies: JSON.parse(JSON.stringify(COMPANIES)),
+  activities: [],
+  emails: [],
+  toasts: [],
+  modal: null,
+  detailLead: null,
+  leadsFilter: {search:"",stage:"all",date:"today",ind:"all"},
+  leadsSelected: {},
+  leadsPage: 0,
+  leadsPageSize: 20,
+  mailMerge: null,
+  period: "monthly",
+  emailTab: "compose",
+  previewEmail: null,
+  showEmailPreview: false,
+  mergeLeadId: null,
+  emailSearch: null,
+  manualEmail: null,
+  manualEmailName: null,
+  aiPrompt: null,
+  aiPromptDefault: "Write a concise, professional cold outreach email (3-4 short paragraphs). Open with a personalised hook referencing their company or role. Briefly introduce Fute Global as a specialist staffing firm. Include a soft CTA asking for a 15-min call. Be warm but direct — no fluff.",
+  emailSubj: "Opportunity regarding {{pos}} at {{company}}",
+  emailBody: "Hi {{fn}},\n\nI came across {{company}} and was really impressed by what you're building in the {{ind}} space.\n\nAt Fute Global, we specialize in connecting organizations with top-tier talent. Given your role as {{desig}}, I believe we could be genuinely helpful with your {{pos}} search.\n\nWould you be open to a quick 15-minute call this week?\n\nWarm regards,\n{{sender}}\nFute Global LLC",
+  fu1Subj: "Re: Opportunity regarding {{pos}} at {{company}}",
+  fu1Body: "Hi {{fn}},\n\nJust following up on my previous email regarding {{pos}} at {{company}}. I wanted to make sure it didn't get buried.\n\nWe've helped similar companies fill roles like this quickly — happy to share some examples if useful.\n\nWould love to connect briefly this week.\n\nBest,\n{{sender}}\nFute Global LLC",
+  fu2Subj: "Re: Opportunity regarding {{pos}} at {{company}}",
+  fu2Body: "Hi {{fn}},\n\nI wanted to reach out one last time regarding {{pos}} at {{company}}. If the timing isn't right, no worries at all — happy to reconnect whenever it makes sense.\n\nBest,\n{{sender}}\nFute Global LLC",
+  appSettings: {},
+  teamAssignments: [],
+  userEmailsCache: {},      // userId -> array of user_emails
+  managerUsersTab: 'bd',    // 'ra' | 'bd' | 'rateam' | 'bdteam'
+  selectedManagerUser: null,
+  genEmail: null,
+  aiGenerating: false,
+  adminTab: "users",
+  adminView: "bd",
+  adminSelectedUser: null,
+  addUserForm: null,
+  reminders: [],
+  reminderTab: "ooo",
+  reminderSearch: null,
+  viewingUser: null,
+  importPreview: null,
+  importWB: null,
+  importSheet: null,
+  jobs: [],
+  contacts: [],
+  detailJob: null,
+  jobsFilter: {search:"",stages:[],industries:[],dateRange:"all",dateFrom:"",dateTo:""},
+  openDrop: null,
+  assignSel: {},
+  assignTargetBD: "",
+  distributePoolStats: null,
+  _assignManagerId: null,
+  _assignRatio: null,
+  todaySummary: null,
+  insightsData: null,
+  insightsSelectedRA: null,
+  assignFilter: {ra:"",dup:"all"},
+  pendingEmails: [],
+  previewPendingId: null,
+  emailAccounts: [],
+  composeContactId: null,
+  composeCompanyId: null,
+  composeFromEmailId: null,
+  jobsSel: {},
+  pendingEmailsSel: {},
+  pendingPage: 0,
+  showAIPanel: false,
+  raForm: {
+    coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',
+    position:'',jobUrl:'',jobCreatedDate:'',jobOpenedDate:'',salaryRange:'',source:'',editJobId:null,
+    contacts:[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}]
+  },
+  raFormCoSuggestions:[],
+  raFormZipSuggestions:[],
+  raFormSubmitting:false,
+};
+
+// No pre-seeded reminders — users set them manually from the OOO list
+STATE.activities = genActs(STATE.leads);
+var _seed = genJobs(STATE.leads, STATE.companies);
+STATE.jobs = _seed.jobs;
+STATE.contacts = _seed.contacts;
+STATE.emails = STATE.leads.filter(function(l){return l.sent}).slice(0,6).map(function(l,i){
+  var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
+  var body="Hi "+l.fn+",\n\nI came across "+co.name+" and was really impressed by what you're building in the "+(co.ind||"")+" space.\n\nAt Fute Global, we specialize in connecting organizations with top-tier talent. Given your role as "+l.desig+", I believe we could be genuinely helpful with your "+l.pos+" search.\n\nWould you be open to a quick 15-minute call this week?\n\nWarm regards,\nFute Global LLC";
+  return{id:"e"+i,lid:l.id,by:l.aid,to:l.email,subj:"Connecting re: "+l.pos+" at "+(co?co.name:""),body:body,plt:l.plt||"Gmail",dt:l.sent,status:"sent"};
+});
+
+// ════════════════════════════════════════════════
+// RENDER ENGINE
+// ════════════════════════════════════════════════
+var toastTimer={};
+function showToast(msg,type){
+  type=type||"info";
+  var id=Date.now();
+  STATE.toasts.push({id:id,msg:msg,type:type});
+  toastTimer[id]=setTimeout(function(){
+    STATE.toasts=STATE.toasts.filter(function(t){return t.id!==id});
+    render();
+  },3000);
+  render();
 }
 
-// ── HEALTH ─────────────────────────────────────────────────────
-app.use(express.static('public'));
-app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '3.0.0' }));
+var clockTimer=null;
+function startClock(){
+  if(clockTimer)clearInterval(clockTimer);
+  clockTimer=setInterval(function(){
+    var n=new Date();
+    var dt=document.getElementById("dash-clock-time");
+    var dd=document.getElementById("dash-clock-date");
+    if(dt)dt.textContent=n.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:true});
+    if(dd)dd.textContent=n.toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"});
+  },1000);
+}
 
-// ══════════════════════════════════════════════════════════════
-// AUTH
-// ══════════════════════════════════════════════════════════════
-app.post('/auth/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
-    const { data: user, error } = await supabase.from('users').select('*')
-      .eq('email', email.toLowerCase().trim()).eq('is_active', true).is('deleted_at', null).single();
-    if (error || !user) return res.status(401).json({ error: 'Invalid email or password' });
-    const valid = await bcrypt.compare(password, user.password_hash);
-    if (!valid) return res.status(401).json({ error: 'Invalid email or password' });
-    const roles = user.roles || (user.role ? [user.role] : []);
-    const token = jwt.sign(
-      { id: user.id, email: user.email, roles, role: roles[0] || 'ra', name: user.name },
-      process.env.JWT_SECRET, { expiresIn: '8h' }
-    );
-    const { password_hash, ...safeUser } = user;
-    res.json({ token, user: { ...safeUser, roles } });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+function render(){
+  var root=document.getElementById("app");
+  if(!root)return;
+  if(!STATE.user){root.innerHTML=renderLogin();bindLogin();return;}
+  if(STATE.loading){
+    root.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:14px;background:var(--bg)">'+
+      '<div style="width:36px;height:36px;border:3px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite"></div>'+
+      '<div style="font-size:13.5px;color:var(--text3)">Loading your data...</div>'+
+      '<style>@keyframes spin{to{transform:rotate(360deg)}}</style>'+
+    '</div>';
+    return;
+  }
+  // Save all scroll positions before re-render
+  var content=document.getElementById("content");
+  var scrollTop=content?content.scrollTop:0;
+  var pageEl=content?content.querySelector(".page"):null;
+  var pageScroll=pageEl?pageEl.scrollTop:0;
+  var winScroll=window.scrollY||0;
+  root.innerHTML=renderApp();
+  bindApp();
+  startClock();
+  // Restore scroll positions after re-render
+  var newContent=document.getElementById("content");
+  if(newContent){
+    if(scrollTop)newContent.scrollTop=scrollTop;
+    var newPage=newContent.querySelector(".page");
+    if(newPage&&pageScroll)newPage.scrollTop=pageScroll;
+  }
+  if(winScroll)window.scrollTo(0,winScroll);
+}
 
-app.post('/auth/change-password', auth, async (req, res) => {
-  try {
-    const { currentPassword, newPassword } = req.body;
-    if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
-    const { data: user } = await supabase.from('users').select('password_hash').eq('id', req.user.id).single();
-    const valid = await bcrypt.compare(currentPassword, user.password_hash);
-    if (!valid) return res.status(401).json({ error: 'Current password incorrect' });
-    const hash = await bcrypt.hash(newPassword, 10);
-    await supabase.from('users').update({ password_hash: hash, updated_at: new Date() }).eq('id', req.user.id);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+// ════════════════════════════════════════════════
+// HELPERS
+// ════════════════════════════════════════════════
+function av(user,size){
+  var nm=user.name||'';var parts=nm.trim().split(/\s+/);
+  var initials=user.av||(((parts[0]||'')[0]||'')+((parts[1]||'')[0]||'')).toUpperCase()||'?';
+  var roleMap={admin:'av-admin',bd:'av-bd',ra:'av-ra',ra_lead:'av-admin',bd_lead:'av-bd'};
+  var cls=user.avc||(roleMap[user.role]||'av-ra');
+  return '<div class="av av-'+size+' '+cls+'">'+initials+'</div>';
+}
+function avById(id,size){
+  var u=STATE.users.find(function(x){return x.id===id});
+  return u?av(u,size):'<div class="av av-'+size+' av-ra">?</div>';
+}
+function icon(name){
+  var icons={
+    dashboard:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>',
+    leads:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    email:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>',
+    admin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    profile:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+    plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+    search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+    dl:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+    eye:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+    edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+    trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>',
+    send:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
+    x:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    google:'<svg viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>',
+    star:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
+    clock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+    copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'
+  };
+  return icons[name]||'<svg viewBox="0 0 24 24"></svg>';
+}
+function ico(name,size){
+  size=size||15;
+  return '<span style="width:'+size+'px;height:'+size+'px;display:inline-flex;flex-shrink:0">'+icon(name)+'</span>';
+}
 
-// ══════════════════════════════════════════════════════════════
-// USERS
-// ══════════════════════════════════════════════════════════════
-const USER_COLS = 'id,name,email,role,roles,employee_id,designation,platform,is_active,created_at';
-
-app.get('/users', auth, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('users').select(USER_COLS).is('deleted_at', null).order('name');
-    if (error) throw error;
-    res.json(data.map(u => ({ ...u, roles: u.roles || (u.role ? [u.role] : []) })));
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/users/me', auth, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('users').select(USER_COLS).eq('id', req.user.id).single();
-    if (error) throw error;
-    res.json({ ...data, roles: data.roles || (data.role ? [data.role] : []) });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/users', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
-    const { name, email, password, roles, role, employee_id, designation, platform } = req.body;
-    if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
-    const userRoles = roles || (role ? [role] : ['ra']);
-    const hash = await bcrypt.hash(password || 'Fute@2024', 10);
-    const { data, error } = await supabase.from('users').insert({
-      name, email: email.toLowerCase().trim(), password_hash: hash,
-      role: userRoles[0] || 'ra', roles: userRoles,
-      employee_id, designation, platform: platform || 'Gmail'
-    }).select(USER_COLS).single();
-    if (error) throw error;
-    res.status(201).json({ ...data, roles: data.roles || userRoles });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.put('/users/:id', auth, async (req, res) => {
-  try {
-    const { id } = req.params;
-    if (!hasRole(req, 'admin') && req.user.id !== id) return res.status(403).json({ error: 'Forbidden' });
-    const { name, email, roles, role, employee_id, designation, platform } = req.body;
-    const updates = { updated_at: new Date() };
-    if (name) updates.name = name;
-    if (email) updates.email = email.toLowerCase().trim();
-    if (roles && hasRole(req, 'admin')) { updates.roles = roles; updates.role = roles[0] || 'ra'; }
-    else if (role && hasRole(req, 'admin')) { updates.role = role; updates.roles = [role]; }
-    if (employee_id) updates.employee_id = employee_id;
-    if (designation !== undefined) updates.designation = designation;
-    if (platform) updates.platform = platform;
-    const { data, error } = await supabase.from('users').update(updates).eq('id', id).select(USER_COLS).single();
-    if (error) throw error;
-    res.json({ ...data, roles: data.roles || (data.role ? [data.role] : []) });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Update roles only
-app.put('/users/:id/roles', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
-    const { roles } = req.body;
-    if (!Array.isArray(roles) || !roles.length) return res.status(400).json({ error: 'roles array required' });
-    const { data, error } = await supabase.from('users')
-      .update({ roles, role: roles[0], updated_at: new Date() })
-      .eq('id', req.params.id).select(USER_COLS).single();
-    if (error) throw error;
-    res.json({ ...data, roles });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.delete('/users/:id', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
-    if (req.params.id === req.user.id) return res.status(400).json({ error: 'Cannot delete yourself' });
-    await supabase.from('users').update({ deleted_at: new Date(), is_active: false }).eq('id', req.params.id);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════
-// USER EMAILS — email IDs per user
-// ══════════════════════════════════════════════════════════════
-app.get('/users/:id/emails', auth, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('user_emails')
-      .select('*').eq('user_id', req.params.id).order('created_at');
-    if (error) throw error;
-    // Attach ms_connected flag
-    const ids = (data || []).map(e => e.id);
-    const { data: tokens } = ids.length
-      ? await supabase.from('microsoft_tokens').select('user_email_id').in('user_email_id', ids)
-      : { data: [] };
-    const connectedSet = new Set((tokens || []).map(t => t.user_email_id));
-    res.json((data || []).map(e => ({ ...e, ms_connected: connectedSet.has(e.id) })));
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/users/:id/emails', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'bd_lead') && req.user.id !== req.params.id) return res.status(403).json({ error: 'Forbidden' });
-    const { email_address, display_name, platform, daily_send_limit, is_primary } = req.body;
-    if (!email_address) return res.status(400).json({ error: 'email_address required' });
-    // If setting as primary, unset others first
-    if (is_primary) {
-      await supabase.from('user_emails').update({ is_primary: false }).eq('user_id', req.params.id);
+function getMyLeads(user){
+  return STATE.leads.filter(function(l){
+    if(l.del)return false;
+    if(user.role==="ra")return l.aid===user.id;
+    if(user.role==="bd")return l.bid===user.id;
+    return true;
+  });
+}
+function getTeam(user){
+  if(user.role==="ra")return STATE.users.filter(function(u){return u.id===user.bdm});
+  if(user.role==="bd")return STATE.users.filter(function(u){return u.bdm===user.id});
+  return STATE.users.filter(function(u){return u.id!==user.id});
+}
+function filterLeads(leads){
+  var f=STATE.leadsFilter;
+  var today=todayIST();
+  return leads.filter(function(l){
+    if(f.date==="today"&&l.date!==today)return false;
+    if(f.date==="week"){var w=new Date();w.setDate(w.getDate()-7);if(new Date(l.date)<w)return false;}
+    if(f.date==="month"){var n=new Date();if(new Date(l.date).getMonth()!==n.getMonth())return false;}
+    if(f.stage!=="all"&&l.stage!==f.stage)return false;
+    if(f.ind!=="all"){var co=STATE.companies.find(function(c){return c.id===l.coid});if(!co||co.ind!==f.ind)return false;}
+    if(f.search){
+      var q=f.search.toLowerCase();
+      var co2=STATE.companies.find(function(c){return c.id===l.coid});
+      var vals=[l.email,l.fn,l.ln,co2?co2.name:"",l.pos,l.desig];
+      if(!vals.some(function(v){return(v||"").toLowerCase().includes(q)}))return false;
     }
-    const { data, error } = await supabase.from('user_emails').insert({
-      user_id: req.params.id,
-      email_address: email_address.toLowerCase().trim(),
-      display_name: display_name || email_address,
-      platform: platform || 'Microsoft',
-      is_primary: is_primary || false,
-      is_active: true,
-      daily_send_limit: daily_send_limit || 150
-    }).select().single();
-    if (error) throw error;
-    res.status(201).json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+    return true;
+  });
+}
+function periodLeads(user){
+  var all=getMyLeads(user);
+  var p=STATE.period;
+  var now=new Date();
+  return all.filter(function(l){
+    var d=new Date(l.date);
+    if(p==="daily")return l.date===todayIST();
+    if(p==="weekly"){var w=new Date(now);w.setDate(w.getDate()-7);return d>=w;}
+    if(p==="monthly")return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();
+    if(p==="quarterly"){var q=new Date(now);q.setMonth(q.getMonth()-3);return d>=q;}
+    return true;
+  });
+}
+function fillEmail(tmpl,l,co,sender){
+  return tmpl.replace(/{{(\w+)}}/g,function(m,k){
+    // Support both seed field names (fn/ln/pos) and production field names (first_name/position)
+    var fn=l.fn||l.first_name||"";
+    var ln=l.ln||l.last_name||"";
+    var pos=l.pos||l.position||"";
+    var desig=l.desig||l.designation||"";
+    var coName=co?co.name||co.company_name||"":l.company_name||"";
+    var coInd=co?co.ind||co.industry||"":l.company_ind||"";
+    var coLoc=co?co.loc||co.location||"":l.location||"";
+    var map={fn:fn,ln:ln,company:coName,ind:coInd,pos:pos,desig:desig,loc:coLoc,sender:sender||STATE.user.name};
+    return map[k]!==undefined?map[k]:m;
+  });
+}
 
-app.patch('/users/:id/emails/:eid', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'bd_lead') && req.user.id !== req.params.id) return res.status(403).json({ error: 'Forbidden' });
-    const { is_active, is_primary, display_name, daily_send_limit, platform } = req.body;
-    const updates = { updated_at: new Date() };
+// ════════════════════════════════════════════════
+// RENDER LOGIN
+// ════════════════════════════════════════════════
+function renderLogin(){
+  var picks=STATE.users.map(function(u){
+    return '<button class="fc" onclick="loginAs(\''+u.id+'\')" style="font-size:11.5px">'+u.name+'</button>';
+  }).join("");
+  return '<div class="login-wrap">'+
+    '<div class="login-card">'+
+      '<div class="login-top">'+
+        '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">'+
+          '<div style="width:44px;height:44px;min-width:44px;background:rgba(255,255,255,.2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:var(--display);font-weight:700;font-size:17px;color:#fff;flex-shrink:0">FG</div>'+
+          '<div><div style="font-family:var(--display);font-weight:700;font-size:20px;color:#fff;line-height:1.2">Fute Global LLC</div><div style="font-size:12px;color:rgba(255,255,255,.82);margin-top:2px">Lead Management Software</div></div>'+
+        '</div>'+
+        '<div style="font-size:11.5px;color:rgba(255,255,255,.65);border-top:1px solid rgba(255,255,255,.2);padding-top:10px">Internal platform · Authorized personnel only</div>'+
+      '</div>'+
+      '<div class="login-body">'+
+        '<div style="font-family:var(--display);font-weight:600;font-size:17px;margin-bottom:5px">Welcome back</div>'+
+        '<div style="font-size:13px;color:var(--text3);margin-bottom:20px">Sign in with your Fute Global account</div>'+
+        '<button class="google-btn" onclick="showToast(\'Google Workspace login coming soon. Use email and password for now.\',\'info\')">'+
+          '<span style="width:20px;height:20px;display:inline-flex">'+icon("google")+'</span>'+
+          'Continue with Google Workspace'+
+        '</button>'+
+        '<div class="or-div">or sign in with email</div>'+
+        '<div class="fgrp"><label class="flbl">Work email</label><input class="inp" id="login-email" type="email" placeholder="you@futeglobal.com"/></div>'+
+        '<div class="fgrp"><label class="flbl">Password</label><input class="inp" id="login-pass" type="password" placeholder="••••••••"/></div>'+
+        '<div id="login-err" style="display:none;color:var(--red);font-size:12px;background:var(--red-l);padding:8px 10px;border-radius:var(--r);margin-bottom:10px"></div>'+
+        '<button class="btn btn-primary w100" style="justify-content:center" onclick="doLogin()">Sign in</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>'+renderToasts();
+}
 
-    // Enforce max 4 active per user
-    if (is_active === true) {
-      const { count } = await supabase.from('user_emails')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', req.params.id).eq('is_active', true).neq('id', req.params.eid);
-      if (count >= 4) return res.status(400).json({ error: 'Maximum 4 active email IDs allowed per user' });
+// ════════════════════════════════════════════════
+// RENDER APP SHELL
+// ════════════════════════════════════════════════
+function renderApp(){
+  var u=STATE.user;
+  var today=todayIST();
+  var myLeads=getMyLeads(u);
+  var todayCnt=myLeads.filter(function(l){return l.date===today}).length;
+
+  var navItems=[
+    {id:"dashboard",lbl:"Dashboard",ic:"dashboard"},
+    {id:"leads",lbl:"Leads",ic:"leads",badge:todayCnt},
+    ...(!userHasRole(u,'ra')||userHasAnyRole(u,'bd','bd_lead','admin','ra_lead')?[{id:"email",lbl:"Email",ic:"email"}]:[]),
+    ...(userHasRole(u,'ra')&&!userHasAnyRole(u,'admin','bd','bd_lead','ra_lead')?[{id:"insights",lbl:"Insights",ic:"dashboard"}]:[{id:"reminders",lbl:"Reminders",ic:"star",badge:STATE.reminders.filter(function(r){return r.user_id===u.id&&r.status==="pending"}).length||null}]),
+    {id:"profile",lbl:"My Profile",ic:"profile"}
+  ];
+  if(userHasAnyRole(u,'admin','ra_lead','bd_lead'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
+  if(userHasAnyRole(u,'admin','bd_lead'))navItems.splice(5,0,{id:"managerusers",lbl:"Manager Users",ic:"email"});
+  if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
+
+  var nav=navItems.map(function(n){
+    var active=STATE.page===n.id?" active":"";
+    var badge=n.badge&&n.badge>0?'<span class="nav-badge">'+n.badge+'</span>':"";
+    return '<div class="nav-item'+active+'" onclick="goPage(\''+n.id+'\')"><span class="nav-icon">'+icon(n.ic)+'</span>'+n.lbl+badge+'</div>';
+  }).join("");
+
+  var switchers=""; // removed — use team list to switch views
+
+  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",profile:"My Profile",reminders:"Reminders"};
+  var viewingName=STATE.viewingUser&&STATE.viewingUser.id!==u.id?" · Viewing: "+STATE.viewingUser.name:"";
+
+  return '<div id="sidebar">'+
+    '<div class="sb-brand"><div class="sb-logo">'+
+      '<div class="sb-icon">FG</div>'+
+      '<div><div class="sb-name">Fute Global</div><div class="sb-sub">Lead Management</div></div>'+
+    '</div></div>'+
+    '<div class="sb-nav"><div class="sb-lbl">Menu</div>'+nav+'</div>'+
+    '<div class="sb-footer">'+
+      '<div class="user-row" onclick="goPage(\'profile\')">'+av(u,"32")+'<div style="flex:1;min-width:0"><div class="u-name">'+u.name+'</div><div class="u-role">'+roleLabel(u.role)+'</div></div></div>'+
+      '<div class="signout" onclick="signOut()">Sign out</div>'+
+    '</div>'+
+  '</div>'+
+  '<div id="main">'+
+    '<div id="topbar">'+
+      '<div>'+
+        '<div class="tb-title">'+pageTitles[STATE.page]+viewingName+'</div>'+
+      '</div>'+
+      '<div class="tb-right">'+
+        (STATE.viewingUser&&STATE.viewingUser.id!==u.id?
+          '<button class="btn btn-outline btn-sm" onclick="stopViewing()" style="font-size:12px">← Back to my dashboard</button>'
+        :"")+
+      '</div>'+
+    '</div>'+
+    '<div id="content">'+renderPage()+'</div>'+
+  '</div>'+
+  renderToasts()+renderModal();
+}
+
+function roleLabel(r){return{ra:"Research Analyst",bd:"BD Manager",admin:"Admin",ra_lead:"RA Team Lead",bd_lead:"BD Team Lead"}[r]||r;}
+
+// ════════════════════════════════════════════════
+// RENDER PAGES
+// ════════════════════════════════════════════════
+function renderPage(){
+  if(STATE.page==="dashboard")return renderDashboard();
+  if(STATE.page==="leads"){var html=renderJobs();setTimeout(bindJobsControls,0);return html;}
+  if(STATE.page==="assign"){return renderAssignLeads();}
+  if(STATE.page==="emailaccounts"||STATE.page==="managerusers"){return renderManagerUsers();}
+  if(STATE.page==="insights"){if(STATE.user&&STATE.user.role==='ra'&&!STATE.insightsData){loadMyInsights();}return renderInsights();}
+  if(STATE.page==="email")return renderEmail();
+  if(STATE.page==="reminders")return renderReminders();
+  if(STATE.page==="admin")return renderAdmin();
+  if(STATE.page==="profile")return renderProfile();
+  return "<div class='page'>Page not found</div>";
+}
+
+// ── DASHBOARD ──────────────────────────────────
+function renderDashboard(){
+  // Support "view as" — admin/BD can click a team member to see their dashboard
+  var u=STATE.viewingUser||STATE.user;
+  var isViewingOther=STATE.viewingUser&&STATE.viewingUser.id!==STATE.user.id;
+  var pl=periodLeads(u);
+  var total=pl.length;
+  var emailed=pl.filter(function(l){return l.sent}).length;
+  var pos=pl.filter(function(l){return l.stage==="Positive"||l.stage==="Connected"}).length;
+  var pend=pl.filter(function(l){return l.stage==="Active"}).length;
+  var rr=total?Math.round(emailed/total*100):0;
+
+  var hour=new Date().getHours();
+  var greet=hour<12?"Good morning":hour<17?"Good afternoon":"Good evening";
+
+  // period picker
+  var periods=["daily","weekly","monthly","quarterly"];
+  var pickers=periods.map(function(p){
+    return '<button class="fc'+(STATE.period===p?" on":"") + '" onclick="setPeriod(\''+p+'\')" style="text-transform:capitalize">'+p+'</button>';
+  }).join("");
+
+  // team card — only show for actual logged-in user (not when viewing someone else)
+  var team=isViewingOther?[]:getTeam(u);
+  var canClickTeam=(STATE.user.role==="admin"||STATE.user.role==="bd");
+  var teamRows=team.map(function(t){
+    var tl=getMyLeads(t);
+    var tlp=filterPeriod(tl,STATE.period);
+    var pos_=tlp.filter(function(l){return l.stage==="Positive"||l.stage==="Connected"}).length;
+    var neg_=tlp.filter(function(l){return l.stage==="Negative"}).length;
+    var resp_=tlp.filter(function(l){return l.sent}).length;
+    var rr_=tlp.length?Math.round(resp_/tlp.length*100):0;
+    var rrColor=rr_>50?"var(--green)":rr_>25?"var(--amber)":"var(--text3)";
+    var clickStyle=canClickTeam?'cursor:pointer':'cursor:default';
+    var hoverStyle=canClickTeam?' onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'transparent\'"':"";
+    var clickAttr=canClickTeam?' onclick="viewAs(\''+t.id+'\')"':"";
+    return '<div'+clickAttr+hoverStyle+' style="'+clickStyle+';display:flex;flex-direction:row;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);transition:background .1s;background:transparent">'+
+      '<div class="av av-36 '+t.avc+'" style="flex-shrink:0">'+t.av+'</div>'+
+      '<div style="flex:1;min-width:0;overflow:hidden">'+
+        '<div style="font-weight:500;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)">'+t.name+'</div>'+
+        '<div style="font-size:11.5px;color:var(--text3);white-space:nowrap">'+roleLabel(t.role)+(t.empId?' · '+t.empId:'')+'</div>'+
+      '</div>'+
+      '<div style="display:flex;flex-direction:row;gap:0;align-items:center;flex-shrink:0">'+
+        '<div style="text-align:center;width:72px">'+
+          '<div style="font-family:var(--display);font-weight:700;font-size:17px;color:var(--accent);line-height:1.2">'+tlp.length+'</div>'+
+          '<div style="font-size:10px;color:var(--text3)">leads</div>'+
+        '</div>'+
+        '<div style="text-align:center;width:80px">'+
+          '<div style="font-family:var(--display);font-weight:700;font-size:17px;color:'+rrColor+';line-height:1.2">'+rr_+'%</div>'+
+          '<div style="font-size:10px;color:var(--text3)">response</div>'+
+        '</div>'+
+        '<div style="text-align:center;width:60px">'+
+          '<div style="font-family:var(--display);font-weight:700;font-size:17px;color:var(--green);line-height:1.2">'+pos_+'</div>'+
+          '<div style="font-size:10px;color:var(--text3)">positive</div>'+
+        '</div>'+
+        '<div style="text-align:center;width:60px">'+
+          '<div style="font-family:var(--display);font-weight:700;font-size:17px;color:var(--red);line-height:1.2">'+neg_+'</div>'+
+          '<div style="font-size:10px;color:var(--text3)">negative</div>'+
+        '</div>'+
+        (canClickTeam?'<div style="width:20px;text-align:center;color:var(--text3);font-size:13px">›</div>':'')+
+      '</div>'+
+    '</div>';
+  }).join("");
+
+  // industry breakdown
+  var indMap={};
+  var allMy=getMyLeads(u);
+  allMy.forEach(function(l){var co=STATE.companies.find(function(c){return c.id===l.coid});if(co)indMap[co.ind]=(indMap[co.ind]||0)+1;});
+  var indArr=Object.entries(indMap).sort(function(a,b){return b[1]-a[1]}).slice(0,7);
+  var maxI=indArr.length?indArr[0][1]:1;
+  var indRows=indArr.map(function(e){
+    var pct=Math.round(e[1]/maxI*100);
+    return '<div class="ind-row">'+
+      '<div style="font-size:13px;min-width:110px">'+e[0]+'</div>'+
+      '<div class="ind-bg"><div class="ind-fill" style="width:'+pct+'%;background:var(--accent)"></div></div>'+
+      '<div style="font-size:12px;font-family:var(--mono);color:var(--text3);min-width:22px;text-align:right">'+e[1]+'</div>'+
+    '</div>';
+  }).join("");
+
+  // response rate bars (last 4 weeks)
+  var bars=[3,2,1,0].map(function(w){
+    var wEnd=new Date();wEnd.setDate(wEnd.getDate()-w*7);
+    var wStart=new Date(wEnd);wStart.setDate(wStart.getDate()-7);
+    var wl=allMy.filter(function(l){var d=new Date(l.date);return d>=wStart&&d<=wEnd;});
+    var we=wl.filter(function(l){return l.sent}).length;
+    var rate=wl.length?Math.round(we/wl.length*100):0;
+    var bg=rate>60?"var(--green)":rate>30?"var(--amber)":"var(--accent)";
+    return '<div class="bar-col"><div class="bar-fill" style="height:'+Math.max(4,rate)+'%;background:'+bg+'"></div><div class="bar-lbl">W'+(4-w)+'</div></div>';
+  }).join("");
+
+  // stage pills
+  var stagePills=STAGES.map(function(s){
+    var cnt=pl.filter(function(l){return l.stage===s}).length;
+    if(!cnt)return"";
+    var c=s==="Positive"?"var(--green)":s==="Negative"?"var(--red)":s==="Connected"?"var(--accent)":"var(--text)";
+    return '<div style="text-align:center;padding:12px 16px;background:var(--bg);border-radius:var(--r2);min-width:76px">'+
+      '<div style="font-family:var(--display);font-size:22px;font-weight:700;color:'+c+'">'+cnt+'</div>'+
+      '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+s+'</div>'+
+    '</div>';
+  }).join("");
+
+  return '<div class="page">'+
+    (isViewingOther?
+      '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--amber-l);border:1px solid rgba(217,119,6,.25);border-radius:var(--r2);margin-bottom:14px;font-size:13px">'+
+        '<span style="font-size:16px">👁</span>'+
+        '<span>You are viewing <strong>'+u.name+'</strong>\'s dashboard as an observer.</span>'+
+        '<button class="btn btn-outline btn-sm" style="margin-left:auto;font-size:12px" onclick="stopViewing()">← Back to mine</button>'+
+      '</div>'
+    :"")+
+    '<div class="banner">'+
+      '<div style="position:absolute;top:16px;right:20px;background:rgba(255,255,255,.18);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.3);border-radius:var(--r2);padding:10px 16px;text-align:right">'+
+        '<div id="dash-clock-time" style="font-family:var(--display);font-size:13px;font-weight:500;letter-spacing:.01em;line-height:1;color:rgba(255,255,255,.85)">'+new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:true})+'</div>'+
+        '<div id="dash-clock-date" style="font-size:22px;font-weight:700;margin-top:5px;color:#fff;font-family:var(--display)">'+new Date().toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})+'</div>'+
+      '</div>'+
+      '<div class="banner-name">'+(isViewingOther?u.name+"'s Dashboard":greet+', '+u.name.split(" ")[0]+' 👋')+'</div>'+
+      '<div class="banner-sub">'+roleLabel(u.role)+'</div>'+
+      '<div class="banner-stats">'+
+        '<div><div class="bstat-val">'+total+'</div><div class="bstat-lbl">Leads this period</div></div>'+
+        '<div style="width:1px;background:rgba(255,255,255,.25);align-self:stretch"></div>'+
+        '<div><div class="bstat-val">'+emailed+'</div><div class="bstat-lbl">Emails sent</div></div>'+
+        '<div style="width:1px;background:rgba(255,255,255,.25);align-self:stretch"></div>'+
+        '<div><div class="bstat-val">'+rr+'%</div><div class="bstat-lbl">Response rate</div></div>'+
+        '<div style="width:1px;background:rgba(255,255,255,.25);align-self:stretch"></div>'+
+        '<div><div class="bstat-val">'+pos+'</div><div class="bstat-lbl">Positive</div></div>'+
+      '</div>'+
+    '</div>'+
+
+    '<div class="flex gap2 mb4 flex-wrap">'+pickers+'</div>'+
+
+    (team.length?
+      '<div class="card mb4">'+
+        '<div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">'+
+          '<div>'+
+            '<div class="fw6">'+(u.role==="ra"?"Your BD Manager":"Your Team")+'</div>'+
+            (canClickTeam&&!isViewingOther?'<div style="font-size:11px;color:var(--text3);margin-top:2px">Click any member to view their dashboard</div>':'')+
+          '</div>'+
+          '<div style="display:flex;flex-direction:row;align-items:center;flex-shrink:0">'+
+            '<div style="text-align:center;width:72px;font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Leads</div>'+
+            '<div style="text-align:center;width:80px;font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Response</div>'+
+            '<div style="text-align:center;width:60px;font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Pos</div>'+
+            '<div style="text-align:center;width:60px;font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Neg</div>'+
+            (canClickTeam?'<div style="width:20px"></div>':'')+
+          '</div>'+
+        '</div>'+
+        '<div>'+teamRows+'</div>'+
+        '<div style="padding:8px 14px;background:var(--bg);border-top:1px solid var(--border);border-radius:0 0 var(--r3) var(--r3);font-size:11.5px;color:var(--text3)">Showing stats for: <strong style="color:var(--text)">'+STATE.period+'</strong></div>'+
+      '</div>'
+    :"")+
+
+    '<div class="g2 mb4">'+
+      '<div class="card cp"><div class="flex jb aic mb3"><div><div class="fw6">Response rate trend</div><div class="f12 text3">Last 4 weeks</div></div><span class="bdg bdg-blue">'+rr+'% avg</span></div><div class="bar-chart">'+bars+'</div></div>'+
+      '<div class="card cp"><div class="fw6 mb3">Industry breakdown</div>'+(indRows||'<div class="text3 f13">No leads yet</div>')+'</div>'+
+    '</div>'+
+
+    '<div class="card cp"><div class="flex jb aic mb3"><div class="fw6">Pipeline overview</div><div class="f12 text3">'+STATE.period+'</div></div><div class="flex gap2 flex-wrap">'+stagePills+'</div></div>'+
+
+    // ── REMINDERS WIDGET ─────────────────────────
+    (function(){
+      var today=todayIST();
+      var myR=STATE.reminders.filter(function(r){return r.user_id===STATE.user.id&&r.status==="pending";});
+      var due=myR.filter(function(r){return r.return_date<=today;});
+      var upcoming=myR.filter(function(r){return r.return_date>today;}).slice(0,4);
+      if(!myR.length)return '<div class="card cp mt4">'+
+        '<div class="flex jb aic mb3">'+
+          '<div><div class="fw6">Reminders</div><div class="f12 text3">No reminders set</div></div>'+
+          '<button class="btn btn-outline btn-sm" onclick="goPage(\'reminders\')">Go to Reminders</button>'+
+        '</div>'+
+        '<div style="padding:16px 0;text-align:center;font-size:13px;color:var(--text3)">Set reminders to follow up with contacts at the right time.</div>'+
+      '</div>';
+
+      var dueRows=due.map(function(r){
+        return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">'+
+          '<div style="width:7px;height:7px;border-radius:50%;background:var(--amber);flex-shrink:0"></div>'+
+          '<div style="flex:1;min-width:0">'+
+            '<div style="font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(r.name)+'</div>'+
+            '<div class="f12 text3">'+htmlEsc(r.company||r.email||"")+'</div>'+
+          '</div>'+
+          '<span style="font-size:11px;padding:2px 7px;background:var(--amber);color:#fff;border-radius:10px;white-space:nowrap">Due today</span>'+
+          '<button class="btn btn-sm" style="background:var(--amber);color:#fff;white-space:nowrap" onclick="sendReminderEmail(\''+r.id+'\')">'+ico("send",12)+' Send</button>'+
+        '</div>';
+      }).join("");
+
+      var upcomingRows=upcoming.map(function(r){
+        var days=Math.ceil((new Date(r.return_date)-new Date(today))/86400000);
+        return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">'+
+          '<div style="width:7px;height:7px;border-radius:50%;background:var(--accent);flex-shrink:0"></div>'+
+          '<div style="flex:1;min-width:0">'+
+            '<div style="font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(r.name)+'</div>'+
+            '<div class="f12 text3">'+htmlEsc(r.return_date||'')+(r.reminder_time?' · '+r.reminder_time+' IST':'')+(r.note?' · '+htmlEsc(r.note):'')+'</div>'+
+          '</div>'+
+          '<span style="font-size:11px;padding:2px 8px;background:'+(days<=3?"var(--red-l)":"var(--accent-l)")+';color:'+(days<=3?"var(--red)":"var(--accent)")+';border-radius:10px;white-space:nowrap">'+days+' day'+(days!==1?"s":"")+'</span>'+
+        '</div>';
+      }).join("");
+
+      return '<div class="card cp mt4">'+
+        '<div class="flex jb aic mb3">'+
+          '<div>'+
+            '<div class="fw6">Reminders</div>'+
+            '<div class="f12 text3">'+due.length+' due · '+upcoming.length+' upcoming</div>'+
+          '</div>'+
+          '<div class="flex gap2">'+
+            (due.length?'<button class="btn btn-sm" style="background:var(--amber);color:#fff" onclick="sendAllDue()">Send all due ('+due.length+')</button>':"")+
+            '<button class="btn btn-outline btn-sm" onclick="goPage(\'reminders\')">View all</button>'+
+          '</div>'+
+        '</div>'+
+        (due.length?'<div style="margin-bottom:8px;font-size:12px;font-weight:600;color:var(--amber);text-transform:uppercase;letter-spacing:.05em">⏰ Due now</div>':"")+
+        dueRows+
+        (upcoming.length?'<div style="margin:'+(due.length?"12px":"0")+'px 0 8px;font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">Upcoming</div>':"")+
+        upcomingRows+
+        (myR.length>5?'<div style="padding-top:10px;text-align:center"><button class="btn btn-outline btn-sm" onclick="goPage(\'reminders\')">View all '+myR.length+' reminders</button></div>':"")+
+      '</div>';
+    })()+
+
+  '</div>';
+}
+
+function filterPeriod(leads,p){
+  var now=new Date();
+  return leads.filter(function(l){
+    var d=new Date(l.date);
+    if(p==="daily")return l.date===todayIST();
+    if(p==="weekly"){var w=new Date(now);w.setDate(w.getDate()-7);return d>=w;}
+    if(p==="monthly")return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();
+    if(p==="quarterly"){var q=new Date(now);q.setMonth(q.getMonth()-3);return d>=q;}
+    return true;
+  });
+}
+
+// ── LEADS ──────────────────────────────────────
+function renderJobs(){
+  var u=STATE.user;
+  var jobs=getMyJobs(u);
+  var f=STATE.jobsFilter;
+  if(f.search){
+    var q=f.search.toLowerCase();
+    jobs=jobs.filter(function(j){
+      if((j.position||"").toLowerCase().indexOf(q)>-1)return true;
+      if((j.company_name||"").toLowerCase().indexOf(q)>-1)return true;
+      if((j.location||"").toLowerCase().indexOf(q)>-1)return true;
+      var cs=jobContacts(j.id);
+      for(var i=0;i<cs.length;i++){
+        var c=cs[i];
+        if(((c.first_name||"")+" "+(c.last_name||"")).toLowerCase().indexOf(q)>-1)return true;
+        if((c.email||"").toLowerCase().indexOf(q)>-1)return true;
+      }
+      return false;
+    });
+  }
+  if(f.stages&&f.stages.length)jobs=jobs.filter(function(j){return f.stages.indexOf(j.stage)>-1;});
+  if(f.industries&&f.industries.length)jobs=jobs.filter(function(j){return f.industries.indexOf(j.industry||j.company_ind||"")>-1;});
+  if(f.dateRange&&f.dateRange!=="all"&&f.dateRange!=="custom"){var _now=new Date();var _today=todayIST();var _cut=null;if(f.dateRange==="today")_cut=_today;else if(f.dateRange==="yesterday"){var _yy=new Date(_now);_yy.setDate(_yy.getDate()-1);_cut=_yy.toISOString().slice(0,10);}else if(f.dateRange==="week"){var _ww=new Date(_now);_ww.setDate(_ww.getDate()-7);_cut=_ww.toISOString().slice(0,10);}if(_cut){if(f.dateRange==="today"||f.dateRange==="yesterday")jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)===_cut;});else jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)>=_cut;});}}
+  if(f.dateRange==="custom"){if(f.dateFrom)jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)>=f.dateFrom;});if(f.dateTo)jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)<=f.dateTo;});}
+
+  var stages=["Unassigned","Assigned","Connected","Rejected","Future","Qualified"];
+  var stageOpts=stages.map(function(st){return '<option value="'+st+'"'+(f.stage===st?" selected":"")+'>'+st+'</option>';}).join("");
+
+  var canChangeStageInline=userHasAnyRole(u,'admin','bd','bd_lead');
+  var _tp=Math.max(1,Math.ceil(jobs.length/20));
+  var _pg=Math.min(STATE.leadsPage||0,_tp-1);
+  var rows=jobs.slice(_pg*20,(_pg+1)*20).map(function(j){
+    var cs=jobContacts(j.id);
+    var primary=cs[0]||{};
+    var stageColor={Unassigned:"#94a3b8",Assigned:"#3b82f6",Connected:"#8b5cf6",Rejected:"#ef4444",Future:"#f59e0b",Qualified:"#10b981"}[j.stage]||"#64748b";
+    var isChk=!!(STATE.jobsSel&&STATE.jobsSel[j.id]);
+    return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer;background:'+(isChk?'var(--accent-l)':'')+'" onclick="openJob(\''+j.id+'\')">'+
+      '<td style="padding:12px;width:36px" onclick="event.stopPropagation()"><input type="checkbox" '+(isChk?'checked':'')+' onchange="toggleJobSel(\''+j.id+'\',this.checked)" style="width:15px;height:15px;cursor:pointer;accent-color:var(--accent)"/></td>'+
+      '<td style="padding:12px"><div style="font-weight:600;color:var(--text)">'+escHtml(j.company_name)+(j.is_duplicate?'<span style="margin-left:6px;background:#fef9c3;color:#b45309;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">DUP</span>':'')+(j.freshness==='Old'?'<span style="margin-left:6px;background:#fef2f2;color:#dc2626;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">OLD</span>':'')+(j.freshness==='New'?'<span style="margin-left:6px;background:#f0fdf4;color:#16a34a;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">NEW</span>':'')+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.company_ind)+'</div></td>'+
+      '<td style="padding:12px"><div style="font-weight:500">'+escHtml(j.position)+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.location||"—")+'</div></td>'+
+      '<td style="padding:12px"><div>'+escHtml((primary.first_name||"")+" "+(primary.last_name||""))+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(primary.email||"—")+'</div></td>'+
+      '<td style="padding:12px;text-align:center"><span style="background:rgba(99,102,241,.1);color:var(--accent);padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600">'+cs.length+'</span></td>'+
+      (canChangeStageInline?'<td style="padding:12px"><select onchange="changeJobStage(\''+j.id+'\',this.value);event.stopPropagation()" onclick="event.stopPropagation()" style="font-size:11px;padding:4px 8px;border:1.5px solid '+stageColor+';border-radius:8px;background:'+stageColor+'1a;color:'+stageColor+';font-weight:600;cursor:pointer">'+['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'].map(function(s){return'<option value="'+s+'"'+(j.stage===s?' selected':'')+'>'+s+'</option>';}).join('')+'</select></td>':'<td style="padding:12px"><span style="background:'+stageColor+'1a;color:'+stageColor+';padding:4px 10px;border-radius:10px;font-size:11px;font-weight:600">'+j.stage+'</span></td>')+
+      '<td style="padding:12px;font-size:12px;color:var(--text2)">'+(j.assigned_bd_name?'<div style="font-weight:500">'+escHtml(j.assigned_bd_name)+'</div><div style="font-size:10px;color:var(--text3)">'+( j.assigned_at?(new Date(j.assigned_at)).toLocaleDateString("en-GB",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"")+'</div>':'<span style="color:var(--text3)">—</span>')+'</td>'+'<td style="padding:12px;font-size:11px;color:var(--text3)">'+escHtml(j.created_date||"")+'</td>'+
+    '</tr>';
+  }).join("");
+
+  if(!rows)rows='<tr><td colspan="9" style="padding:40px;text-align:center;color:var(--text3)">No leads found yet.</td></tr>';
+
+  // RA sees form at top + their leads below; others see search/filter + table
+  var isRA=(u.role==='ra');
+
+  // Build RA-specific rows with 24hr edit button
+  var now24=new Date();
+  var raRows=jobs.map(function(j){
+    var cs=jobContacts(j.id);
+    var primary=cs[0]||{};
+    var stageColor={Unassigned:'#94a3b8',Assigned:'#3b82f6',Connected:'#8b5cf6',Rejected:'#ef4444',Future:'#f59e0b','In Discussion':'#f59e0b',Qualified:'#10b981'}[j.stage]||'#64748b';
+    var hoursOld=(now24-new Date(j.created_at))/3600000;
+    var canRAEdit=hoursOld<=24;
+    var editBtn=canRAEdit?
+      '<button onclick="raFormEdit(\''+j.id+'\')" style="font-size:11px;padding:4px 10px;background:var(--accent-l);color:var(--accent);border:1px solid rgba(37,99,235,.2);border-radius:6px;cursor:pointer;font-weight:600">✏ Edit</button>':
+      '<span style="font-size:10px;color:var(--text3)">Locked</span>';
+    return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer" onclick="openJob(\''+j.id+'\')">'+
+      '<td style="padding:12px"><div style="font-weight:600;color:var(--text)">'+escHtml(j.company_name)+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.company_ind||j.industry||'')+'</div></td>'+
+      '<td style="padding:12px;font-weight:500">'+escHtml(j.position)+'</td>'+
+      '<td style="padding:12px"><div>'+escHtml((primary.first_name||'')+(primary.last_name?' '+primary.last_name:''))+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(primary.email||'\u2014')+'</div></td>'+
+      '<td style="padding:12px;text-align:center"><span style="background:rgba(99,102,241,.1);color:var(--accent);padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600">'+cs.length+'</span></td>'+
+      '<td style="padding:12px"><span style="background:'+stageColor+'1a;color:'+stageColor+';padding:4px 10px;border-radius:10px;font-size:11px;font-weight:600">'+j.stage+'</span></td>'+
+      '<td style="padding:12px;font-size:11px;color:var(--text3)">'+escHtml(j.created_date||'')+'</td>'+
+      '<td style="padding:12px" onclick="event.stopPropagation()">'+editBtn+'</td>'+
+    '</tr>';
+  }).join('');
+  if(!raRows)raRows='<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No leads submitted yet. Use the form above to add your first lead.</td></tr>';
+
+
+  if(isRA){
+    return '<div style="padding:24px">'+
+      renderRALeadForm()+
+      '<div style="margin:24px 0 12px;font-weight:700;font-size:13px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Your submitted leads ('+jobs.length+')</div>'+
+      '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden">'+
+        '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
+          '<thead style="background:var(--bg3);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
+            '<tr><th style="padding:12px;text-align:left">Company</th><th style="padding:12px;text-align:left">Position</th><th style="padding:12px;text-align:left">Primary Contact</th><th style="padding:12px;text-align:center">Contacts</th><th style="padding:12px;text-align:left">Stage</th><th style="padding:12px;text-align:left">Created</th><th style="padding:12px"></th></tr>'+
+          '</thead>'+
+          '<tbody>'+raRows+'</tbody>'+
+        '</table>'+
+      '</div>'+
+      '<div style="margin-top:10px;font-size:12px;color:var(--text3)">'+jobs.length+' lead'+(jobs.length===1?'':'s')+' submitted by you</div>'+
+    '</div>';
+  }
+
+  var allStagesList=['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'];
+  var allIndustriesList=['Engineering','Healthcare','Legal','Accounting','Management','Other'];
+  var stageActive=f.stages&&f.stages.length>0;
+  var indActive=f.industries&&f.industries.length>0;
+  var dateActive=f.dateRange&&f.dateRange!=='all';
+  var anyActive=stageActive||indActive||dateActive;
+  function mkChkDrop(name,key,items,selected,active){
+    var btn='<button onclick="event.stopPropagation();STATE.openDrop=STATE.openDrop===\''+name+'\' ?null:\''+name+'\';render()" style="padding:9px 13px;border:'+(active?'1.5px solid var(--accent)':'1px solid var(--border)')+';border-radius:8px;background:'+(active?'var(--accent-l)':'var(--bg2)')+';color:'+(active?'var(--accent)':'var(--text)')+';font-size:13px;font-weight:'+(active?'600':'400')+';cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap">'+(active?name+' ('+selected.length+')':name)+' <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></button>';
+    var panel='';
+    if(STATE.openDrop===name){
+      panel='<div style="position:absolute;top:calc(100% + 4px);left:0;z-index:9000;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);min-width:190px;padding:6px 0" onclick="event.stopPropagation()">'+
+        items.map(function(v){var on=selected.indexOf(v)>-1;return '<label style="display:flex;align-items:center;gap:9px;padding:7px 14px;cursor:pointer;font-size:13px;background:'+(on?'var(--accent-l)':'transparent')+';color:'+(on?'var(--accent)':'var(--text)')+'"><input type="checkbox" '+(on?'checked':'')+' onchange="toggleJobFilter(\''+key+'\',\''+v+'\',this.checked)" style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer"/>'+v+'</label>';}).join('')+
+        (selected.length?'<div style="border-top:1px solid var(--border);padding:6px 14px;margin-top:2px"><button onclick="STATE.jobsFilter.'+key+'=[];STATE.leadsPage=0;render()" style="font-size:11.5px;color:var(--red);background:none;border:none;cursor:pointer;padding:0">Clear</button></div>':'')+
+      '</div>';
+    }
+    return '<div style="position:relative">'+btn+panel+'</div>';
+  }
+  var dateLabel=f.dateRange==='today'?'Today':f.dateRange==='yesterday'?'Yesterday':f.dateRange==='week'?'This week':f.dateRange==='custom'&&(f.dateFrom||f.dateTo)?((f.dateFrom||'…')+' → '+(f.dateTo||'…')):'Date';
+  var dateBtn='<div style="position:relative">'+
+    '<button onclick="event.stopPropagation();STATE.openDrop=STATE.openDrop===\'date\' ?null:\'date\';render()" style="padding:9px 13px;border:'+(dateActive?'1.5px solid var(--accent)':'1px solid var(--border)')+';border-radius:8px;background:'+(dateActive?'var(--accent-l)':'var(--bg2)')+';color:'+(dateActive?'var(--accent)':'var(--text)')+';font-size:13px;font-weight:'+(dateActive?'600':'400')+';cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap">'+dateLabel+' <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></button>'+
+    (STATE.openDrop==='date'?
+      '<div style="position:absolute;top:calc(100% + 4px);left:0;z-index:9000;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);padding:12px 14px;min-width:240px" onclick="event.stopPropagation()">'+
+        // Preset chips
+        '<div style="display:flex;flex-direction:column;gap:2px;margin-bottom:8px">'+
+          ['today','yesterday','week'].map(function(val){var lbl=val==='today'?'Today':val==='yesterday'?'Yesterday':'This week';var on=f.dateRange===val;return '<button onclick="STATE.jobsFilter.dateRange=STATE.jobsFilter.dateRange===\''+val+'\' ?\'all\':\''+val+'\';STATE.jobsFilter.dateFrom=\'\';STATE.jobsFilter.dateTo=\'\';STATE.leadsPage=0;render()" style="padding:7px 12px;border-radius:7px;font-size:13px;cursor:pointer;text-align:left;border:1px solid '+(on?'var(--accent)':'var(--border)')+';background:'+(on?'var(--accent-l)':'transparent')+';color:'+(on?'var(--accent)':'var(--text)')+';font-weight:'+(on?'600':'400')+'">'+lbl+'</button>';}).join('')+
+        '</div>'+
+        // Custom separator
+        '<div style="border-top:1px solid var(--border);margin:8px 0 10px"></div>'+
+        '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Custom range</div>'+
+        '<div style="display:flex;flex-direction:column;gap:8px">'+
+          '<div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;color:var(--text2);width:28px">From</span><input type="date" value="'+escAttr(f.dateFrom||'')+'" onchange="STATE.jobsFilter.dateRange=\'custom\';STATE.jobsFilter.dateFrom=this.value;STATE.leadsPage=0;render()" style="flex:1;padding:6px 10px;border:1px solid var(--border2);border-radius:7px;font-size:13px;background:var(--card);color:var(--text)"/></div>'+
+          '<div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;color:var(--text2);width:28px">To</span><input type="date" value="'+escAttr(f.dateTo||'')+'" onchange="STATE.jobsFilter.dateRange=\'custom\';STATE.jobsFilter.dateTo=this.value;STATE.leadsPage=0;render()" style="flex:1;padding:6px 10px;border:1px solid var(--border2);border-radius:7px;font-size:13px;background:var(--card);color:var(--text)"/></div>'+
+        '</div>'+
+        (dateActive?'<button onclick="STATE.jobsFilter.dateRange=\'all\';STATE.jobsFilter.dateFrom=\'\';STATE.jobsFilter.dateTo=\'\';STATE.leadsPage=0;render()" style="margin-top:10px;font-size:11.5px;color:var(--red);background:none;border:none;cursor:pointer;padding:0">Clear</button>':'')+
+      '</div>':'')  +
+  '</div>';
+
+  return '<div style="padding:24px">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;gap:12px;flex-wrap:wrap">'+
+      '<div style="display:flex;gap:10px;align-items:center;flex:1;min-width:280px;flex-wrap:wrap">'+
+        '<input id="jobs-search" placeholder="Search jobs, companies, contacts..." value="'+escAttr(f.search)+'" style="flex:1;max-width:340px;padding:9px 13px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);font-size:13px"/>'+
+        mkChkDrop('Stage','stages',allStagesList,f.stages||[],stageActive)+
+        mkChkDrop('Industry','industries',allIndustriesList,f.industries||[],indActive)+
+        dateBtn+
+        (anyActive?'<button onclick="STATE.jobsFilter.stages=[];STATE.jobsFilter.industries=[];STATE.jobsFilter.dateRange=\'all\';STATE.jobsFilter.dateFrom=\'\';STATE.jobsFilter.dateTo=\'\';STATE.openDrop=null;STATE.leadsPage=0;render()" style="padding:7px 12px;border:1.5px solid var(--red);border-radius:8px;background:var(--red-l);color:var(--red);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">&#10005; Clear</button>':'')+
+      '</div>'+
+      '<div style="display:flex;gap:8px;align-items:center">'+
+        (u.role==='ra_lead'||u.role==='admin'?'<button onclick="openExportLeads()" style="background:var(--card);color:var(--text);border:1.5px solid var(--border);padding:9px 15px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px">'+ico("dl",13)+' Export</button>':'')+
+        '<button onclick="triggerImport()" style="background:var(--card);color:var(--text);border:1.5px solid var(--border);padding:9px 15px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px">'+ico("upload",13)+' Import Excel</button>'+
+        (u.role!=='ra'?'<button onclick="openAddJob()" style="background:var(--accent);color:#fff;border:0;padding:10px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px">+ Add Job</button>':'')+
+        '<input type="file" id="xl-import" accept=".xlsx,.xls" style="display:none" onchange="importXL(this)"/>'+
+      '</div>'+
+    '</div>'+
+    (Object.keys(STATE.jobsSel||{}).filter(function(k){return STATE.jobsSel[k];}).length?
+      '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--accent-l);border:1.5px solid var(--accent);border-radius:10px;margin-bottom:10px;flex-wrap:wrap">'+
+        '<div style="font-size:13px;font-weight:600;color:var(--accent)">'+Object.keys(STATE.jobsSel).filter(function(k){return STATE.jobsSel[k];}).length+' selected</div>'+
+        '<div style="flex:1"></div>'+
+        '<label style="font-size:12px;color:var(--text2);font-weight:500">Change stage to:</label>'+
+        '<select id="bulk-job-stage" style="padding:6px 10px;border:1.5px solid var(--border2);border-radius:7px;font-size:13px;background:var(--card);color:var(--text);cursor:pointer">'+
+          '<option value="">— Pick stage —</option>'+
+          ['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'].map(function(s){return'<option value="'+s+'">'+s+'</option>';}).join('')+
+        '</select>'+
+        '<button onclick="applyBulkJobStage()" style="background:var(--accent);color:#fff;border:0;padding:7px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">Apply</button>'+
+        '<button onclick="STATE.jobsSel={};render()" style="background:transparent;color:var(--text2);border:1px solid var(--border2);padding:7px 12px;border-radius:7px;font-size:12px;cursor:pointer">Clear</button>'+
+      '</div>'
+    :'')+
+    '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden">'+
+      '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
+        '<thead style="background:var(--bg3);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
+          '<tr><th style="padding:12px;width:36px"><input type="checkbox" id="jobs-sel-all" onchange="toggleAllJobs(this.checked)" onclick="event.stopPropagation()" style="width:15px;height:15px;cursor:pointer;accent-color:var(--accent)"/></th><th style="padding:12px;text-align:left">Company</th><th style="padding:12px;text-align:left">Position</th><th style="padding:12px;text-align:left">Primary Contact</th><th style="padding:12px;text-align:center">Contacts</th><th style="padding:12px;text-align:left">Stage</th><th style="padding:12px;text-align:left">Assigned BD</th><th style="padding:12px;text-align:left">Created</th></tr>'+
+        '</thead>'+
+        '<tbody>'+rows+'</tbody>'+
+      '</table>'+
+    '</div>'+
+    '<div style="margin-top:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">'+
+      '<div style="font-size:12px;color:var(--text3)">'+jobs.length+' lead'+(jobs.length===1?'':'s')+' · page '+(_pg+1)+' of '+_tp+'</div>'+
+      (_tp>1?'<div style="display:flex;gap:5px">'+
+        '<button onclick="setLeadsPage('+(_pg-1)+')" style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer" '+(_pg===0?'disabled':'')+'>&#8592; Prev</button>'+
+        '<span style="padding:5px 10px;font-size:12px;font-weight:600">'+(_pg+1)+' / '+_tp+'</span>'+
+        '<button onclick="setLeadsPage('+(_pg+1)+')" style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer" '+(_pg>=_tp-1?'disabled':'')+'>Next &#8594;</button>'+
+      '</div>':'')+
+    '</div>'+
+  '</div>';
+}
+
+// Bind search/filter inputs (called from render() after DOM replace)
+function bindJobsControls(){
+  var s=document.getElementById("jobs-search");
+  if(s)s.oninput=function(){STATE.jobsFilter.search=this.value;render();var x=document.getElementById("jobs-search");if(x){x.focus();x.setSelectionRange(x.value.length,x.value.length);}};
+  var st=document.getElementById("jobs-stage");
+  if(st)st.onchange=function(){STATE.jobsFilter.stage=this.value;render();};
+}
+
+function openJob(id){ STATE.detailJob=id; STATE.modal={type:"jobDetail",id:id}; render(); }
+function openAddJob(){ STATE.modal={type:"addJob"}; render(); }
+
+// ── JOB DETAIL MODAL ──────────────────────────────
+function renderJobDetailModal(){
+  var j=jobById(STATE.modal.id); if(!j) return "";
+  var u=STATE.user;
+  var canChangeStage=userHasAnyRole(u,'admin','bd','bd_lead');
+  var canEdit=userHasRole(u,'admin')||j.created_by===u.id||j.assigned_to===u.id||j.assigned_to_bd===u.id;
+  var bdStages=['Connected','Rejected','Future','In Discussion'];
+  var allStages=['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'];
+  var cs=jobContacts(j.id);
+  var stageOpts=allStages.map(function(st){return '<option value="'+st+'"'+(j.stage===st?" selected":"")+'>'+st+'</option>';}).join("");
+
+  var emailStatusColors={valid:'var(--green)',invalid:'var(--red)',deactivated:'var(--text3)',out_of_office:'var(--amber)'};
+  var emailStatusLabels={valid:'Valid',invalid:'Invalid',deactivated:'Deactivated',out_of_office:'Out of Office'};
+  var canChangeEmailStatus=userHasAnyRole(u,'admin','bd','bd_lead');
+
+  var contactRows=cs.map(function(c){
+    var es=c.email_status||'valid';
+    var esColor=emailStatusColors[es]||'var(--text3)';
+    var esLabel=emailStatusLabels[es]||es;
+    var emailStatusBadge='<span style="font-size:10px;padding:2px 7px;border-radius:6px;font-weight:600;background:'+esColor+'22;color:'+esColor+'">'+esLabel+'</span>';
+    var emailStatusSel=canChangeEmailStatus?
+      '<select onchange="changeEmailStatus(\''+c.id+'\',this.value,\''+escHtml(c.email||'')+'\',\''+escHtml((c.first_name||'')+' '+(c.last_name||''))+'\')" style="font-size:11px;padding:3px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);margin-top:4px">'+
+        ['valid','invalid','deactivated','out_of_office'].map(function(s){
+          return '<option value="'+s+'"'+(es===s?' selected':'')+'>'+emailStatusLabels[s]+'</option>';
+        }).join('')+
+      '</select>':'';
+    return '<div style="background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:12px;margin-bottom:8px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:start;gap:8px">'+
+        '<div style="flex:1">'+
+          '<div style="font-weight:600;color:var(--text)">'+escHtml((c.first_name||"")+" "+(c.last_name||""))+(c.is_primary?' <span style="background:rgba(16,185,129,.15);color:#10b981;padding:2px 7px;border-radius:8px;font-size:10px;margin-left:4px">PRIMARY</span>':'')+'</div>'+
+          '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+escHtml(c.designation||"—")+'</div>'+
+          '<div style="font-size:12px;color:var(--text2);margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+
+            '\ud83d\udce7 '+escHtml(c.email||"—")+' '+emailStatusBadge+
+          '</div>'+
+          (canChangeEmailStatus?'<div style="margin-top:5px">'+emailStatusSel+(c.ooo_until&&es==='out_of_office'?'<span style="font-size:11px;color:var(--amber);margin-left:8px">until '+escHtml(c.ooo_until)+'</span>':'')+'</div>':'')+
+          (c.phone?'<div style="font-size:12px;color:var(--text2);margin-top:4px">\ud83d\udcde '+escHtml(c.phone)+'</div>':'')+
+          (c.linkedin?'<div style="font-size:12px;color:var(--text2);margin-top:2px">\ud83d\udd17 '+escHtml(c.linkedin)+'</div>':'')+
+        '</div>'+
+        '<div style="display:flex;flex-direction:column;gap:4px">'+
+          (c.email?'<button onclick="sendEmailToContact(\''+c.id+'\')" style="background:var(--accent);color:#fff;border:0;padding:5px 10px;border-radius:6px;font-size:11px;cursor:pointer">Email</button>':'')+
+          (canEdit?'<button onclick="deleteContact(\''+c.id+'\')" style="background:transparent;color:#ef4444;border:1px solid #ef4444;padding:5px 10px;border-radius:6px;font-size:11px;cursor:pointer">Delete</button>':'')+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  }).join("");
+  if(!contactRows)contactRows='<div style="color:var(--text3);font-size:12px;padding:12px;text-align:center">No contacts yet.</div>';
+
+  return '<div style="background:var(--bg2);border-radius:14px;width:min(720px,94vw);max-height:90vh;overflow-y:auto;border:1px solid var(--border)">'+
+    '<div style="padding:20px 24px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:start;gap:12px">'+
+      '<div><div style="font-size:18px;font-weight:700;color:var(--text)">'+escHtml(j.position)+'</div><div style="font-size:13px;color:var(--text3);margin-top:3px">'+escHtml(j.company_name)+(j.location?" · "+escHtml(j.location):"")+'</div></div>'+
+      '<button onclick="closeModal()" style="background:transparent;border:0;color:var(--text3);font-size:22px;cursor:pointer;line-height:1">×</button>'+
+    '</div>'+
+    '<div style="padding:20px 24px">'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">'+
+        '<div><label style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Stage</label>'+
+          (canChangeStage?'<select id="job-stage-sel" onchange="changeJobStage(\''+j.id+'\',this.value)" style="width:100%;margin-top:5px;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px">'+stageOpts+'</select>':'<div style="margin-top:5px;font-size:13px;color:var(--text)">'+j.stage+'</div>')+
+        '</div>'+
+        '<div><label style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Source</label><div style="margin-top:5px;font-size:13px;color:var(--text)">'+escHtml(j.source||"—")+'</div></div>'+
+      '</div>'+
+      '<div style="margin-bottom:18px"><label style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Notes</label>'+
+        (canEdit?'<textarea id="job-notes" onblur="saveJobNotes(\''+j.id+'\',this.value)" style="width:100%;margin-top:5px;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px;min-height:64px;resize:vertical;font-family:inherit">'+escHtml(j.notes||"")+'</textarea>':'<div style="margin-top:5px;font-size:13px;color:var(--text)">'+escHtml(j.notes||"—")+'</div>')+
+      '</div>'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-size:13px;font-weight:600;color:var(--text)">Contacts ('+cs.length+')</div>'+
+        (canEdit?'<button onclick="openAddContact(\''+j.id+'\')" style="background:var(--accent);color:#fff;border:0;padding:6px 12px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer">+ Add Contact</button>':'')+
+      '</div>'+
+      contactRows+
+      renderResearchSection(j, u.role==='ra'&&j.created_by===u.id)+
+      (canEdit?'<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border2);display:flex;justify-content:flex-end;gap:8px"><button onclick="deleteJob(\''+j.id+'\')" style="background:transparent;color:#ef4444;border:1px solid #ef4444;padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer">Delete Job</button></div>':'')+
+    '</div>'+
+  '</div>';
+}
+
+// ── ADD JOB MODAL ─────────────────────────────────
+function renderAddJobModal(){
+  var u=STATE.user;
+  var coOpts=STATE.companies.map(function(c){return '<option value="'+c.id+'">'+escHtml(c.name)+'</option>';}).join("");
+  return '<div style="background:var(--bg2);border-radius:14px;width:min(560px,94vw);max-height:90vh;overflow-y:auto;border:1px solid var(--border)">'+
+    '<div style="padding:18px 22px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between"><div style="font-size:16px;font-weight:700;color:var(--text)">Add Job</div><button onclick="closeModal()" style="background:transparent;border:0;color:var(--text3);font-size:22px;cursor:pointer;line-height:1">×</button></div>'+
+    '<div style="padding:20px 22px">'+
+      '<div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text3)">Company</label><select id="aj-co" style="width:100%;margin-top:4px;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px">'+coOpts+'</select></div>'+
+      '<div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text3)">Position</label><input id="aj-pos" placeholder="e.g. Senior Software Engineer" style="width:100%;margin-top:4px;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/></div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">'+
+        '<div><label style="font-size:11px;color:var(--text3)">Location</label><input id="aj-loc" style="width:100%;margin-top:4px;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/></div>'+
+        '<div><label style="font-size:11px;color:var(--text3)">Source</label><input id="aj-src" placeholder="LinkedIn, Indeed..." style="width:100%;margin-top:4px;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/></div>'+
+      '</div>'+
+      '<div style="margin-bottom:14px"><label style="font-size:11px;color:var(--text3)">Job URL (optional)</label><input id="aj-url" style="width:100%;margin-top:4px;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/></div>'+
+      '<div style="font-size:12px;color:var(--text3);margin-bottom:8px;padding-top:6px;border-top:1px solid var(--border2);padding-top:12px">First contact (you can add more after creating)</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
+        '<input id="aj-fn" placeholder="First name *" style="padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/>'+
+        '<input id="aj-ln" placeholder="Last name" style="padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/>'+
+      '</div>'+
+      '<input id="aj-desig" placeholder="Designation" style="width:100%;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px;margin-bottom:10px"/>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">'+
+        '<input id="aj-email" placeholder="Email" style="padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/>'+
+        '<input id="aj-phone" placeholder="Phone" style="padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/>'+
+      '</div>'+
+      '<div style="display:flex;justify-content:flex-end;gap:8px"><button onclick="closeModal()" style="background:transparent;color:var(--text3);border:1px solid var(--border);padding:9px 16px;border-radius:7px;cursor:pointer;font-size:13px">Cancel</button><button onclick="submitAddJob()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600">Create Job</button></div>'+
+    '</div>'+
+  '</div>';
+}
+
+// ── ADD CONTACT MODAL ─────────────────────────────
+function renderAddContactModal(){
+  var jid=STATE.modal.job_id;
+  return '<div style="background:var(--bg2);border-radius:14px;width:min(480px,94vw);border:1px solid var(--border)">'+
+    '<div style="padding:18px 22px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between"><div style="font-size:16px;font-weight:700;color:var(--text)">Add Contact</div><button onclick="backToJob(\''+jid+'\')" style="background:transparent;border:0;color:var(--text3);font-size:22px;cursor:pointer;line-height:1">×</button></div>'+
+    '<div style="padding:20px 22px">'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
+        '<input id="ac-fn" placeholder="First name *" style="padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/>'+
+        '<input id="ac-ln" placeholder="Last name" style="padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/>'+
+      '</div>'+
+      '<input id="ac-desig" placeholder="Designation" style="width:100%;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px;margin-bottom:10px"/>'+
+      '<input id="ac-email" placeholder="Email" style="width:100%;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px;margin-bottom:10px"/>'+
+      '<input id="ac-phone" placeholder="Phone" style="width:100%;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px;margin-bottom:10px"/>'+
+      '<input id="ac-linkedin" placeholder="LinkedIn URL" style="width:100%;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px;margin-bottom:14px"/>'+
+      '<div style="display:flex;justify-content:flex-end;gap:8px"><button onclick="backToJob(\''+jid+'\')" style="background:transparent;color:var(--text3);border:1px solid var(--border);padding:9px 16px;border-radius:7px;cursor:pointer;font-size:13px">Cancel</button><button onclick="submitAddContact(\''+jid+'\')" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600">Add Contact</button></div>'+
+    '</div>'+
+  '</div>';
+}
+
+// ── JOB/CONTACT ACTIONS (local STATE; B2 will swap to API) ──
+function changeJobStage(jid, st){
+  var j=jobById(jid); if(!j) return;
+  var old=j.stage; j.stage=st;
+  STATE.activities.unshift({id:"a"+Date.now(),lid:jid,by:STATE.user.id,type:"stage_change",txt:"Stage: "+old+" → "+st,dt:new Date().toISOString()});
+  showToast("Stage updated","success"); render();
+}
+function saveJobNotes(jid, val){
+  var j=jobById(jid); if(!j) return;
+  if (j.notes===val) return;
+  j.notes=val; showToast("Notes saved","success");
+}
+function deleteJob(jid){
+  if(!confirm("Delete this job and all its contacts?")) return;
+  STATE.jobs=STATE.jobs.filter(function(j){return j.id!==jid;});
+  STATE.contacts=STATE.contacts.filter(function(c){return c.job_id!==jid;});
+  STATE.modal=null; STATE.detailJob=null;
+  showToast("Job deleted","success"); render();
+}
+function submitAddJob(){
+  var co=document.getElementById("aj-co").value;
+  var pos=document.getElementById("aj-pos").value.trim();
+  var fn=document.getElementById("aj-fn").value.trim();
+  if(!pos){showToast("Position is required","error");return;}
+  if(!fn){showToast("First contact name is required","error");return;}
+  var c=STATE.companies.find(function(x){return x.id===co;})||{};
+  var jid="j"+Date.now();
+  STATE.jobs.unshift({
+    id:jid, company_id:co, company_name:c.name||"", company_ind:c.ind||"", company_web:c.web||"",
+    position:pos, location:document.getElementById("aj-loc").value.trim(),
+    source:document.getElementById("aj-src").value.trim()||"LinkedIn",
+    job_url:document.getElementById("aj-url").value.trim(),
+    stage:"Active", notes:"",
+    created_by:STATE.user.id, assigned_to:STATE.user.id,
+    created_date:new Date().toISOString().slice(0,10), created_at:new Date().toISOString()
+  });
+  STATE.contacts.unshift({
+    id:"c"+Date.now(), job_id:jid,
+    first_name:fn, last_name:document.getElementById("aj-ln").value.trim(),
+    designation:document.getElementById("aj-desig").value.trim(),
+    email:document.getElementById("aj-email").value.trim(),
+    phone:document.getElementById("aj-phone").value.trim(),
+    linkedin:"", is_primary:true
+  });
+  STATE.modal=null; showToast("Job created","success"); render();
+}
+function openAddContact(jid){ STATE.modal={type:"addContact",job_id:jid}; render(); }
+function backToJob(jid){ STATE.modal={type:"jobDetail",id:jid}; render(); }
+function submitAddContact(jid){
+  var fn=document.getElementById("ac-fn").value.trim();
+  if(!fn){showToast("First name is required","error");return;}
+  var existing=jobContacts(jid);
+  STATE.contacts.push({
+    id:"c"+Date.now(), job_id:jid,
+    first_name:fn, last_name:document.getElementById("ac-ln").value.trim(),
+    designation:document.getElementById("ac-desig").value.trim(),
+    email:document.getElementById("ac-email").value.trim(),
+    phone:document.getElementById("ac-phone").value.trim(),
+    linkedin:document.getElementById("ac-linkedin").value.trim(),
+    is_primary:existing.length===0
+  });
+  showToast("Contact added","success");
+  STATE.modal={type:"jobDetail",id:jid}; render();
+}
+function deleteContact(cid){
+  if(!confirm("Delete this contact?")) return;
+  var c=STATE.contacts.find(function(x){return x.id===cid;}); if(!c) return;
+  var jid=c.job_id;
+  STATE.contacts=STATE.contacts.filter(function(x){return x.id!==cid;});
+  showToast("Contact deleted","success"); render();
+}
+function sendEmailToContact(cid){
+  var c=STATE.contacts.find(function(x){return x.id===cid;}); if(!c) return;
+  var j=jobById(c.job_id)||{};
+  STATE.composeContactId=cid+'|'+(j.id||'');
+  STATE.composeCompanyId=j.company_id||null;
+  STATE.manualEmail=null;STATE.genEmail=null;STATE.emailTab='compose';STATE.showAIPanel=false;
+  STATE.page="email"; STATE.modal=null; showToast("Compose email to "+c.first_name,"info"); render();
+}
+function closeModal(){ STATE.modal=null; render(); }
+
+// ── EMAIL ──────────────────────────────────────
+function renderEmail(){
+  var u=STATE.user;
+  // BD sees pending+queued+sent; others see sent only
+  var isBD=userHasAnyRole(u,'bd','bd_lead','admin','ra_lead');
+  var pending=STATE.pendingEmails||[];
+  var sentEmails=STATE.sentEmails||[];
+  var tabs=isBD?['pending','compose','sent','outreachplan']:['compose','sent','outreachplan'];
+  if(!STATE.emailTab)STATE.emailTab=isBD?'pending':'compose';
+
+  var tabBar=tabs.map(function(t){
+    var lbl=t==='pending'?('Pending'+(pending.length?' ('+pending.length+')':'')):t==='outreachplan'?'Outreach Plan':t.charAt(0).toUpperCase()+t.slice(1);
+    return '<div class="tab'+(STATE.emailTab===t?' active':'')+'" onclick="setEmailTab(\''+t+'\')">'+lbl+'</div>';
+  }).join('');
+
+  // ── PENDING TAB ──
+  var pendingHtml='';
+  if(STATE.emailTab==='pending'){
+    var totalRecipients=pending.length;
+    var selPendingCount=Object.keys(STATE.pendingEmailsSel||{}).filter(function(k){return STATE.pendingEmailsSel[k];}).length;
+    var sendAllBtn='<div style="display:flex;gap:8px;align-items:center">'+
+      (selPendingCount?
+        '<button onclick="openSendSelectedConfirm()" style="background:var(--teal);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer">'+ico('send',13)+' Send selected ('+selPendingCount+')</button>'
+      :'')+
+      '<button onclick="openSendAllConfirm()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer'+(totalRecipients?'':';opacity:.4;cursor:not-allowed')+'"'+(totalRecipients?'':'disabled')+'>Send all ('+totalRecipients+')</button>'+
+      '<button onclick="runMsDebug()" style="background:var(--bg);color:var(--text2);border:1px solid var(--border2);padding:7px 12px;border-radius:8px;font-size:12px;cursor:pointer" title="Debug Microsoft token status">🔍 Debug</button>'+
+    '</div>';
+
+    var _pPage=Math.max(0,STATE.pendingPage||0);
+    var _pTotal=Math.max(1,Math.ceil(pending.length/20));
+    _pPage=Math.min(_pPage,_pTotal-1);
+    var pagePending=pending.slice(_pPage*20,(_pPage+1)*20);
+
+    var pendingRows=pagePending.map(function(e,idx){
+      var isSelected=STATE.previewPendingId===e.id;
+      var jname=(e.job&&e.job.position?e.job.position:'')+(e.job&&e.job.company?(' · '+e.job.company.name):'');
+      var fu=e.followup_type;
+      var rowBg=isSelected?'var(--accent-l)':fu==='fu2'?'#fff8f0':fu==='fu1'?'#fffdf0':'';
+      var fuBadge=fu==='fu1'?'<span style="font-size:10px;padding:2px 7px;background:#fef9c3;color:#92400e;border-radius:6px;font-weight:700;margin-left:6px">FU1</span>':fu==='fu2'?'<span style="font-size:10px;padding:2px 7px;background:#ffedd5;color:#9a3412;border-radius:6px;font-weight:700;margin-left:6px">FU2</span>':'';
+      var ePlat=(e.job&&e.job.sending_email&&e.job.sending_email.platform)||'Microsoft';
+      var platBadge=ePlat.toLowerCase()==='gmail'||ePlat.toLowerCase()==='google'?'<span style="font-size:10px;padding:2px 7px;background:#fef3c7;color:#92400e;border-radius:5px;font-weight:600;margin-left:5px">Gmail</span>':'<span style="font-size:10px;padding:2px 7px;background:#dbeafe;color:#1e40af;border-radius:5px;font-weight:600;margin-left:5px">Outlook</span>';
+      var isPendingSel=!!(STATE.pendingEmailsSel&&STATE.pendingEmailsSel[e.id]);
+      if(isPendingSel)rowBg='var(--red-l)';
+      return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer;background:'+rowBg+'" onclick="previewPendingEmail(\''+e.id+'\')">'+'<td style="padding:10px 12px;width:36px" onclick="event.stopPropagation()"><input type="checkbox" '+(isPendingSel?'checked':'')+' onchange="togglePendingEmailSel(\''+e.id+'\',this.checked)" style="width:15px;height:15px;cursor:pointer;accent-color:var(--red)"/></td>'+'<td style="padding:10px 12px;font-size:13px"><div style="font-weight:500">'+htmlEsc(e.to_email)+fuBadge+'</div>'+'<div style="font-size:11px;color:var(--text3)">'+htmlEsc((e.contact&&e.contact.first_name?e.contact.first_name+' '+(e.contact.last_name||''):''))+'</div></td>'+'<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+htmlEsc(jname)+'</td>'+'<td style="padding:10px 12px;font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subject||'')+'</td>'+'<td style="padding:10px 12px;white-space:nowrap">'+platBadge+'</td>'+'</tr>';
+    }).join('');
+    if(!pendingRows)pendingRows='<tr><td colspan="5" style="padding:40px;text-align:center"><div style="color:var(--text3);margin-bottom:12px">No pending emails yet.</div><button onclick="generatePendingEmails()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer">⚡ Generate emails for assigned leads</button></td></tr>';
+
+    // Pagination bar — show up to 4 page numbers + prev/next
+    var paginationBar='';
+    if(_pTotal>1){
+      var pageNums='';
+      var startPage=Math.max(0,Math.min(_pPage-1,_pTotal-4));
+      var endPage=Math.min(_pTotal-1,startPage+3);
+      for(var pn=startPage;pn<=endPage;pn++){
+        var isAct=pn===_pPage;
+        pageNums+='<button onclick="STATE.pendingPage='+pn+';STATE.previewPendingId=null;render()" style="padding:5px 11px;border:1px solid '+(isAct?'var(--accent)':'var(--border2)')+';border-radius:7px;background:'+(isAct?'var(--accent)':'var(--card)')+';color:'+(isAct?'#fff':'var(--text2)')+';font-size:12px;font-weight:'+(isAct?'700':'400')+';cursor:pointer">'+( pn+1)+'</button>';
+      }
+      paginationBar='<div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;flex-wrap:wrap;gap:8px">'+
+        '<div style="font-size:12px;color:var(--text3)">'+pending.length+' email'+(pending.length!==1?'s':'')+' · page '+(_pPage+1)+' of '+_pTotal+'</div>'+
+        '<div style="display:flex;gap:5px;align-items:center">'+
+          '<button onclick="STATE.pendingPage=Math.max(0,(STATE.pendingPage||0)-1);STATE.previewPendingId=null;render()" style="padding:5px 11px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer" '+(_pPage===0?'disabled':'')+'>← Prev</button>'+
+          pageNums+
+          '<button onclick="STATE.pendingPage=Math.min('+(  _pTotal-1)+',( STATE.pendingPage||0)+1);STATE.previewPendingId=null;render()" style="padding:5px 11px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer" '+(_pPage>=_pTotal-1?'disabled':'')+'>Next →</button>'+
+        '</div>'+
+      '</div>';
     }
 
-    if (is_active !== undefined) updates.is_active = is_active;
-    if (display_name !== undefined) updates.display_name = display_name;
-    if (daily_send_limit !== undefined) updates.daily_send_limit = daily_send_limit;
-    if (platform !== undefined) updates.platform = platform;
-
-    // If setting as primary, unset others first
-    if (is_primary === true) {
-      await supabase.from('user_emails').update({ is_primary: false }).eq('user_id', req.params.id);
-      updates.is_primary = true;
+    // Preview panel
+    var previewPanel='';
+    if(STATE.previewPendingId){
+      var pe=pending.find(function(e){return e.id===STATE.previewPendingId;});
+      if(pe){
+        previewPanel='<div style="width:380px;flex-shrink:0;background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
+          '<div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'+
+            '<div style="font-weight:600;font-size:13px">Email Preview</div>'+
+            '<button class="btn-icon" onclick="STATE.previewPendingId=null;render()">'+ico('x',13)+'</button>'+
+          '</div>'+
+          '<div style="padding:12px 14px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text2)">'+
+            '<div><strong>From:</strong> '+((pe.job&&pe.job.sending_email)?htmlEsc(pe.job.sending_email.display_name||pe.sender&&pe.sender.name||'')+' &lt;'+htmlEsc(pe.job.sending_email.email_address)+'&gt;':(pe.from_email?htmlEsc(pe.sender&&pe.sender.name||'')+' &lt;'+htmlEsc(pe.from_email)+'&gt;':'—'))+'</div>'+'<div class="mt1"><strong>To:</strong> '+htmlEsc(pe.to_email)+'</div>'+
+            '<div class="mt1"><strong>Subject:</strong> '+htmlEsc(pe.subject||'')+'</div>'+
+          '</div>'+
+          '<div style="padding:14px;font-size:13px;line-height:1.7;white-space:pre-wrap;max-height:360px;overflow-y:auto">'+htmlEsc(pe.body||'')+'</div>'+
+          '<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'+
+            '<button class="btn btn-sm" onclick="deletePendingEmail(\''+pe.id+'\')" style="color:var(--red);border:1px solid var(--red);background:transparent;padding:5px 11px;border-radius:7px;font-size:12px;cursor:pointer">🗑 Delete</button>'+
+            '<button class="btn btn-outline btn-sm" onclick="openEditPendingEmail(\''+pe.id+'\')">✒ Edit email</button>'+
+          '</div>'+
+          '</div>'+
+        '</div>';
+      }
     }
 
-    const { data, error } = await supabase.from('user_emails').update(updates)
-      .eq('id', req.params.eid).eq('user_id', req.params.id).select().single();
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+    var selPendingIds=Object.keys(STATE.pendingEmailsSel||{}).filter(function(k){return STATE.pendingEmailsSel[k];});
+    var bulkDeleteBar=selPendingIds.length?
+      '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--red-l);border:1.5px solid var(--red);border-radius:10px;margin-bottom:10px;flex-wrap:wrap">'+
+        '<div style="font-size:13px;font-weight:600;color:var(--red)">'+selPendingIds.length+' selected</div>'+
+        '<div style="flex:1"></div>'+
+        '<button onclick="deleteSelectedPendingEmails()" style="background:var(--red);color:#fff;border:0;padding:7px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">🗑 Delete selected</button>'+
+        '<button onclick="STATE.pendingEmailsSel={};render()" style="background:transparent;color:var(--text2);border:1px solid var(--border2);padding:7px 12px;border-radius:7px;font-size:12px;cursor:pointer">Clear</button>'+
+      '</div>'
+    :'';
 
-app.delete('/users/:id/emails/:eid', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'bd_lead') && req.user.id !== req.params.id) return res.status(403).json({ error: 'Forbidden' });
-    await supabase.from('user_emails').delete().eq('id', req.params.eid).eq('user_id', req.params.id);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+    pendingHtml='<div>'+
+      bulkDeleteBar+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
+        '<div style="font-size:13px;color:var(--text2)">'+pending.length+' email'+(pending.length!==1?'s':'')+' ready · '+pending.length+' recipient'+(pending.length!==1?'s':'')+' total</div>'+
+        sendAllBtn+
+      '</div>'+
+      '<div style="display:flex;gap:14px;align-items:flex-start">'+
+        '<div style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
+          '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
+            '<thead style="background:var(--bg);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
+              '<tr><th style="padding:10px 12px;width:36px"><input type="checkbox" id="pending-sel-all" onchange="toggleAllPendingEmails(this.checked)" onclick="event.stopPropagation()" style="width:15px;height:15px;cursor:pointer;accent-color:var(--accent)"/></th><th style="padding:10px 12px;text-align:left">Recipient</th><th style="padding:10px 12px;text-align:left">Job</th><th style="padding:10px 12px;text-align:left">Subject</th><th style="padding:10px 12px;text-align:left">Via</th></tr>'+
+            '</thead>'+
+            '<tbody>'+pendingRows+'</tbody>'+
+          '</table>'+
+        '</div>'+
+        previewPanel+
+      '</div>'+
+      paginationBar+
+    '</div>';
+  }
 
-// ══════════════════════════════════════════════════════════════
-// TEAM ASSIGNMENTS
-// ══════════════════════════════════════════════════════════════
-app.get('/team-assignments', auth, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('team_assignments')
-      .select('*, member:users!member_id(id,name,email,roles,role), manager:users!manager_id(id,name,email,roles,role)')
-      .order('created_at');
-    if (error) throw error;
-    res.json(data || []);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+  // ── SENT TAB ──
+  var sentHtml='';
+  if(STATE.emailTab==='sent'){
+    var sentRows=sentEmails.map(function(e){
+      var jname=(e.job&&e.job.position?e.job.position:'')+(e.job&&e.job.company?(' · '+e.job.company.name):'');
+      return '<tr style="border-bottom:1px solid var(--border2)">'+
+        '<td style="padding:10px 12px;font-size:13px">'+htmlEsc(e.to_email||'')+'</td>'+
+        '<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+htmlEsc(jname)+'</td>'+
+        '<td style="padding:10px 12px;font-size:12px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subject||'')+'</td>'+
+        '<td style="padding:10px 12px"><span style="font-size:11px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:8px;font-weight:600">'+htmlEsc(e.status||'sent')+'</span></td>'+
+        '<td style="padding:10px 12px;font-size:11px;color:var(--text3)">'+htmlEsc(e.sent_at||'')+'</td>'+
+      '</tr>';
+    }).join('');
+    if(!sentRows)sentRows='<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">No sent emails yet.</td></tr>';
+    sentHtml='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
+      '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
+        '<thead style="background:var(--bg);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
+          '<tr><th style="padding:10px 12px;text-align:left">To</th><th style="padding:10px 12px;text-align:left">Job</th><th style="padding:10px 12px;text-align:left">Subject</th><th style="padding:10px 12px;text-align:left">Status</th><th style="padding:10px 12px;text-align:left">Date</th></tr>'+
+        '</thead>'+
+        '<tbody>'+sentRows+'</tbody>'+
+      '</table>'+
+    '</div>';
+  }
 
-app.post('/team-assignments', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
-    const { member_id, manager_id, assignment_type } = req.body;
-    if (!member_id || !manager_id || !assignment_type) return res.status(400).json({ error: 'member_id, manager_id, assignment_type required' });
-    const { data, error } = await supabase.from('team_assignments').insert({ member_id, manager_id, assignment_type }).select().single();
-    if (error) throw error;
-    res.status(201).json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.delete('/team-assignments/:id', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
-    await supabase.from('team_assignments').delete().eq('id', req.params.id);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════
-// COMPANIES
-// ══════════════════════════════════════════════════════════════
-app.get('/companies', auth, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('companies').select('*').is('deleted_at', null).order('name');
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/lookup/zipcode', auth, async (req, res) => {
-  try {
-    const { zip } = req.query;
-    if (!zip || zip.length < 3) return res.json([]);
-    const resp = await fetch(`https://api.zippopotam.us/us/${zip.trim()}`);
-    if (!resp.ok) return res.json([]);
-    const data = await resp.json();
-    const places = (data.places || []).map(p => ({
-      zip: data['post code'], city: p['place name'], state: p['state'],
-      state_abbr: p['state abbreviation'],
-      display: `${p['place name']}, ${p['state abbreviation']} ${data['post code']}`
-    }));
-    res.json(places);
-  } catch (err) { res.json([]); }
-});
-
-app.get('/companies/search', auth, async (req, res) => {
-  try {
-    const { q } = req.query;
-    if (!q || q.length < 2) return res.json([]);
-    const { data, error } = await supabase.from('companies')
-      .select('id,name,industry,location,website').ilike('name', `%${q}%`).is('deleted_at', null).limit(8);
-    if (error) throw error;
-    const result = await Promise.all((data || []).map(async co => {
-      const { count } = await supabase.from('jobs').select('id', { count: 'exact', head: true }).eq('company_id', co.id).is('deleted_at', null);
-      return { ...co, job_count: count || 0 };
-    }));
-    res.json(result);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/contacts/check-email', auth, async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) return res.json({ duplicate: false });
-    const twoMonthsAgo = new Date(); twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
-    const { data, error } = await supabase.from('contacts')
-      .select('id,first_name,last_name,email,created_at,job:jobs(id,position,company:companies(name))')
-      .eq('email', email.toLowerCase().trim()).gte('created_at', twoMonthsAgo.toISOString()).limit(1);
-    if (error) throw error;
-    if (!data?.length) return res.json({ duplicate: false });
-    const c = data[0];
-    const daysSince = Math.floor((new Date() - new Date(c.created_at)) / 86400000);
-    res.json({ duplicate: true, days_ago: daysSince, contact_name: `${c.first_name} ${c.last_name}`.trim(), company: c.job?.company?.name || '', position: c.job?.position || '' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/companies/bulk', auth, async (req, res) => {
-  try {
-    const { companies } = req.body;
-    if (!Array.isArray(companies) || !companies.length) return res.status(400).json({ error: 'companies array required' });
-    const rows = companies.map(c => ({ name: c.name, website: c.website || null, industry: c.industry || null, location: c.location || null, created_by: req.user.id }));
-    const { data, error } = await supabase.from('companies').insert(rows).select('id,name');
-    if (error) throw error;
-    res.status(201).json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/companies', auth, async (req, res) => {
-  try {
-    const { name, website, industry, location, size, notes } = req.body;
-    if (!name) return res.status(400).json({ error: 'Company name required' });
-    const { data, error } = await supabase.from('companies').insert({ name, website, industry, location, size, notes, created_by: req.user.id }).select().single();
-    if (error) throw error;
-    res.status(201).json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.put('/companies/:id', auth, async (req, res) => {
-  try {
-    const { name, website, industry, location, size, notes } = req.body;
-    const updates = { updated_at: new Date() };
-    if (name !== undefined) updates.name = name;
-    if (website !== undefined) updates.website = website;
-    if (industry !== undefined) updates.industry = industry;
-    if (location !== undefined) updates.location = location;
-    if (size !== undefined) updates.size = size;
-    if (notes !== undefined) updates.notes = notes;
-    const { data, error } = await supabase.from('companies').update(updates).eq('id', req.params.id).select().single();
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.delete('/companies/:id', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
-    await supabase.from('companies').update({ deleted_at: new Date() }).eq('id', req.params.id);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════
-// JOBS
-// ══════════════════════════════════════════════════════════════
-const JOB_SELECT = `*, research, company:companies(id,name,website,industry,location), contacts(id,job_id,first_name,last_name,designation,email,phone,linkedin,is_primary,email_status,ooo_until,email_sent_at,email_platform), creator:users!created_by(id,name,employee_id), assignee:users!assigned_to(id,name,employee_id), bd_assignee:users!assigned_to_bd(id,name,employee_id), sending_email:user_emails!sending_email_id(id,email_address,display_name)`;
-
-app.get('/jobs', auth, async (req, res) => {
-  try {
-    let query = supabase.from('jobs').select(JOB_SELECT).is('deleted_at', null).order('created_at', { ascending: false });
-    if (hasRole(req, 'admin', 'ra_lead')) {
-      // see all
-    } else if (hasRole(req, 'bd_lead')) {
-      query = query.not('assigned_to_bd', 'is', null);
-    } else if (hasRole(req, 'bd')) {
-      query = query.eq('assigned_to_bd', req.user.id);
-    } else {
-      query = query.eq('created_by', req.user.id);
+  // ── OUTREACH PLAN TAB ──
+  var vars=[['{{fn}}','First name'],['{{company}}','Company'],['{{pos}}','Position'],['{{ind}}','Industry'],['{{desig}}','Designation'],['{{loc}}','Location'],['{{sender}}','Sender name']];
+  var varChips=vars.map(function(v){
+    return '<span onclick="insertVar(\''+v[0]+'\')" style="font-size:11.5px;padding:4px 10px;background:var(--accent-l);color:var(--accent);border-radius:6px;cursor:pointer;font-family:var(--mono);border:1px solid rgba(37,99,235,.2)">'+v[0]+'<span style="font-family:var(--font);font-size:10px;opacity:.7;margin-left:4px">'+v[1]+'</span></span>';
+  }).join(' ');
+  if(!STATE.activeTmpl)STATE.activeTmpl='outreach';
+  var myPlan=STATE.myOutreachPlan||{};
+  var fu1Day=parseInt(myPlan['fu1_day']||'3',10);
+  var fu2Day=parseInt(myPlan['fu2_day']||'7',10);
+  function dayOpts(selected,minDay){
+    var opts='';
+    for(var d=1;d<=10;d++){
+      if(d<=minDay)continue;
+      opts+='<option value="'+d+'"'+(d===selected?' selected':'')+'>Day '+d+'</option>';
     }
-    const { data, error } = await query;
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+    return opts;
+  }
+  var tmplDefs=[
+    {key:'outreach',label:'Outreach 1',sublabel:'Sent immediately on assignment',color:'var(--accent)',subjVal:myPlan['tmpl_o1_subject']||STATE.emailSubj,bodyVal:myPlan['tmpl_o1_body']||STATE.emailBody,subjId:'tmpl-o1-subj',bodyId:'tmpl-o1-body'},
+    {key:'fu1',label:'Follow-up 1',sublabel:'Day '+fu1Day+' after outreach',color:'#ca8a04',subjVal:myPlan['tmpl_fu1_subject']||STATE.fu1Subj,bodyVal:myPlan['tmpl_fu1_body']||STATE.fu1Body,subjId:'tmpl-fu1-subj',bodyId:'tmpl-fu1-body'},
+    {key:'fu2',label:'Follow-up 2',sublabel:'Day '+fu2Day+' after outreach',color:'#ea580c',subjVal:myPlan['tmpl_fu2_subject']||STATE.fu2Subj,bodyVal:myPlan['tmpl_fu2_body']||STATE.fu2Body,subjId:'tmpl-fu2-subj',bodyId:'tmpl-fu2-body'}
+  ];
+  var activeTmpl=tmplDefs.find(function(t){return t.key===STATE.activeTmpl;})||tmplDefs[0];
+  var tmplTabBtns=tmplDefs.map(function(t){
+    var isActive=STATE.activeTmpl===t.key;
+    return '<button onclick="STATE.activeTmpl=\''+t.key+'\';render()" style="padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:2px solid '+(isActive?t.color:'var(--border)')+';background:'+(isActive?t.color:'var(--card)')+';color:'+(isActive?'#fff':'var(--text2)')+';transition:all .15s">'+t.label+'</button>';
+  }).join('');
+  var daySettingsHtml='';
+  if(STATE.activeTmpl==='fu1'){
+    daySettingsHtml='<div class="fgrp" style="margin-bottom:14px"><label class="flbl">Send Follow-up 1 on</label>'+
+      '<select class="sel" style="max-width:160px" id="fu1-day-sel" onchange="saveOutreachDay(\'fu1_day\',this.value)">'+
+        '<option value="">— select day —</option>'+dayOpts(fu1Day,0)+
+      '</select>'+
+      '<div style="font-size:11px;color:var(--text3);margin-top:4px">Days after the outreach email was sent</div>'+
+    '</div>';
+  } else if(STATE.activeTmpl==='fu2'){
+    daySettingsHtml='<div class="fgrp" style="margin-bottom:14px"><label class="flbl">Send Follow-up 2 on</label>'+
+      '<select class="sel" style="max-width:160px" id="fu2-day-sel" onchange="saveOutreachDay(\'fu2_day\',this.value)">'+
+        '<option value="">— select day —</option>'+dayOpts(fu2Day,fu1Day)+
+      '</select>'+
+      '<div style="font-size:11px;color:var(--text3);margin-top:4px">Must be after Follow-up 1 (Day '+fu1Day+')</div>'+
+    '</div>';
+  }
+  var canEditTemplates=userHasAnyRole(u,'bd','bd_lead','admin');
+  var tmplHtml=canEditTemplates?
+    '<div>'+
+      '<div style="display:flex;gap:10px;margin-bottom:20px">'+tmplTabBtns+'</div>'+
+      '<div class="card cp" style="border-top:3px solid '+activeTmpl.color+'">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
+          '<div><div style="font-weight:700;font-size:14px;color:var(--text)">'+activeTmpl.label+'</div>'+
+              '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+activeTmpl.sublabel+'</div></div>'+
+          '<div style="display:flex;gap:6px;flex-wrap:wrap">'+varChips+'</div>'+
+        '</div>'+
+        daySettingsHtml+
+        '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="'+activeTmpl.subjId+'" value="'+htmlEsc(activeTmpl.subjVal)+'"/></div>'+
+        '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:200px" id="'+activeTmpl.bodyId+'">'+htmlEsc(activeTmpl.bodyVal)+'</textarea></div>'+
+        '<button class="btn btn-primary mt2" onclick="saveOutreachTemplate(\''+activeTmpl.key+'\',\''+activeTmpl.subjId+'\',\''+activeTmpl.bodyId+'\')" >Save template</button>'+
+      '</div>'+
+    '</div>':
+    '<div class="card cp"><div style="color:var(--text3);font-size:13px">Outreach plan editing is available to BD and Admin roles only.</div></div>';
 
-app.get('/jobs/:id', auth, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('jobs').select(JOB_SELECT).eq('id', req.params.id).is('deleted_at', null).single();
-    if (error) throw error;
-    if (!hasRole(req, 'admin') && data.created_by !== req.user.id && data.assigned_to !== req.user.id) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+  // ── COMPOSE TAB ──
+  var myJobs=getMyJobs(u);
 
-app.post('/jobs/bulk', auth, async (req, res) => {
-  try {
-    const { jobs } = req.body;
-    if (!Array.isArray(jobs) || !jobs.length) return res.status(400).json({ error: 'jobs array required' });
-    const tzMap = {'ny':'EST','nj':'EST','fl':'EST','ma':'EST','pa':'EST','ga':'EST','nc':'EST','sc':'EST','va':'EST','ct':'EST','me':'EST','nh':'EST','vt':'EST','ri':'EST','de':'EST','md':'EST','dc':'EST','oh':'EST','mi':'EST','in':'EST','ky':'EST','wv':'EST','tn':'EST','tx':'CST','il':'CST','mn':'CST','wi':'CST','mo':'CST','ia':'CST','ks':'CST','ne':'CST','sd':'CST','nd':'CST','ok':'CST','la':'CST','ar':'CST','ms':'CST','al':'CST','co':'MST','az':'MST','nm':'MST','ut':'MST','wy':'MST','mt':'MST','id':'MST','ca':'PST','wa':'PST','or':'PST','nv':'PST','ak':'PST','hi':'PST'};
-    function getTimezone(location) {
-      if (!location) return 'EST';
-      const loc = location.toLowerCase();
-      for (const [state, tz] of Object.entries(tzMap)) { if (loc.includes(state)) return tz; }
-      return 'EST';
-    }
-    function getFreshness(openedDate, createdDate) {
-      const ref = openedDate || createdDate;
-      if (!ref) return 'Normal';
-      const days = Math.floor((new Date() - new Date(ref)) / 86400000);
-      if (days <= 3) return 'New'; if (days <= 10) return 'Normal'; return 'Old';
-    }
-    const jobRows = jobs.map(j => ({ company_id: j.company_id, position: j.position || '(unknown)', location: j.location || null, source: j.source || 'Import', job_url: j.job_url || null, stage: 'Unassigned', notes: '', created_by: req.user.id, assigned_to: null, is_duplicate: j.is_duplicate || false, duplicate_of: j.duplicate_of || null, salary_range: j.salary_range || null, job_created_date: j.job_created_date || null, job_opened_date: j.job_opened_date || null, timezone: getTimezone(j.location), freshness: getFreshness(j.job_opened_date, j.job_created_date), bdm_assigned_name: j.bdm_assigned_name || null, industry: j.industry || null }));
-    const { data: insertedJobs, error: jobErr } = await supabase.from('jobs').insert(jobRows).select('id');
-    if (jobErr) throw jobErr;
-    const contactRows = [];
-    insertedJobs.forEach((job, idx) => {
-      const contacts = jobs[idx].contacts || [];
-      contacts.forEach((c, ci) => {
-        if (!c.first_name && !c.email) return;
-        contactRows.push({ job_id: job.id, first_name: c.first_name || '', last_name: c.last_name || '', designation: c.designation || null, email: c.email || null, phone: c.phone || null, linkedin: c.linkedin || null, is_primary: ci === 0 });
+  // Build company list for step-1 picker
+  var companyIds={};
+  myJobs.forEach(function(j){
+    if(j.company_id&&!companyIds[j.company_id])companyIds[j.company_id]={id:j.company_id,name:j.company_name};
+  });
+  var companyList=Object.values(companyIds).sort(function(a,b){return a.name.localeCompare(b.name);});
+  var coOpts='<option value="">— Select company —</option>'+companyList.map(function(c){
+    return '<option value="'+c.id+'"'+(STATE.composeCompanyId===c.id?' selected':'')+'>'+escHtml(c.name)+'</option>';
+  }).join('');
+
+  // Step-2: contacts for selected company
+  var pocOpts='';
+  if(STATE.composeCompanyId){
+    var coJobs=myJobs.filter(function(j){return j.company_id===STATE.composeCompanyId;});
+    var pocList=[];
+    coJobs.forEach(function(j){
+      STATE.contacts.filter(function(c){return c.job_id===j.id&&c.email;}).forEach(function(c){
+        pocList.push({cid:c.id,jid:j.id,label:(c.first_name||'')+' '+(c.last_name||'').trim()+(c.email?' <'+c.email+'>':'')+(c.designation?' · '+c.designation:''),email:c.email});
       });
     });
-    if (contactRows.length) { await supabase.from('contacts').insert(contactRows); }
-    res.status(201).json({ imported: insertedJobs.length, contacts: contactRows.length });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/jobs', auth, async (req, res) => {
-  try {
-    const { company_id, position, location, source, job_url, stage, notes, assigned_to, is_duplicate, duplicate_of, contacts, salary_range, job_created_date, job_opened_date, bdm_assigned_name, industry: jobIndustry } = req.body;
-    if (!company_id || !position) return res.status(400).json({ error: 'company_id and position required' });
-    const tzMap = {'ny':'EST','nj':'EST','fl':'EST','ma':'EST','pa':'EST','ga':'EST','nc':'EST','sc':'EST','va':'EST','ct':'EST','tx':'CST','il':'CST','mn':'CST','co':'MST','az':'MST','ca':'PST','wa':'PST','or':'PST'};
-    let timezone = 'EST';
-    if (location) { const loc = location.toLowerCase(); for (const [s, tz] of Object.entries(tzMap)) { if (loc.includes(s)) { timezone = tz; break; } } }
-    let freshness = 'Normal';
-    const refDate = job_opened_date || job_created_date;
-    if (refDate) { const days = Math.floor((new Date() - new Date(refDate)) / 86400000); if (days <= 3) freshness = 'New'; else if (days <= 10) freshness = 'Normal'; else freshness = 'Old'; }
-    const { data: job, error } = await supabase.from('jobs').insert({
-      company_id, position, location, source, job_url, stage: stage || 'Unassigned', notes: notes || '',
-      created_by: req.user.id,
-      assigned_to: (hasRole(req, 'admin', 'ra_lead') ? (assigned_to || null) : null),
-      is_duplicate: is_duplicate || false, duplicate_of: duplicate_of || null, salary_range: salary_range || null,
-      job_created_date: job_created_date || null, job_opened_date: job_opened_date || null,
-      timezone, freshness, bdm_assigned_name: bdm_assigned_name || null, industry: jobIndustry || null
-    }).select().single();
-    if (error) throw error;
-    if (Array.isArray(contacts) && contacts.length) {
-      const rows = contacts.map((c, i) => ({ job_id: job.id, first_name: c.first_name || '', last_name: c.last_name || '', designation: c.designation || null, email: c.email || null, phone: c.phone || null, linkedin: c.linkedin || null, is_primary: i === 0 }));
-      await supabase.from('contacts').insert(rows);
-    }
-    await logActivity(job.id, null, req.user.id, 'job_created', `Job created: ${position}`, null, { position, stage: job.stage });
-    res.status(201).json(job);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.put('/jobs/:id', auth, async (req, res) => {
-  try {
-    const { data: existing } = await supabase.from('jobs').select('*').eq('id', req.params.id).single();
-    if (!existing) return res.status(404).json({ error: 'Not found' });
-    const isRA = hasRole(req, 'ra') && !hasRole(req, 'admin', 'ra_lead', 'bd', 'bd_lead');
-    const hoursSinceCreation = (new Date() - new Date(existing.created_at)) / 3600000;
-    const raCanEdit = isRA && existing.created_by === req.user.id && hoursSinceCreation <= 24;
-    const canEdit = hasRole(req, 'admin', 'ra_lead', 'bd', 'bd_lead') || existing.created_by === req.user.id || existing.assigned_to_bd === req.user.id || raCanEdit;
-    if (!canEdit) return res.status(403).json({ error: 'Forbidden' });
-    if (isRA && !raCanEdit) return res.status(403).json({ error: 'Edit window has expired (24 hours)' });
-    const { position, location, source, job_url, stage, notes, assigned_to, assigned_to_bd, sending_email_id } = req.body;
-    const updates = { updated_at: new Date() };
-    if (position !== undefined) updates.position = position;
-    if (location !== undefined) updates.location = location;
-    if (source !== undefined) updates.source = source;
-    if (job_url !== undefined) updates.job_url = job_url;
-    if (stage !== undefined) {
-      const bdStages = ['Connected','Rejected','Future','In Discussion'];
-      const systemStages = ['Unassigned','Assigned'];
-      if (bdStages.includes(stage) && hasRole(req, 'admin', 'bd', 'bd_lead')) updates.stage = stage;
-      else if (systemStages.includes(stage) && hasRole(req, 'admin', 'ra_lead')) updates.stage = stage;
-      else if (hasRole(req, 'admin')) updates.stage = stage;
-    }
-    if (notes !== undefined) updates.notes = notes;
-    if (assigned_to !== undefined && hasRole(req, 'admin', 'ra_lead')) updates.assigned_to = assigned_to || null;
-    if (assigned_to_bd !== undefined && hasRole(req, 'admin', 'ra_lead')) {
-      updates.assigned_to_bd = assigned_to_bd || null;
-      updates.assigned_at = assigned_to_bd ? new Date() : null;
-      if (assigned_to_bd && stage === undefined) updates.stage = 'Assigned';
-    }
-    if (sending_email_id !== undefined && hasRole(req, 'admin', 'ra_lead')) updates.sending_email_id = sending_email_id || null;
-    const { data, error } = await supabase.from('jobs').update(updates).eq('id', req.params.id).select().single();
-    if (error) throw error;
-    if (stage !== undefined && stage !== existing.stage) {
-      await logActivity(data.id, null, req.user.id, 'stage_change', `Stage: ${existing.stage} → ${stage}`, { stage: existing.stage }, { stage });
-      if (existing.stage === 'Assigned' && stage !== 'Assigned') {
-        await supabase.from('follow_ups').update({ status: 'skipped' }).eq('job_id', req.params.id).eq('status', 'active');
-      }
-    } else {
-      await logActivity(data.id, null, req.user.id, 'job_updated', 'Job updated', null, null);
-    }
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.delete('/jobs/:id', auth, async (req, res) => {
-  try {
-    const { data: existing } = await supabase.from('jobs').select('created_by,position').eq('id', req.params.id).single();
-    if (!existing) return res.status(404).json({ error: 'Not found' });
-    if (!hasRole(req, 'admin') && existing.created_by !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
-    await supabase.from('jobs').update({ deleted_at: new Date() }).eq('id', req.params.id);
-    await logActivity(req.params.id, null, req.user.id, 'job_deleted', `Job deleted: ${existing.position}`, null, null);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/jobs/export', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'RA Lead only' });
-    const { from, to, stage } = req.query;
-    let query = supabase.from('jobs').select('id,position,stage,location,industry,timezone,freshness,salary_range,job_created_date,job_opened_date,bdm_assigned_name,source,created_at,company:companies(name,website,industry,location),contacts(first_name,last_name,designation,email,phone,linkedin),creator:users!created_by(name)').is('deleted_at', null).order('created_at', { ascending: false });
-    if (from) query = query.gte('created_at', from);
-    if (to) query = query.lte('created_at', to + 'T23:59:59Z');
-    if (stage) query = query.eq('stage', stage);
-    const { data, error } = await query;
-    if (error) throw error;
-    res.json(data || []);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.patch('/jobs/:id/research', auth, async (req, res) => {
-  try {
-    const { research } = req.body;
-    if (!research) return res.status(400).json({ error: 'research object required' });
-    const { data: job } = await supabase.from('jobs').select('created_by').eq('id', req.params.id).single();
-    if (!job) return res.status(404).json({ error: 'Job not found' });
-    if (!hasRole(req, 'admin', 'ra_lead') && job.created_by !== req.user.id) return res.status(403).json({ error: 'Only the RA who created this lead can add research' });
-    const { data, error } = await supabase.from('jobs').update({ research, updated_at: new Date() }).eq('id', req.params.id).select('id,research').single();
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════
-// CONTACTS
-// ══════════════════════════════════════════════════════════════
-async function canTouchJob(req, job_id) {
-  if (hasRole(req, 'admin')) return true;
-  const { data } = await supabase.from('jobs').select('created_by,assigned_to,assigned_to_bd').eq('id', job_id).single();
-  if (!data) return false;
-  return data.created_by === req.user.id || data.assigned_to === req.user.id || data.assigned_to_bd === req.user.id;
-}
-
-app.get('/jobs/:job_id/contacts', auth, async (req, res) => {
-  try {
-    if (!(await canTouchJob(req, req.params.job_id))) return res.status(403).json({ error: 'Forbidden' });
-    const { data, error } = await supabase.from('contacts').select('*').eq('job_id', req.params.job_id).order('is_primary', { ascending: false });
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/contacts', auth, async (req, res) => {
-  try {
-    const { job_id, first_name, last_name, designation, email, phone, linkedin, is_primary } = req.body;
-    if (!job_id || !first_name) return res.status(400).json({ error: 'job_id and first_name required' });
-    if (!(await canTouchJob(req, job_id))) return res.status(403).json({ error: 'Forbidden' });
-    const { data, error } = await supabase.from('contacts').insert({ job_id, first_name, last_name: last_name || '', designation, email, phone, linkedin, is_primary: !!is_primary }).select().single();
-    if (error) throw error;
-    await logActivity(job_id, data.id, req.user.id, 'contact_added', `Contact added: ${first_name} ${last_name || ''}`.trim(), null, null);
-    res.status(201).json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.put('/contacts/:id', auth, async (req, res) => {
-  try {
-    const { data: existing } = await supabase.from('contacts').select('job_id').eq('id', req.params.id).single();
-    if (!existing) return res.status(404).json({ error: 'Not found' });
-    if (!(await canTouchJob(req, existing.job_id))) return res.status(403).json({ error: 'Forbidden' });
-    const fields = ['first_name','last_name','designation','email','phone','linkedin','is_primary','email_status','ooo_until'];
-    const updates = { updated_at: new Date() };
-    fields.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
-    const { data, error } = await supabase.from('contacts').update(updates).eq('id', req.params.id).select().single();
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.delete('/contacts/:id', auth, async (req, res) => {
-  try {
-    const { data: existing } = await supabase.from('contacts').select('job_id').eq('id', req.params.id).single();
-    if (!existing) return res.status(404).json({ error: 'Not found' });
-    if (!(await canTouchJob(req, existing.job_id))) return res.status(403).json({ error: 'Forbidden' });
-    await supabase.from('contacts').delete().eq('id', req.params.id);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.patch('/contacts/:id/email-status', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'bd', 'bd_lead')) return res.status(403).json({ error: 'BD role required' });
-    const { email_status, ooo_until } = req.body;
-    const allowed = ['valid','invalid','deactivated','out_of_office'];
-    if (!allowed.includes(email_status)) return res.status(400).json({ error: 'Invalid status' });
-    const updates = { email_status, updated_at: new Date() };
-    if (email_status === 'out_of_office' && ooo_until) updates.ooo_until = ooo_until;
-    if (email_status !== 'out_of_office') updates.ooo_until = null;
-    const { data: contact, error } = await supabase.from('contacts').update(updates).eq('id', req.params.id).select('*, job:jobs(id,position,company:companies(name))').single();
-    if (error) throw error;
-    if (email_status === 'out_of_office' && ooo_until) {
-      const contactName = `${contact.first_name || ''} ${contact.last_name || ''}`.trim();
-      await supabase.from('reminders').insert({ job_id: contact.job_id, user_id: req.user.id, contact_name: contactName, company_name: contact.job?.company?.name || '', email: contact.email, return_date: ooo_until, reminder_time: '09:00', note: `${contactName} is back from OOO.`, status: 'pending', reminder_type: 'ooo_return', contact_id: contact.id });
-      await logActivity(contact.job_id, contact.id, req.user.id, 'ooo_set', `${contactName} marked OOO until ${ooo_until}`, null, { ooo_until });
-    }
-    res.json(contact);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════
-// EMAILS
-// ══════════════════════════════════════════════════════════════
-app.get('/emails', auth, async (req, res) => {
-  try {
-    const { status } = req.query;
-    let query = supabase.from('emails').select(`*, contact:contacts(id,first_name,last_name,email,designation), job:jobs(id,position,company_id,company:companies(name,industry,location),sending_email:user_emails!sending_email_id(id,email_address,display_name)), sender:users!sent_by(id,name,email)`).order('created_at', { ascending: false });
-    if (!hasRole(req, 'admin', 'ra_lead')) query = query.eq('sent_by', req.user.id);
-    if (status) query = query.eq('status', status);
-    const { data, error } = await query;
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/emails/pending-count', auth, async (req, res) => {
-  try {
-    const { count, error } = await supabase.from('emails').select('id', { count: 'exact', head: true }).eq('sent_by', req.user.id).eq('status', 'pending');
-    if (error) throw error;
-    res.json({ count: count || 0 });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/emails', auth, async (req, res) => {
-  try {
-    const { contact_id, job_id, to_email, subject, body, platform } = req.body;
-    if (!to_email) return res.status(400).json({ error: 'to_email required' });
-    const { data, error } = await supabase.from('emails').insert({ contact_id: contact_id || null, job_id: job_id || null, to_email, subject, body, platform: platform || 'Gmail', sent_by: req.user.id, status: 'sent', sent_at: today() }).select().single();
-    if (error) throw error;
-    if (contact_id) await supabase.from('contacts').update({ email_sent_at: today(), email_platform: platform || 'Gmail', updated_at: new Date() }).eq('id', contact_id);
-    if (job_id) await logActivity(job_id, contact_id || null, req.user.id, 'email_sent', `Email sent: ${subject || ''}`, null, null);
-    res.status(201).json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/emails/generate', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'ra_lead', 'bd', 'bd_lead')) return res.status(403).json({ error: 'Not allowed' });
-    const { job_ids } = req.body;
-    if (!Array.isArray(job_ids) || !job_ids.length) return res.status(400).json({ error: 'job_ids required' });
-    const { data: jobs, error: jErr } = await supabase.from('jobs').select('id, position, assigned_to_bd, sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name), company:companies(name,industry,location), contacts(*)').in('id', job_ids);
-    if (jErr) throw jErr;
-    const bdIds = [...new Set(jobs.map(j => j.assigned_to_bd).filter(Boolean))];
-    const { data: bdUsers } = bdIds.length ? await supabase.from('users').select('id,name,email').in('id', bdIds) : { data: [] };
-    const bdMap = {};
-    (bdUsers || []).forEach(u => { bdMap[u.id] = u; });
-
-    // Pre-fetch primary sending email for each BD (used as fallback if job.sending_email_id is null)
-    const allBdIds = [...new Set([req.user.id, ...bdIds])];
-    const { data: bdEmailRows } = allBdIds.length
-      ? await supabase.from('user_emails').select('id,user_id,email_address,display_name,is_primary').eq('is_active', true).in('user_id', allBdIds).order('is_primary', { ascending: false })
-      : { data: [] };
-    const bdPrimaryEmailMap = {};
-    (bdEmailRows || []).forEach(e => {
-      if (!bdPrimaryEmailMap[e.user_id]) bdPrimaryEmailMap[e.user_id] = e; // first = primary (ordered desc)
-    });
-
-    // Load saved templates for all BD users involved
-    const tmplKeys = allBdIds.flatMap(id => [
-      `u_${id}_tmpl_o1_subject`, `u_${id}_tmpl_o1_body`
-    ]);
-    const { data: tmplRows } = await supabase.from('app_settings').select('key,value').in('key', tmplKeys);
-    const tmplSettings = {};
-    (tmplRows || []).forEach(r => { tmplSettings[r.key] = r.value; });
-
-    function fillTmpl(tmpl, vars) {
-      return (tmpl || '').replace(/{{(\w+)}}/g, (m, k) => vars[k] !== undefined ? vars[k] : m);
-    }
-
-    const emailsToInsert = [];
-    const generated = [];
-    const failed = [];
-    for (const job of jobs) {
-      const bd = bdMap[job.assigned_to_bd] || { id: req.user.id, name: req.user.name, email: req.user.email };
-      const contacts = (job.contacts || []).filter(c => c.email);
-
-      // Get this BD's saved template, fall back to global defaults
-      const savedSubj = tmplSettings[`u_${bd.id}_tmpl_o1_subject`] || '';
-      const savedBody = tmplSettings[`u_${bd.id}_tmpl_o1_body`] || '';
-
-      for (const contact of contacts) {
-        try {
-          let subject, body;
-          // sender = display name on the sending Outlook account (what recipient sees)
-          // Use job's sending email first, then BD's primary outreach email, never login name alone
-          const senderDisplayName = job.sending_email?.display_name || bdPrimaryEmailMap[bd.id]?.display_name || bd.name || '';
-          const vars = {
-            fn: contact.first_name || '',
-            ln: contact.last_name || '',
-            company: job.company?.name || '',
-            pos: job.position || '',
-            ind: job.company?.industry || '',
-            loc: job.company?.location || '',
-            desig: contact.designation || 'Hiring Manager',
-            sender: senderDisplayName
-          };
-
-          if (savedSubj && savedBody) {
-            // Use BD's saved template from Outreach Plan
-            subject = fillTmpl(savedSubj, vars);
-            body = fillTmpl(savedBody, vars);
-          } else if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== 'your_anthropic_api_key_here') {
-            // No saved template — use AI to generate
-            const prompt = `Write a hyper-personalized cold outreach email from ${senderDisplayName} at Fute Global LLC (a staffing/recruitment firm) to ${contact.first_name} ${contact.last_name || ''}, ${contact.designation || 'Hiring Manager'} at ${job.company?.name || ''} (${job.company?.industry || ''}, ${job.company?.location || ''}).\n\nThey are hiring for: ${job.position}\n\nInstructions: 3 short paragraphs, warm but professional tone, no fluff, end with a clear call to action.\n\nFormat strictly as:\nSubject: [subject line]\n\n[email body]`;
-            const aiResp = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 500, messages: [{ role: 'user', content: prompt }] }) });
-            const aiData = await aiResp.json();
-            const text = aiData.content?.[0]?.text || '';
-            const subjectMatch = text.match(/Subject:\s*(.+)/i);
-            subject = subjectMatch ? subjectMatch[1].trim() : `Staffing Partnership — ${job.company?.name}`;
-            body = text.replace(/^Subject:.+\n*/im, '').trim();
-          } else {
-            subject = fillTmpl(savedSubj || 'Staffing Partnership — {{company}}', vars);
-            body = fillTmpl(savedBody || `Hi {{fn}},\n\nI came across {{company}} and noticed you're hiring for {{pos}}. At Fute Global, we specialize in placing top-tier talent for roles exactly like this.\n\nWould you be open to a quick 15-minute call this week?\n\nBest regards,\n{{sender}}\nFute Global LLC`, vars);
-          }
-          // Use job's assigned sending email, or fall back to BD's primary outreach email
-          // Never fall back to bd.email (login email) — that's not an outreach account
-          const jobSendingEmail = job.sending_email;
-          const bdPrimaryEmail = bdPrimaryEmailMap[bd.id];
-          const resolvedSendingEmail = jobSendingEmail || bdPrimaryEmail;
-          const sendingEmailAddress = resolvedSendingEmail?.email_address || '';
-          const sendingDisplayName = resolvedSendingEmail?.display_name || bd.name || '';
-          // If job has no sending_email_id, update it now so future sends use the right account
-          if (!job.sending_email_id && bdPrimaryEmail) {
-            supabase.from('jobs').update({ sending_email_id: bdPrimaryEmail.id }).eq('id', job.id).then(() => {}).catch(() => {});
-          }
-          emailsToInsert.push({ contact_id: contact.id, job_id: job.id, to_email: contact.email, subject, body, platform: 'Outlook', sent_by: bd.id, from_email: sendingEmailAddress, status: 'pending' });
-          generated.push({ contact_id: contact.id, email: contact.email });
-        } catch(e) { failed.push({ contact_id: contact.id, email: contact.email, error: e.message }); }
-      }
-    }
-    if (emailsToInsert.length) { const { error: insErr } = await supabase.from('emails').insert(emailsToInsert); if (insErr) throw insErr; }
-    res.json({ generated: generated.length, failed: failed.length, failDetails: failed });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/emails/send-selected', auth, async (req, res) => {
-  try {
-    const { email_ids } = req.body;
-    if (!Array.isArray(email_ids) || !email_ids.length) return res.status(400).json({ error: 'email_ids required' });
-
-    const { data: pendingEmails, error: fetchErr } = await supabase
-      .from('emails')
-      .select('id, to_email, subject, body, contact_id, job_id, from_email, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
-      .eq('sent_by', req.user.id)
-      .eq('status', 'pending')
-      .in('id', email_ids);
-    if (fetchErr) throw fetchErr;
-    if (!pendingEmails || !pendingEmails.length) return res.json({ success: true, sent: 0, failed: 0 });
-
-    // Respond immediately — send loop runs in background with delays
-    res.json({ success: true, queued: pendingEmails.length, message: `Sending ${pendingEmails.length} emails with random delays. Check Sent tab for progress.` });
-
-    let sent = 0, failed = 0;
-    const failDetails = [], sentContactIds = [], sentJobIds = [];
-
-    for (const email of pendingEmails) {
-      const userEmailId = email.job?.sending_email_id;
-      const sendingEmail = email.job?.sending_email;
-      const platform = (sendingEmail?.platform || 'Microsoft').toLowerCase();
-
-      if (!userEmailId) {
-        failed++;
-        failDetails.push({ id: email.id, to: email.to_email, from: email.from_email || '—', error: 'No sending email configured for this job' });
-        try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
-        continue;
-      }
-      if (platform === 'gmail' || platform === 'google') {
-        failed++;
-        failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || '—', error: 'Gmail sending not connected yet' });
-        try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
-        continue;
-      }
-      try {
-        const accessToken = await getMicrosoftToken(userEmailId);
-        const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: { subject: email.subject, body: { contentType: 'Text', content: email.body }, toRecipients: [{ emailAddress: { address: email.to_email } }] }, saveToSentItems: true })
-        });
-        if (!sendRes.ok) { const e = await sendRes.json().catch(() => ({})); throw new Error(e?.error?.message || `HTTP ${sendRes.status}`); }
-        await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email.id);
-        const todayDate = today();
-        const { data: logRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', userEmailId).eq('send_date', todayDate).single();
-        await supabase.from('email_send_log').upsert({ user_email_id: userEmailId, send_date: todayDate, emails_sent: (logRow?.emails_sent || 0) + 1 }, { onConflict: 'user_email_id,send_date' });
-        if (email.contact_id) sentContactIds.push(email.contact_id);
-        if (email.job_id) sentJobIds.push(email.job_id);
-        sent++;
-        // Random delay before next email
-        if (sent + failed < pendingEmails.length) await randomDelay(1, 120);
-      } catch (e) {
-        failed++;
-        failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: e.message });
-        try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
-      }
-    }
-
-    const uniqueContactIds = [...new Set(sentContactIds.filter(Boolean))];
-    if (uniqueContactIds.length) await supabase.from('contacts').update({ email_sent_at: today() }).in('id', uniqueContactIds);
-    const uniqueJobIds = [...new Set(sentJobIds.filter(Boolean))];
-    for (const jid of uniqueJobIds) await logActivity(jid, null, req.user.id, 'emails_sent', `${sent} email(s) sent via Microsoft`, null, null);
-    console.log(`[SendSelected] Completed: ${sent} sent, ${failed} failed`);
-  } catch (err) { console.error('[SendSelected] Error:', err.message); }
-});
-
-app.post('/emails/queue-all', auth, async (req, res) => {
-  try {
-    // Fetch all pending emails for this user, joining job -> sending_email_id + platform
-    const { data: pendingEmails, error: fetchErr } = await supabase
-      .from('emails')
-      .select('id, to_email, subject, body, contact_id, job_id, from_email, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
-      .eq('sent_by', req.user.id)
-      .eq('status', 'pending');
-    if (fetchErr) throw fetchErr;
-    if (!pendingEmails || !pendingEmails.length) return res.json({ success: true, sent: 0, failed: 0 });
-
-    // Respond immediately so browser doesn't time out — send loop runs in background
-    const totalCount = pendingEmails.length;
-    res.json({ success: true, queued: totalCount, message: `Sending ${totalCount} emails with random delays (up to 120s between each). Check Sent tab for progress.` });
-
-    let sent = 0;
-    let failed = 0;
-    const failDetails = [];
-    const sentContactIds = [];
-    const sentJobIds = [];
-
-    for (const email of pendingEmails) {
-      const userEmailId = email.job?.sending_email_id;
-      const sendingEmail = email.job?.sending_email;
-      const platform = (sendingEmail?.platform || 'Microsoft').toLowerCase();
-
-      if (!userEmailId) {
-        failed++;
-        failDetails.push({ id: email.id, to: email.to_email, from: email.from_email || '—', error: 'No sending email configured for this job' });
-        try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
-        continue;
-      }
-
-      // Gmail not yet supported — skip and mark failed
-      if (platform === 'gmail' || platform === 'google') {
-        failed++;
-        failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: 'Gmail sending not connected yet — please connect Google OAuth' });
-        try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
-        continue;
-      }
-
-      try {
-        const accessToken = await getMicrosoftToken(userEmailId);
-        const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: {
-              subject: email.subject,
-              body: { contentType: 'Text', content: email.body },
-              toRecipients: [{ emailAddress: { address: email.to_email } }]
-            },
-            saveToSentItems: true
-          })
-        });
-        if (!sendRes.ok) {
-          const errData = await sendRes.json().catch(() => ({}));
-          throw new Error(errData?.error?.message || `HTTP ${sendRes.status}`);
-        }
-        // Mark as sent
-        await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email.id);
-        // Update send log
-        const todayDate = today();
-        const { data: logRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', userEmailId).eq('send_date', todayDate).single();
-        await supabase.from('email_send_log').upsert({ user_email_id: userEmailId, send_date: todayDate, emails_sent: (logRow?.emails_sent || 0) + 1 }, { onConflict: 'user_email_id,send_date' });
-        if (email.contact_id) sentContactIds.push(email.contact_id);
-        if (email.job_id) sentJobIds.push(email.job_id);
-        sent++;
-        // Random delay before next email (skip delay after last email)
-        if (sent + failed < pendingEmails.length) await randomDelay(1, 120);
-      } catch (e) {
-        failed++;
-        failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: e.message });
-        // Mark as failed so it's visible in UI
-        try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
-      }
-    }
-
-    // Update contact email_sent_at for successful sends
-    const uniqueContactIds = [...new Set(sentContactIds.filter(Boolean))];
-    if (uniqueContactIds.length) await supabase.from('contacts').update({ email_sent_at: today() }).in('id', uniqueContactIds);
-
-    // Log activity per job
-    const uniqueJobIds = [...new Set(sentJobIds.filter(Boolean))];
-    for (const jid of uniqueJobIds) await logActivity(jid, null, req.user.id, 'emails_sent', `${sent} email(s) sent via Microsoft`, null, null);
-    console.log(`[SendAll] Completed: ${sent} sent, ${failed} failed`);
-  } catch (err) { console.error('[SendAll] Error:', err.message); }
-});
-
-app.delete('/emails/:id', auth, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('emails').select('id,status,sent_by').eq('id', req.params.id).single();
-    if (error || !data) return res.status(404).json({ error: 'Email not found' });
-    if (data.sent_by !== req.user.id && !hasRole(req, 'admin')) return res.status(403).json({ error: 'Forbidden' });
-    if (data.status !== 'pending' && data.status !== 'failed') return res.status(400).json({ error: 'Can only delete pending or failed emails' });
-    const { error: delErr } = await supabase.from('emails').delete().eq('id', req.params.id);
-    if (delErr) throw delErr;
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.patch('/emails/:id', auth, async (req, res) => {
-  try {
-    const { subject, body } = req.body;
-    const updates = {};
-    if (subject !== undefined) updates.subject = subject;
-    if (body !== undefined) updates.body = body;
-    const { data, error } = await supabase.from('emails').update(updates).eq('id', req.params.id).eq('sent_by', req.user.id).select().single();
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════
-// REMINDERS
-// ══════════════════════════════════════════════════════════════
-app.get('/reminders', auth, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('reminders').select(`*, job:jobs(id,position,stage,company_id,company:companies(name)), contact:contacts(id,first_name,last_name,email)`).eq('user_id', req.user.id).order('return_date');
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/reminders', auth, async (req, res) => {
-  try {
-    const { job_id, contact_name, company_name, email, return_date, reminder_time, note, contact_id, reminder_type } = req.body;
-    if (!return_date) return res.status(400).json({ error: 'Return date required' });
-    const { data, error } = await supabase.from('reminders').insert({ job_id: job_id || null, user_id: req.user.id, contact_name, company_name, email, return_date, reminder_time: reminder_time || '09:00', note, status: 'pending', contact_id: contact_id || null, reminder_type: reminder_type || null }).select().single();
-    if (error) throw error;
-    res.status(201).json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.patch('/reminders/:id', auth, async (req, res) => {
-  try {
-    const { status, return_date, reminder_time, note } = req.body;
-    const updates = { updated_at: new Date() };
-    if (status) updates.status = status;
-    if (return_date) updates.return_date = return_date;
-    if (reminder_time) updates.reminder_time = reminder_time;
-    if (note !== undefined) updates.note = note;
-    const { data, error } = await supabase.from('reminders').update(updates).eq('id', req.params.id).eq('user_id', req.user.id).select().single();
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.delete('/reminders/:id', auth, async (req, res) => {
-  try {
-    await supabase.from('reminders').delete().eq('id', req.params.id).eq('user_id', req.user.id);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════
-// INSIGHTS
-// ══════════════════════════════════════════════════════════════
-app.get('/insights/ra/:userId', auth, async (req, res) => {
-  try {
-    const targetId = req.params.userId;
-    if (hasRole(req, 'ra') && !hasRole(req, 'admin', 'ra_lead') && req.user.id !== targetId) return res.status(403).json({ error: 'Forbidden' });
-    const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
-    const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7);
-    const monthAgo = new Date(now); monthAgo.setDate(monthAgo.getDate() - 30);
-    const { data: jobs, error } = await supabase.from('jobs').select('id,stage,freshness,industry,timezone,is_duplicate,created_at,created_date').eq('created_by', targetId).is('deleted_at', null).gte('created_at', monthAgo.toISOString());
-    if (error) throw error;
-    const all = jobs || [];
-    const todayJobs = all.filter(j => j.created_date === todayStr);
-    const weekJobs = all.filter(j => new Date(j.created_at) >= weekAgo);
-    const last7 = {};
-    for (let i = 6; i >= 0; i--) { const d = new Date(now); d.setDate(d.getDate() - i); const key = d.toISOString().split('T')[0]; last7[key] = all.filter(j => j.created_date === key).length; }
-    function normInd(raw) {
-      if (!raw) return 'Other'; const r = raw.toLowerCase();
-      if (r.includes('engineer')||r.includes('manufactur')||r.includes('construction')) return 'Engineering';
-      if (r.includes('health')||r.includes('medical')||r.includes('pharma')) return 'Healthcare';
-      if (r.includes('legal')||r.includes('law')||r.includes('attorney')) return 'Legal';
-      if (r.includes('account')||r.includes('financ')||r.includes('audit')) return 'Accounting';
-      if (r.includes('manag')||r.includes('consult')||r.includes('staffing')||r.includes('recruit')) return 'Management';
-      return 'Other';
-    }
-    function breakdown(arr, field) { const map = {}; arr.forEach(j => { const raw = j[field] || ''; const v = field === 'industry' ? normInd(raw) : (raw || 'Unknown'); map[v] = (map[v] || 0) + 1; }); return map; }
-    res.json({ total_month: all.length, total_week: weekJobs.length, total_today: todayJobs.length, duplicates: all.filter(j => j.is_duplicate).length, last_7_days: last7, by_industry: breakdown(all,'industry'), by_timezone: breakdown(all,'timezone'), by_freshness: breakdown(all,'freshness'), by_stage: breakdown(all,'stage') });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════
-// STATS
-// ══════════════════════════════════════════════════════════════
-app.get('/stats', auth, async (req, res) => {
-  try {
-    const { period } = req.query;
-    const now = new Date();
-    let dateFrom;
-    if (period === 'daily') dateFrom = today();
-    else if (period === 'weekly') { const w = new Date(now); w.setDate(w.getDate()-7); dateFrom = w.toISOString().split('T')[0]; }
-    else if (period === 'quarterly') { const q = new Date(now); q.setMonth(q.getMonth()-3); dateFrom = q.toISOString().split('T')[0]; }
-    else { const m = new Date(now.getFullYear(), now.getMonth(), 1); dateFrom = m.toISOString().split('T')[0]; }
-    let query = supabase.from('jobs').select('id,stage,created_by,assigned_to,contacts(id,email_sent_at)').is('deleted_at', null).gte('created_at', dateFrom + 'T00:00:00Z');
-    if (!hasRole(req, 'admin')) query = query.or(`created_by.eq.${req.user.id},assigned_to.eq.${req.user.id}`);
-    const { data, error } = await query;
-    if (error) throw error;
-    const total = data.length;
-    const emailed = data.filter(j => (j.contacts || []).some(c => c.email_sent_at)).length;
-    const byStage = {};
-    data.forEach(j => { byStage[j.stage] = (byStage[j.stage] || 0) + 1; });
-    res.json({ total, emailed, responseRate: total ? Math.round(emailed/total*100) : 0, byStage, period: period || 'monthly', dateFrom });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════
-// ACTIVITY LOG
-// ══════════════════════════════════════════════════════════════
-app.get('/jobs/:job_id/activity', auth, async (req, res) => {
-  try {
-    if (!(await canTouchJob(req, req.params.job_id))) return res.status(403).json({ error: 'Forbidden' });
-    const { data, error } = await supabase.from('activity_log').select(`*, user:users(id,name,employee_id)`).eq('job_id', req.params.job_id).order('created_at', { ascending: false });
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════
-// DISTRIBUTION
-// ══════════════════════════════════════════════════════════════
-function buildAutoRatio(pool_stats, capacity) {
-  const total = Math.min(pool_stats?.total || 0, capacity);
-  function evenSplit(obj) { const keys = Object.keys(obj).filter(k => obj[k] > 0); if (!keys.length) return {}; const base = Math.floor(100 / keys.length); const result = {}; let rem = 100; keys.forEach((k, i) => { result[k] = i === keys.length - 1 ? rem : base; rem -= base; }); return result; }
-  return { total_to_send: total, by_freshness: evenSplit(pool_stats?.by_freshness || {}), by_industry: evenSplit(pool_stats?.by_industry || {}), by_timezone: evenSplit(pool_stats?.by_timezone || {}), exclude_duplicates: false, summary: `Auto-balanced distribution of ${total} leads.` };
-}
-
-app.post('/distribute/generate-ratio', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'RA Lead only' });
-    const { priority_text, pool_stats, manager_id } = req.body;
-    const { data: manager } = await supabase.from('users').select('id,name').eq('id', manager_id).single();
-    const capacity = pool_stats.capacity || 150;
-    if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY === 'your_anthropic_api_key_here') return res.json(buildAutoRatio(pool_stats, capacity));
-    const prompt = `You are a lead distribution engine for Fute Global LLC.\nPool: ${JSON.stringify(pool_stats)}\nManager: ${manager?.name}\nCapacity: ${capacity}\nInstructions: "${priority_text}"\nRespond ONLY with valid JSON:\n{"total_to_send":<number>,"by_freshness":{"New":<pct>,"Normal":<pct>,"Old":<pct>},"by_industry":{"Engineering":<pct>,"Healthcare":<pct>,"Legal":<pct>,"Accounting":<pct>,"Management":<pct>,"Other":<pct>},"by_timezone":{"EST":<pct>,"CST":<pct>,"MST":<pct>,"PST":<pct>},"exclude_duplicates":<bool>,"summary":"<text>"}`;
-    const aiResp = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 400, messages: [{ role: 'user', content: prompt }] }) });
-    const aiData = await aiResp.json();
-    const ratio = JSON.parse((aiData.content?.[0]?.text || '{}').replace(/```json|```/g, '').trim());
-    res.json(ratio);
-  } catch (err) { res.json(buildAutoRatio(req.body.pool_stats, req.body.pool_stats?.capacity || 150)); }
-});
-
-app.post('/distribute/execute', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'RA Lead only' });
-    const { manager_id, ratio } = req.body;
-    if (!manager_id || !ratio) return res.status(400).json({ error: 'manager_id and ratio required' });
-
-    // Get manager's active user_emails
-    const { data: userEmails } = await supabase.from('user_emails')
-      .select('id,email_address,display_name,daily_send_limit').eq('user_id', manager_id).eq('is_active', true);
-    if (!userEmails?.length) return res.status(400).json({ error: 'Manager has no active email IDs' });
-
-    const todayDate = today();
-    const { data: sendLogs } = await supabase.from('email_send_log').select('user_email_id,emails_sent').eq('send_date', todayDate);
-    const sentToday = {};
-    (sendLogs || []).forEach(l => { sentToday[l.user_email_id] = l.emails_sent; });
-
-    const accounts = userEmails.map(a => ({ ...a, remaining: (a.daily_send_limit || 150) - (sentToday[a.id] || 0) })).filter(a => a.remaining > 0);
-    if (!accounts.length) return res.status(400).json({ error: 'All email IDs have reached daily limit' });
-
-    const totalCapacity = accounts.reduce((s, a) => s + a.remaining, 0);
-    const totalToSend = Math.min(ratio.total_to_send || 50, totalCapacity);
-
-    let query = supabase.from('jobs').select('id,position,freshness,industry,timezone,is_duplicate').is('deleted_at', null).eq('stage', 'Unassigned').is('assigned_to_bd', null);
-    if (ratio.exclude_duplicates) query = query.eq('is_duplicate', false);
-    const { data: pool } = await query;
-    if (!pool?.length) return res.status(400).json({ error: 'No unassigned leads in pool' });
-
-    const freshnessOrder = { 'Old': 0, 'Normal': 1, 'New': 2, '': 3 };
-    const sorted = [...pool].sort((a, b) => (freshnessOrder[a.freshness] ?? 3) - (freshnessOrder[b.freshness] ?? 3));
-    const selected = [];
-    const used = { freshness: {}, industry: {}, timezone: {} };
-    for (const job of sorted) {
-      if (selected.length >= totalToSend) break;
-      selected.push(job);
-      used.freshness[job.freshness] = (used.freshness[job.freshness] || 0) + 1;
-      used.industry[job.industry] = (used.industry[job.industry] || 0) + 1;
-      used.timezone[job.timezone] = (used.timezone[job.timezone] || 0) + 1;
-    }
-    if (!selected.length) return res.status(400).json({ error: 'No leads matched distribution criteria' });
-
-    const assignedLeads = [];
-    let acIdx = 0;
-    const now = new Date();
-    for (const job of selected) {
-      let tries = 0;
-      while (accounts[acIdx % accounts.length].remaining <= 0 && tries < accounts.length) { acIdx++; tries++; }
-      const account = accounts[acIdx % accounts.length];
-      account.remaining--;
-      acIdx++;
-      await supabase.from('jobs').update({ assigned_to_bd: manager_id, sending_email_id: account.id, stage: 'Assigned', assigned_at: now, updated_at: now }).eq('id', job.id);
-      assignedLeads.push({ job_id: job.id, user_email_id: account.id });
-    }
-
-    const countPerAccount = {};
-    assignedLeads.forEach(l => { countPerAccount[l.user_email_id] = (countPerAccount[l.user_email_id] || 0) + 1; });
-    for (const [eid, cnt] of Object.entries(countPerAccount)) {
-      await supabase.from('email_send_log').upsert({ user_email_id: eid, send_date: todayDate, emails_sent: (sentToday[eid] || 0) + cnt }, { onConflict: 'user_email_id,send_date' });
-    }
-
-    // Create follow-up rows
-    const jobIds = selected.map(j => j.id);
-    const outreachDateStr = now.toISOString().split('T')[0];
-    const { data: bdSettings } = await supabase.from('app_settings').select('key,value').in('key', [`u_${manager_id}_fu1_day`, `u_${manager_id}_fu2_day`]);
-    const bdSettingsMap = {};
-    (bdSettings || []).forEach(r => { bdSettingsMap[r.key] = r.value; });
-    const fu1Day = parseInt(bdSettingsMap[`u_${manager_id}_fu1_day`] || '3', 10);
-    const fu2Day = parseInt(bdSettingsMap[`u_${manager_id}_fu2_day`] || '7', 10);
-    const fu1Date = new Date(now); fu1Date.setDate(fu1Date.getDate() + fu1Day);
-    const fu2Date = new Date(now); fu2Date.setDate(fu2Date.getDate() + fu2Day);
-    const fu1Str = fu1Date.toISOString().split('T')[0];
-    const fu2Str = fu2Date.toISOString().split('T')[0];
-    const { data: assignedJobs } = await supabase.from('jobs').select('id,sending_email_id,contacts(id,email)').in('id', jobIds);
-    const followUpRows = [];
-    for (const aj of (assignedJobs || [])) {
-      const contacts = (aj.contacts || []).filter(c => c.email);
-      for (const c of contacts) {
-        followUpRows.push({ job_id: aj.id, contact_id: c.id, user_email_id: aj.sending_email_id, outreach_sent_at: outreachDateStr, followup1_due_date: fu1Str, followup2_due_date: fu2Str, status: 'active' });
-      }
-    }
-    if (followUpRows.length) await supabase.from('follow_ups').insert(followUpRows);
-
-    fetch(`${req.protocol}://${req.get('host')}/emails/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': req.headers.authorization }, body: JSON.stringify({ job_ids: jobIds }) }).catch(e => console.error('Email generation error:', e.message));
-
-    res.json({ success: true, total_assigned: selected.length, manager_id, by_freshness: used.freshness, by_industry: used.industry, by_timezone: used.timezone, email_accounts_used: Object.keys(countPerAccount).length, ratio_summary: ratio.summary || '', assigned_at: now.toISOString() });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/distribute/pool-stats', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'RA Lead only' });
-    const { data: pool } = await supabase.from('jobs').select('id,freshness,industry,timezone,is_duplicate').is('deleted_at', null).eq('stage', 'Unassigned').is('assigned_to_bd', null);
-    const stats = { total: pool?.length || 0, by_freshness: {}, by_industry: {}, by_timezone: {}, duplicates: 0 };
-    (pool || []).forEach(j => {
-      stats.by_freshness[j.freshness || 'Unknown'] = (stats.by_freshness[j.freshness || 'Unknown'] || 0) + 1;
-      stats.by_industry[j.industry || 'Unknown'] = (stats.by_industry[j.industry || 'Unknown'] || 0) + 1;
-      stats.by_timezone[j.timezone || 'Unknown'] = (stats.by_timezone[j.timezone || 'Unknown'] || 0) + 1;
-      if (j.is_duplicate) stats.duplicates++;
-    });
-    res.json(stats);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/distribute/today-summary', auth, async (req, res) => {
-  try {
-    const targetId = req.query.manager_id || req.user.id;
-    const { data: jobs } = await supabase.from('jobs').select('id,freshness,industry,timezone,assigned_at').eq('assigned_to_bd', targetId).gte('assigned_at', today() + 'T00:00:00Z');
-    const summary = { total: jobs?.length || 0, by_freshness: {}, by_industry: {}, by_timezone: {} };
-    (jobs || []).forEach(j => {
-      summary.by_freshness[j.freshness || 'Unknown'] = (summary.by_freshness[j.freshness || 'Unknown'] || 0) + 1;
-      summary.by_industry[j.industry || 'Unknown'] = (summary.by_industry[j.industry || 'Unknown'] || 0) + 1;
-      summary.by_timezone[j.timezone || 'Unknown'] = (summary.by_timezone[j.timezone || 'Unknown'] || 0) + 1;
-    });
-    res.json(summary);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/jobs/bulk-stage', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'bd', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Not allowed' });
-    const { job_ids, stage } = req.body;
-    if (!Array.isArray(job_ids) || !job_ids.length) return res.status(400).json({ error: 'job_ids required' });
-    const validStages = ['Unassigned', 'Assigned', 'Connected', 'Rejected', 'Future', 'In Discussion'];
-    if (!validStages.includes(stage)) return res.status(400).json({ error: 'Invalid stage' });
-
-    const updates = { stage, updated_at: new Date() };
-    // If resetting to Unassigned, clear assignment fields so it re-enters the pool
-    if (stage === 'Unassigned') {
-      updates.assigned_to_bd = null;
-      updates.sending_email_id = null;
-      updates.assigned_at = null;
-    }
-
-    const { error } = await supabase.from('jobs').update(updates).in('id', job_ids);
-    if (error) throw error;
-
-    for (const jid of job_ids) await logActivity(jid, null, req.user.id, 'stage_changed', `Stage changed to ${stage}`, null, { stage });
-
-    // If resetting to Unassigned, also delete any pending emails for these jobs
-    if (stage === 'Unassigned') {
-      await supabase.from('emails').delete().in('job_id', job_ids).eq('status', 'pending');
-    }
-
-    res.json({ success: true, updated: job_ids.length, stage });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/jobs/today-summary', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'Not allowed' });
-    const todayStr = today();
-
-    // Jobs created today
-    const { data: todayJobs, error } = await supabase
-      .from('jobs')
-      .select('id, position, industry, location, freshness, is_duplicate, timezone, company:companies(name, industry), contacts(id, designation)')
-      .gte('created_at', todayStr + 'T00:00:00Z')
-      .is('deleted_at', null);
-    if (error) throw error;
-
-    const total = todayJobs.length;
-    const duplicates = todayJobs.filter(j => j.is_duplicate).length;
-    const clean = total - duplicates;
-
-    // Industry breakdown
-    const byIndustry = {};
-    todayJobs.forEach(j => {
-      const ind = j.industry || j.company?.industry || 'Unknown';
-      byIndustry[ind] = (byIndustry[ind] || 0) + 1;
-    });
-
-    // Freshness breakdown
-    const byFreshness = {};
-    todayJobs.forEach(j => {
-      const f = j.freshness || 'Normal';
-      byFreshness[f] = (byFreshness[f] || 0) + 1;
-    });
-
-    // Timezone breakdown
-    const byTimezone = {};
-    todayJobs.forEach(j => {
-      const tz = j.timezone || 'EST';
-      byTimezone[tz] = (byTimezone[tz] || 0) + 1;
-    });
-
-    // Top positions
-    const byPosition = {};
-    todayJobs.forEach(j => {
-      byPosition[j.position] = (byPosition[j.position] || 0) + 1;
-    });
-    const topPositions = Object.entries(byPosition).sort((a,b) => b[1]-a[1]).slice(0,5).map(([k,v]) => `${k} (${v})`);
-
-    // Contact count
-    const totalContacts = todayJobs.reduce((s, j) => s + (j.contacts?.length || 0), 0);
-
-    // Current pool size (all unassigned)
-    const { count: poolSize } = await supabase.from('jobs').select('id', { count: 'exact', head: true }).eq('stage', 'Unassigned').is('deleted_at', null);
-
-    res.json({
-      date: todayStr,
-      total, clean, duplicates, totalContacts,
-      byIndustry, byFreshness, byTimezone, topPositions,
-      poolSize: poolSize || 0
-    });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/jobs/bulk-assign', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'ra_lead or admin only' });
-    const { job_ids, assigned_to_bd } = req.body;
-    if (!Array.isArray(job_ids) || !job_ids.length) return res.status(400).json({ error: 'job_ids array required' });
-    if (!assigned_to_bd) return res.status(400).json({ error: 'assigned_to_bd required' });
-    const { data: bd } = await supabase.from('users').select('id,name').eq('id', assigned_to_bd).single();
-    if (!bd) return res.status(400).json({ error: 'BD user not found' });
-
-    // Get BD's primary active email ID for sending
-    const { data: bdEmails } = await supabase.from('user_emails')
-      .select('id,email_address,is_primary')
-      .eq('user_id', assigned_to_bd)
-      .eq('is_active', true)
-      .order('is_primary', { ascending: false });
-    const sendingEmailId = (bdEmails && bdEmails.length) ? bdEmails[0].id : null;
-
-    const now = new Date();
-    const updatePayload = { assigned_to_bd, assigned_at: now, stage: 'Assigned', updated_at: now };
-    if (sendingEmailId) updatePayload.sending_email_id = sendingEmailId;
-    const { error } = await supabase.from('jobs').update(updatePayload).in('id', job_ids);
-    if (error) throw error;
-    for (const jid of job_ids) await logActivity(jid, null, req.user.id, 'bulk_assigned', `Bulk assigned to BD: ${bd.name}`, null, { assigned_to_bd, bd_name: bd.name });
-    res.json({ success: true, assigned: job_ids.length, bd_name: bd.name, sending_email_id: sendingEmailId });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/jobs/check-duplicates', auth, async (req, res) => {
-  try {
-    const { emails } = req.body;
-    if (!Array.isArray(emails) || !emails.length) return res.json({ duplicates: [] });
-    const { data, error } = await supabase.from('contacts').select('email, job_id, job:jobs(id,position,company_id,company:companies(name))').in('email', emails.map(e => e.toLowerCase().trim())).not('email', 'is', null);
-    if (error) throw error;
-    res.json({ duplicates: data || [] });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════
-// AI EMAIL GENERATION
-// ══════════════════════════════════════════════════════════════
-app.post('/ai/generate-email', auth, async (req, res) => {
-  try {
-    const { lead, contact, company, template } = req.body;
-    const c = contact || lead || {};
-    const vars = { fn: c.first_name, ln: c.last_name, company: company?.name, ind: company?.industry, pos: c.position || req.body.position, desig: c.designation, loc: company?.location, sender: req.user.name };
-    const fill = (s) => (s || '').replace(/{{(\w+)}}/g, (m, k) => vars[k] || m);
-    if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY === 'your_anthropic_api_key_here') {
-      return res.json({ subject: fill(template?.subject || 'Opportunity at {{company}}'), body: fill(template?.body || 'Hi {{fn}},') });
-    }
-    const prompt = `Write a hyper-personalized cold outreach email for a business development executive at Fute Global LLC.\nContact: ${vars.fn} ${vars.ln || ''}, ${vars.desig || ''} at ${vars.company} (${vars.ind || ''}, ${vars.loc || ''})\nPosition: ${vars.pos || ''}\nFormat:\nSubject: [subject line]\n\n[email body]`;
-    const response = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 600, messages: [{ role: 'user', content: prompt }] }) });
-    const aiData = await response.json();
-    const text = aiData.content?.[0]?.text || '';
-    const subjectMatch = text.match(/Subject:\s*(.+)/i);
-    res.json({ subject: subjectMatch ? subjectMatch[1].trim() : `Opportunity at ${vars.company}`, body: text.replace(/^Subject:.+\n*/im, '').trim() });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════
-// APP SETTINGS
-// ══════════════════════════════════════════════════════════════
-app.post('/ai/generate-summary', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'Not allowed' });
-    const { prompt } = req.body;
-    if (!prompt) return res.status(400).json({ error: 'prompt required' });
-    if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY === 'your_anthropic_api_key_here') {
-      return res.json({ summary: 'AI summary unavailable — no API key configured.' });
-    }
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 300, messages: [{ role: 'user', content: prompt }] })
-    });
-    const aiData = await response.json();
-    const summary = aiData.content?.[0]?.text?.trim() || 'Summary unavailable.';
-    res.json({ summary });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/app-settings', auth, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('app_settings').select('key,value');
-    if (error) throw error;
-    const settings = {};
-    (data || []).forEach(r => { settings[r.key] = r.value; });
-    res.json(settings);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/app-settings', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'Admin or RA Lead only' });
-    const { key, value } = req.body;
-    if (!key || value === undefined) return res.status(400).json({ error: 'key and value required' });
-    const { error } = await supabase.from('app_settings').upsert({ key, value, updated_at: new Date() }, { onConflict: 'key' });
-    if (error) throw error;
-    res.json({ success: true, key, value });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════
-// OUTREACH PLAN (per-user)
-// ══════════════════════════════════════════════════════════════
-app.get('/outreach-plan', auth, async (req, res) => {
-  try {
-    const uid = req.user.id;
-    const keys = [`u_${uid}_fu1_day`,`u_${uid}_fu2_day`,`u_${uid}_tmpl_o1_subject`,`u_${uid}_tmpl_o1_body`,`u_${uid}_tmpl_fu1_subject`,`u_${uid}_tmpl_fu1_body`,`u_${uid}_tmpl_fu2_subject`,`u_${uid}_tmpl_fu2_body`];
-    const { data } = await supabase.from('app_settings').select('key,value').in('key', keys);
-    const plan = {};
-    (data || []).forEach(r => { plan[r.key.replace(`u_${uid}_`, '')] = r.value; });
-    res.json(plan);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/outreach-plan', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'bd', 'bd_lead', 'admin')) return res.status(403).json({ error: 'BD role required' });
-    const uid = req.user.id;
-    const allowed = ['fu1_day','fu2_day','tmpl_o1_subject','tmpl_o1_body','tmpl_fu1_subject','tmpl_fu1_body','tmpl_fu2_subject','tmpl_fu2_body'];
-    const { key, value } = req.body;
-    if (!allowed.includes(key)) return res.status(400).json({ error: 'Invalid key' });
-    const fullKey = `u_${uid}_${key}`;
-    const { error } = await supabase.from('app_settings').upsert({ key: fullKey, value: String(value), updated_at: new Date() }, { onConflict: 'key' });
-    if (error) throw error;
-    res.json({ success: true, key: fullKey, value });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════
-// FOLLOW-UPS
-// ══════════════════════════════════════════════════════════════
-app.get('/follow-ups', auth, async (req, res) => {
-  try {
-    let query = supabase.from('follow_ups').select(`*, contact:contacts(id,first_name,last_name,email,designation), job:jobs(id,position,stage,company:companies(name))`).order('followup1_due_date', { ascending: true });
-    if (hasRole(req, 'bd') && !hasRole(req, 'admin', 'ra_lead', 'bd_lead')) {
-      const { data: myJobs } = await supabase.from('jobs').select('id').eq('assigned_to_bd', req.user.id).is('deleted_at', null);
-      const myJobIds = (myJobs || []).map(j => j.id);
-      if (!myJobIds.length) return res.json([]);
-      query = query.in('job_id', myJobIds);
-    }
-    const { data, error } = await query;
-    if (error) throw error;
-    res.json(data || []);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/follow-ups/run', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'bd_lead')) return res.status(403).json({ error: 'Admin only' });
-    const result = await runFollowupEngine();
-    res.json({ success: true, ...result });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-async function runFollowupEngine() {
-  const todayDate = today();
-  const log = { checked: 0, fu1_queued: 0, fu2_queued: 0, skipped_quota: 0, skipped_stage: 0 };
-  try {
-    const { data: dueFu, error: fuErr } = await supabase.from('follow_ups')
-      .select(`*, contact:contacts(id,first_name,last_name,email,designation), job:jobs(id,position,stage,assigned_to_bd,company:companies(name,industry,location),sending_email:user_emails!sending_email_id(id,email_address,display_name))`)
-      .eq('status', 'active');
-    if (fuErr) throw fuErr;
-    log.checked = (dueFu || []).length;
-
-    const { data: settingsRows } = await supabase.from('app_settings').select('key,value');
-    const settings = {};
-    (settingsRows || []).forEach(r => { settings[r.key] = r.value; });
-
-    function getBDTemplate(bdId, key, globalKey, fallback) {
-      return settings[`u_${bdId}_${key}`] || settings[globalKey] || fallback;
-    }
-    function fillTemplate(tmpl, vars) {
-      return (tmpl || '').replace(/{{(\w+)}}/g, (m, k) => vars[k] || m);
-    }
-
-    const { data: sendLogs } = await supabase.from('email_send_log').select('user_email_id,emails_sent').eq('send_date', todayDate);
-    const sentToday = {};
-    (sendLogs || []).forEach(l => { sentToday[l.user_email_id] = l.emails_sent || 0; });
-
-    const { data: allEmails } = await supabase.from('user_emails').select('id,daily_send_limit').eq('is_active', true);
-    const limitMap = {};
-    (allEmails || []).forEach(a => { limitMap[a.id] = a.daily_send_limit || 150; });
-
-    const bdIdSet = [...new Set((dueFu || []).map(f => f.job?.assigned_to_bd).filter(Boolean))];
-    let bdMap = {};
-    if (bdIdSet.length) {
-      const { data: bdUsers } = await supabase.from('users').select('id,name').in('id', bdIdSet);
-      (bdUsers || []).forEach(u => { bdMap[u.id] = u.name; });
-    }
-
-    const emailsToInsert = [];
-    const fu1Updates = [];
-    const fu2Updates = [];
-    const acCountDelta = {};
-
-    const fu1Due = (dueFu || []).filter(f => !f.followup1_sent_at && f.followup1_due_date <= todayDate);
-    const fu2Due = (dueFu || []).filter(f => f.followup1_sent_at && !f.followup2_sent_at && f.followup2_due_date <= todayDate);
-
-    for (const fuList of [fu1Due, fu2Due]) {
-      const isFu2 = fuList === fu2Due;
-      for (const fu of fuList) {
-        const job = fu.job;
-        if (!job || job.stage !== 'Assigned') {
-          await supabase.from('follow_ups').update({ status: 'skipped' }).eq('id', fu.id);
-          log.skipped_stage++; continue;
-        }
-        const acId = job.sending_email?.id;
-        if (!acId) continue;
-        const rem = (limitMap[acId] || 150) - (sentToday[acId] || 0) - (acCountDelta[acId] || 0);
-        if (rem <= 0) { log.skipped_quota++; continue; }
-        const contact = fu.contact;
-        if (!contact?.email) continue;
-        const bdId = job.assigned_to_bd;
-        // Use sending email display_name so signature matches the From address
-        const senderName = job.sending_email?.display_name || bdMap[bdId] || 'Fute Global';
-        const vars = { fn: contact.first_name || '', ln: contact.last_name || '', company: job.company?.name || '', pos: job.position || '', desig: contact.designation || '', ind: job.company?.industry || '', loc: job.company?.location || '', sender: senderName };
-        const subjTmpl = isFu2
-          ? getBDTemplate(bdId, 'tmpl_fu2_subject', 'template_fu2_subject', 'Re: Staffing Partnership — {{company}}')
-          : getBDTemplate(bdId, 'tmpl_fu1_subject', 'template_fu1_subject', 'Re: Staffing Partnership — {{company}}');
-        const bodyTmpl = isFu2
-          ? getBDTemplate(bdId, 'tmpl_fu2_body', 'template_fu2_body', 'Hi {{fn}},\n\nI wanted to reach out one last time regarding {{pos}} at {{company}}.\n\nBest,\n{{sender}}')
-          : getBDTemplate(bdId, 'tmpl_fu1_body', 'template_fu1_body', 'Hi {{fn}},\n\nJust following up on my previous email regarding {{pos}} at {{company}}.\n\nBest,\n{{sender}}');
-        emailsToInsert.push({ contact_id: fu.contact_id, job_id: fu.job_id, to_email: contact.email, from_email: job.sending_email?.email_address || null, subject: fillTemplate(subjTmpl, vars), body: fillTemplate(bodyTmpl, vars), platform: 'Outlook', sent_by: bdId, status: 'pending', followup_type: isFu2 ? 'fu2' : 'fu1', follow_up_id: fu.id });
-        if (isFu2) { fu2Updates.push(fu.id); log.fu2_queued++; } else { fu1Updates.push(fu.id); log.fu1_queued++; }
-        acCountDelta[acId] = (acCountDelta[acId] || 0) + 1;
-      }
-    }
-
-    if (emailsToInsert.length) await supabase.from('emails').insert(emailsToInsert);
-    const nowTs = new Date().toISOString();
-    if (fu1Updates.length) await supabase.from('follow_ups').update({ followup1_sent_at: nowTs }).in('id', fu1Updates);
-    if (fu2Updates.length) { await supabase.from('follow_ups').update({ followup2_sent_at: nowTs, status: 'completed' }).in('id', fu2Updates); }
-    for (const [acId, cnt] of Object.entries(acCountDelta)) {
-      await supabase.from('email_send_log').upsert({ user_email_id: acId, send_date: todayDate, emails_sent: (sentToday[acId] || 0) + cnt }, { onConflict: 'user_email_id,send_date' });
-    }
-    console.log(`[FollowupEngine] FU1: ${log.fu1_queued}, FU2: ${log.fu2_queued}, skipped_quota: ${log.skipped_quota}, skipped_stage: ${log.skipped_stage}`);
-    return log;
-  } catch (err) { console.error('[FollowupEngine] Error:', err.message); return { ...log, error: err.message }; }
-}
-
-function toIST(date) { const utc = date.getTime() + date.getTimezoneOffset() * 60000; return new Date(utc + 5.5 * 3600000); }
-const cronState = { lastOutreachRun: null, lastFollowupRun: null };
-setInterval(async () => {
-  try {
-    const now = toIST(new Date());
-    const hhmm = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-    const dateStr = now.toISOString().split('T')[0];
-    const { data: settingsRows } = await supabase.from('app_settings').select('key,value');
-    const settings = {};
-    (settingsRows || []).forEach(r => { settings[r.key] = r.value; });
-    if (hhmm === (settings['followup_send_time'] || '08:30') && cronState.lastFollowupRun !== dateStr) {
-      cronState.lastFollowupRun = dateStr;
-      console.log(`[Cron] Follow-up engine triggered at ${hhmm} IST`);
-      await runFollowupEngine();
-    }
-  } catch (e) { console.error('[Cron] Error:', e.message); }
-}, 60000);
-
-// ══════════════════════════════════════════════════════════════
-// MICROSOFT OAUTH
-// ══════════════════════════════════════════════════════════════
-const MS_TENANT   = process.env.MICROSOFT_TENANT_ID;
-const MS_CLIENT   = process.env.MICROSOFT_CLIENT_ID;
-const MS_SECRET   = process.env.MICROSOFT_CLIENT_SECRET;
-const MS_REDIRECT = 'https://fute-lms-backend.onrender.com/auth/microsoft/callback';
-const MS_SCOPES   = 'Mail.Send offline_access User.Read';
-
-app.get('/auth/microsoft/connect', async (req, res) => {
-  try {
-    const token = req.query.token || (req.headers.authorization || '').replace('Bearer ', '');
-    if (!token) return res.status(401).send('Unauthorized');
-    let reqUser;
-    try { reqUser = jwt.verify(token, process.env.JWT_SECRET); } catch { return res.status(401).send('Invalid token'); }
-    if (!reqUser.roles?.includes('admin') && reqUser.role !== 'admin') return res.status(403).send('Admin only');
-    const { userEmailId } = req.query;
-    if (!userEmailId) return res.status(400).send('userEmailId required');
-    const state = Buffer.from(JSON.stringify({ userEmailId, userId: reqUser.id })).toString('base64');
-    const url = `https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/authorize?client_id=${MS_CLIENT}&response_type=code&redirect_uri=${encodeURIComponent(MS_REDIRECT)}&scope=${encodeURIComponent(MS_SCOPES)}&state=${encodeURIComponent(state)}&prompt=select_account`;
-    res.redirect(url);
-  } catch (err) { res.status(500).send(err.message); }
-});
-
-app.get('/auth/microsoft/callback', async (req, res) => {
-  try {
-    const { code, state, error: msError } = req.query;
-    if (msError) return res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'${msError}'},'*');window.close();</script>`);
-    if (!code || !state) return res.status(400).send('Missing code or state');
-    const { userEmailId, userId } = JSON.parse(Buffer.from(decodeURIComponent(state), 'base64').toString());
-    const tokenRes = await fetch(`https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/token`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: MS_CLIENT, client_secret: MS_SECRET, code, redirect_uri: MS_REDIRECT, grant_type: 'authorization_code', scope: MS_SCOPES }) });
-    const tokens = await tokenRes.json();
-    if (tokens.error) return res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'${tokens.error_description}'},'*');window.close();</script>`);
-    const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
-    const profileRes = await fetch('https://graph.microsoft.com/v1.0/me', { headers: { Authorization: `Bearer ${tokens.access_token}` } });
-    const profile = await profileRes.json();
-    const emailAddress = profile.mail || profile.userPrincipalName || '';
-
-    // Delete existing token row for this user_email_id, then insert fresh
-    await supabase.from('microsoft_tokens').delete().eq('user_email_id', userEmailId);
-    const { error: insertErr } = await supabase.from('microsoft_tokens').insert(
-      { user_email_id: userEmailId, user_id: userId, email_address: emailAddress, access_token: tokens.access_token, refresh_token: tokens.refresh_token, expires_at: expiresAt, updated_at: new Date() }
-    );
-    if (insertErr) {
-      console.error('microsoft_tokens insert error:', insertErr);
-      return res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'DB save failed: ${insertErr.message}'},'*');window.close();</scr`+`ipt>`);
-    }
-
-    await supabase.from('user_emails').update({ platform: 'Microsoft' }).eq('id', userEmailId);
-    res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_success',userEmailId:'${userEmailId}',email:'${emailAddress}'},'*');window.close();</scr`+`ipt>`);
-  } catch (err) {
-    console.error('Microsoft OAuth callback error:', err);
-    res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'${err.message}'},'*');window.close();</scr`+`ipt>`);
+    pocOpts='<option value="">— Select contact —</option>'+pocList.map(function(p){
+      return '<option value="'+p.cid+'|'+p.jid+'"'+(STATE.composeContactId===p.cid+'|'+p.jid?' selected':'')+'>'+escHtml(p.label)+'</option>';
+    }).join('');
   }
-});
 
-// Random delay between emails to avoid domain flagging (1–120 seconds)
-function randomDelay(minSec = 1, maxSec = 120) {
-  const ms = Math.floor(Math.random() * (maxSec - minSec + 1) + minSec) * 1000;
-  return new Promise(resolve => setTimeout(resolve, ms));
+  var composeHtml='';
+  if(STATE.emailTab==='compose'){
+    var hasRecipient=!!(STATE.composeContactId||STATE.manualEmail);
+
+    // Recipient badge
+    var recipientBadge='';
+    if(STATE.composeContactId){
+      var parts=STATE.composeContactId.split('|');
+      var cc=STATE.contacts.find(function(c){return c.id===parts[0];});
+      var cj=myJobs.find(function(j){return j.id===parts[1];});
+      if(cc)recipientBadge='<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--accent-l);border-radius:var(--r);margin-top:8px">'+
+        '<div style="flex:1;font-size:13px"><strong>'+escHtml((cc.first_name||'')+' '+(cc.last_name||''))+'</strong>'+(cc.designation?' \u00b7 '+escHtml(cc.designation):'')+
+          '<div style="font-size:12px;color:var(--accent);font-weight:600;margin-top:2px">'+escHtml(cc.email||'(no email on record)')+'</div>'+(cj?'<div style="font-size:11px;color:var(--text3)">'+escHtml(cj.company_name)+'</div>':'')+
+        '</div>'+
+        '<button class="btn-icon" onclick="STATE.composeContactId=null;STATE.composeCompanyId=null;STATE.genEmail=null;render()">'+ico('x',13)+'</button>'+
+      '</div>';
+    } else if(STATE.manualEmail){
+      recipientBadge='<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--green-l);border-radius:var(--r);margin-top:8px">'+
+        '<div style="flex:1;font-size:13px"><strong>'+htmlEsc(STATE.manualEmail)+'</strong><div style="font-size:11px;color:var(--text3)">Manual entry</div></div>'+
+        '<button class="btn-icon" onclick="STATE.manualEmail=null;STATE.genEmail=null;render()">'+ico('x',13)+'</button>'+
+      '</div>';
+    }
+
+    // Preview section — shows genEmail with editable subject/body
+    var previewSection='';
+    if(STATE.genEmail){
+      var ge=STATE.genEmail;
+      previewSection='<div style="margin-top:14px;border:1.5px solid var(--accent);border-radius:var(--r2);overflow:hidden">'+
+        '<div style="padding:10px 14px;background:var(--accent-l);display:flex;justify-content:space-between;align-items:center">'+
+          '<div style="font-size:12px;font-weight:600;color:var(--accent)">\u2728 AI Preview \u2014 edit before sending</div>'+
+          '<button class="btn-icon" onclick="STATE.genEmail=null;render()">'+ico('x',12)+'</button>'+
+        '</div>'+
+        '<div style="padding:12px 14px;border-bottom:1px solid var(--border)">'+
+          '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Subject</label>'+
+          '<input class="inp" id="preview-subj" value="'+htmlEsc(ge.subj||ge.subject||'')+'" oninput="STATE.genEmail.subj=this.value;STATE.genEmail.subject=this.value" style="font-size:13px"/>'+
+        '</div>'+
+        '<div style="padding:12px 14px;border-bottom:1px solid var(--border)">'+
+          '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Body</label>'+
+          '<textarea id="preview-body" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;line-height:1.7;min-height:160px;resize:vertical;font-family:inherit" oninput="STATE.genEmail.body=this.value">'+htmlEsc(ge.body||'')+'</textarea>'+
+        '</div>'+
+        '<div style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center">'+
+          '<button class="btn btn-outline btn-sm" onclick="STATE.genEmail=null;render()">Discard</button>'+
+          '<button class="btn btn-primary btn-sm" onclick="sendEmail()">'+ico('send',12)+' Send this email</button>'+
+        '</div>'+
+      '</div>';
+    }
+
+    // AI panel
+    var aiSection='';
+    if(STATE.showAIPanel){
+      aiSection='<div style="margin-top:12px;padding:14px;background:var(--purple-l);border:1.5px solid rgba(124,58,237,.2);border-radius:var(--r2)">'+
+        '<div style="font-size:12px;font-weight:600;color:var(--purple);margin-bottom:8px">\u2728 AI instructions</div>'+
+        '<textarea class="txta w100" style="min-height:80px;font-size:12.5px;background:rgba(255,255,255,.7)" id="ai-prompt-inp" oninput="STATE.aiPrompt=this.value" placeholder="e.g. Be very concise, 3 lines only...">'+htmlEsc(STATE.aiPrompt||STATE.aiPromptDefault)+'</textarea>'+
+        '<div class="flex gap1 flex-wrap mt2">'+
+          ['Very concise (3 lines)','Formal tone','Friendly tone','Focus on urgency','Ask for referral'].map(function(s){
+            return '<span onclick="appendPrompt(\''+s+'\')" style="font-size:11px;padding:3px 8px;background:rgba(124,58,237,.1);color:var(--purple);border-radius:10px;cursor:pointer;border:1px solid rgba(124,58,237,.15)">+\u202f'+s+'</span>';
+          }).join('')+
+        '</div>'+
+        '<div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">'+
+          '<button class="btn btn-outline btn-sm" onclick="resetAIPrompt()">Reset</button>'+
+          '<button class="btn btn-sm" style="background:var(--purple);color:#fff" onclick="generateAI()">'+
+            (STATE.aiGenerating?'Generating\u2026':'Generate email')+
+          '</button>'+
+        '</div>'+
+      '</div>';
+    }
+
+    composeHtml='<div style="max-width:640px">'+
+      '<div class="card cp mb3">'+
+        '<div class="fw6 mb2" style="font-size:13px">Recipient</div>'+
+
+        // Step 1 — pick company
+        '<div style="margin-bottom:10px">'+
+          '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Step 1 \u2014 Select company</label>'+
+          '<select class="sel" onchange="STATE.composeCompanyId=this.value;STATE.composeContactId=null;STATE.genEmail=null;render()">'+coOpts+'</select>'+
+        '</div>'+
+
+        // Step 2 — pick contact (only shown if company selected)
+        (STATE.composeCompanyId?
+          '<div style="margin-bottom:10px">'+
+            '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Step 2 \u2014 Select contact / POC</label>'+
+            '<select class="sel" onchange="STATE.composeContactId=this.value;STATE.manualEmail=null;STATE.genEmail=null;render()">'+pocOpts+'</select>'+
+          '</div>':'')+
+
+        // Divider
+        '<div style="display:flex;align-items:center;gap:8px;margin:10px 0">'+
+          '<div style="flex:1;height:1px;background:var(--border)"></div>'+
+          '<span style="font-size:11px;color:var(--text3)">or type email directly</span>'+
+          '<div style="flex:1;height:1px;background:var(--border)"></div>'+
+        '</div>'+
+        '<input class="inp" placeholder="someone@company.com" id="manual-email-inp" value="'+htmlEsc(STATE.manualEmail||'')+'" oninput="STATE.manualEmail=this.value||null;STATE.composeContactId=null;STATE.composeCompanyId=null;STATE.genEmail=null"/>'+
+        recipientBadge+
+      '</div>'+
+
+      // ── From email selector ──
+      (function(){
+        var myEmails=(STATE.userEmailsCache&&STATE.userEmailsCache[u.id]||[]).filter(function(e){return e.is_active;});
+        if(!myEmails.length){
+          return '<div class="card cp mb3">'
+            +'<div class="fw6 mb2" style="font-size:13px">From</div>'
+            +'<div style="font-size:12px;color:var(--text3);padding:8px 0">No active email IDs assigned to your account. Add one in Manager Users.</div>'
+            +'</div>';
+        }
+        var fromOpts=myEmails.map(function(e){
+          var sel=STATE.composeFromEmailId===e.id;
+          return '<option value="'+e.id+'"'+(sel?' selected':'')+'>'+htmlEsc(e.display_name||e.email_address)+' &lt;'+htmlEsc(e.email_address)+'&gt;</option>';
+        }).join('');
+        return '<div class="card cp mb3">'
+          +'<div class="fw6 mb2" style="font-size:13px">From</div>'
+          +'<select class="sel" onchange="STATE.composeFromEmailId=this.value;render()">'
+            +'<option value="">— Select sending email —</option>'+fromOpts
+          +'</select>'
+          +(STATE.composeFromEmailId?'':'<div style="font-size:11px;color:var(--amber);margin-top:6px">Select a sending email to enable send</div>')
+          +'</div>';
+      })()+
+
+      '<div class="card cp mb3">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+          '<div class="fw6" style="font-size:13px">Message</div>'+
+          '<div style="display:flex;gap:8px;align-items:center">'+
+            '<button onclick="STATE.showAIPanel=!STATE.showAIPanel;render()" style="font-size:12px;padding:5px 11px;border:1px solid rgba(124,58,237,.3);background:'+(STATE.showAIPanel?'var(--purple)':'var(--purple-l)')+';color:'+(STATE.showAIPanel?'#fff':'var(--purple)')+';border-radius:7px;cursor:pointer">\u2728 AI</button>'+
+            '<div class="flex gap1">'+
+              '<button class="fc'+(u.plt==='Gmail'?' on':'')+'" onclick="setPlatform(\'Gmail\')">Gmail</button>'+
+              '<button class="fc'+(u.plt==='Outlook'?' on':'')+'" onclick="setPlatform(\'Outlook\')">Outlook</button>'+
+            '</div>'+
+          '</div>'+
+        '</div>'+
+        '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="email-subj" value="'+htmlEsc(STATE.emailSubj)+'" oninput="STATE.emailSubj=this.value"/></div>'+
+        '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:140px" id="email-body" oninput="STATE.emailBody=this.value">'+htmlEsc(STATE.emailBody)+'</textarea></div>'+
+        aiSection+
+        (hasRecipient&&!STATE.genEmail?
+          '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
+            '<button class="btn btn-outline" onclick="openEmailPreviewModal()">\ud83d\udc41 Preview</button>'+
+            '<button class="btn btn-primary" onclick="sendEmail()">'+ico('send',13)+' Send</button>'+
+          '</div>':
+          '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
+            '<button class="btn btn-primary" '+(hasRecipient?'':'disabled style="opacity:.5;cursor:not-allowed"')+' onclick="sendEmail()">'+ico('send',13)+' Send</button>'+
+          '</div>')+
+        previewSection+
+      '</div>'+
+    '</div>';
+  }
+
+
+
+  // OOO reminder cards for dashboard
+  var today=todayIST();
+  var oooReminders=(STATE.reminders||[]).filter(function(r){
+    return r.reminder_type==='ooo_return'&&r.status==='pending';
+  }).sort(function(a,b){return a.return_date>b.return_date?1:-1;});
+  var dueOOO=oooReminders.filter(function(r){return r.return_date<=today;});
+  var upcomingOOO=oooReminders.filter(function(r){return r.return_date>today;});
+
+  var oooCards='';
+  if(dueOOO.length){
+    oooCards+='<div style="margin-bottom:16px">';
+    oooCards+=dueOOO.map(function(r){
+      var cid=(r.contact&&r.contact.id)||null;
+      return '<div style="background:var(--green-l);border:1.5px solid var(--green);border-radius:var(--r2);padding:12px 16px;margin-bottom:8px;display:flex;align-items:center;gap:12px">'+
+        '<div style="font-size:20px">🟢</div>'+
+        '<div style="flex:1">'+
+          '<div style="font-weight:600;font-size:13px;color:var(--text)">'+htmlEsc(r.contact_name||'Contact')+' has returned from OOO</div>'+
+          '<div style="font-size:12px;color:var(--text2);margin-top:2px">'+htmlEsc(r.company_name||'')+(r.return_date?' \u00b7 Returned '+htmlEsc(r.return_date):'')+'</div>'+
+        '</div>'+
+        (cid?'<button onclick="sendEmailToContact(\''+cid+'\');dismissReminder(\''+r.id+'\')" style="background:var(--green);color:#fff;border:0;padding:6px 12px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer">Compose Email</button>':'')+
+        '<button onclick="dismissReminder(\''+r.id+'\')" style="background:transparent;border:1px solid var(--green);color:var(--green);padding:6px 10px;border-radius:7px;font-size:12px;cursor:pointer">Dismiss</button>'+
+      '</div>';
+    }).join('')+'</div>';
+  }
+  if(upcomingOOO.length){
+    oooCards+='<div style="background:var(--amber-l);border:1px solid var(--amber);border-radius:var(--r2);padding:10px 14px;margin-bottom:16px">'+
+      '<div style="font-size:12px;font-weight:600;color:var(--amber);margin-bottom:6px">⏰ Upcoming OOO Returns ('+upcomingOOO.length+')</div>'+
+      upcomingOOO.slice(0,3).map(function(r){
+        return '<div style="font-size:12px;color:var(--text2);padding:3px 0;border-bottom:1px solid rgba(0,0,0,.05)">'+
+          htmlEsc(r.contact_name||'')+(r.company_name?' \u00b7 '+htmlEsc(r.company_name):'')+'<span style="float:right;color:var(--amber);font-weight:600">'+htmlEsc(r.return_date)+'</span>'+
+        '</div>';
+      }).join('')+
+    '</div>';
+  }
+
+  // BD today summary card
+  var bdSummaryCard='';
+  if((u.role==='bd'||u.role==='bd_lead')&&STATE.todaySummary&&STATE.todaySummary.total>0){
+    bdSummaryCard=renderTodaySummaryCard(STATE.todaySummary);
+  }
+
+  return '<div class="page">'+
+    (oooCards?'<div style="padding:0 24px;padding-top:16px">'+oooCards+'</div>':'')+
+    (bdSummaryCard?'<div style="padding:0 24px;padding-top:16px">'+bdSummaryCard+'</div>':'')+
+    '<div class="ph"><div class="ptitle">Email</div>'+
+      '<div class="psub">'+(isBD?'Manage AI-generated outreach emails':'Email outreach')+' · '+u.name+'</div>'+
+    '</div>'+
+    '<div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:18px;overflow-x:auto">'+tabBar+'</div>'+
+    (STATE.emailTab==='pending'?pendingHtml:'')+
+    (STATE.emailTab==='compose'?composeHtml:'')+
+    (STATE.emailTab==='sent'?sentHtml:'')+
+    (STATE.emailTab==='outreachplan'?tmplHtml:'')+
+  '</div>';
 }
 
-async function getMicrosoftToken(userEmailId) {
-  const { data: tokenRow, error } = await supabase.from('microsoft_tokens').select('*').eq('user_email_id', userEmailId).single();
-  if (error || !tokenRow) throw new Error('No Microsoft token found. Please reconnect.');
-  const now = new Date();
-  if (new Date(tokenRow.expires_at).getTime() - now.getTime() > 5 * 60 * 1000) return tokenRow.access_token;
-  const refreshRes = await fetch(`https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/token`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: MS_CLIENT, client_secret: MS_SECRET, refresh_token: tokenRow.refresh_token, grant_type: 'refresh_token', scope: MS_SCOPES }) });
-  const refreshed = await refreshRes.json();
-  if (refreshed.error) throw new Error('Token refresh failed: ' + refreshed.error_description);
-  await supabase.from('microsoft_tokens').update({ access_token: refreshed.access_token, refresh_token: refreshed.refresh_token || tokenRow.refresh_token, expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(), updated_at: new Date() }).eq('user_email_id', userEmailId);
-  return refreshed.access_token;
+// ── ADMIN ──────────────────────────────────────
+function renderAdmin(){
+  var u=STATE.user;
+  var selectedUserId=STATE.adminSelectedUser||null;
+  if(selectedUserId){return renderAdminUserDetail(selectedUserId);}
+
+  var roleOrder=['admin','ra_lead','bd_lead','bd','ra'];
+  var roleGroupLabels={admin:'Admins',ra_lead:'RA Team Leads',bd_lead:'BD Team Leads',bd:'Managers',ra:'Research Analysts'};
+  var grouped={};roleOrder.forEach(function(r){grouped[r]=[];});
+  STATE.users.forEach(function(usr){if(grouped[usr.role])grouped[usr.role].push(usr);});
+
+  var sections=roleOrder.map(function(role){
+    var users=grouped[role]||[];
+    if(!users.length)return'';
+    var rows=users.map(function(usr){
+      var emailCount=(STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===usr.id;}).length;
+      return '<div onclick="STATE.adminSelectedUser=\''+usr.id+'\';render()" style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s">'+
+        av(usr,'36')+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-weight:600;font-size:13.5px;color:var(--text)">'+htmlEsc(usr.name)+'</div>'+
+          '<div style="font-size:11.5px;color:var(--text3);margin-top:2px">'+htmlEsc(usr.email)+(usr.empId?' · '+htmlEsc(usr.empId):'')+'</div>'+
+        '</div>'+
+        (role==='bd'&&emailCount?'<span style="font-size:11px;padding:2px 8px;background:var(--accent-l);color:var(--accent);border-radius:8px">'+emailCount+' email ID'+(emailCount>1?'s':'')+'</span>':'')+
+        '<span style="font-size:11px;padding:3px 9px;background:'+(usr.is_active!==false?'var(--green-l)':'var(--red-l)')+';color:'+(usr.is_active!==false?'var(--green)':'var(--red)')+';border-radius:8px;font-weight:600">'+(usr.is_active!==false?'Active':'Inactive')+'</span>'+
+        '<div style="color:var(--text3);font-size:18px;margin-left:4px">›</div>'+
+      '</div>';
+    }).join('');
+    return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);margin-bottom:16px;overflow:hidden">'+
+      '<div style="padding:12px 16px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'+
+        '<div style="font-weight:700;font-size:13px;color:var(--text2);text-transform:uppercase;letter-spacing:.06em">'+htmlEsc(roleGroupLabels[role]||role)+' <span style="font-weight:400;color:var(--text3)">('+users.length+')</span></div>'+
+      '</div>'+rows+
+    '</div>';
+  }).join('');
+
+  var canSeeEngine=userHasAnyRole(u,'admin','ra_lead');
+  var enginePanel='<div style="display:flex;justify-content:flex-end;margin-bottom:16px">'+
+    '<button onclick="openEmailEngineModal()" style="display:flex;align-items:center;gap:7px;padding:7px 14px;background:var(--card);border:1px solid var(--border2);border-radius:8px;font-size:13px;color:var(--text2);cursor:pointer">'+
+      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'+
+      'Email Engine Schedule'+
+    '</button>'+
+  '</div>';
+
+  return '<div class="page">'+
+    '<div class="ph"><div class="flex jb aic">'+
+      '<div><div class="ptitle">Admin</div><div class="psub">'+STATE.users.length+' users · Fute Global LLC</div></div>'+
+      '<button class="btn btn-primary btn-sm" onclick="openAddUser()">'+ico('plus',13)+'Add user</button>'+
+    '</div></div>'+(canSeeEngine?enginePanel:'')+sections+'</div>';
 }
 
-app.post('/emails/send-microsoft', auth, async (req, res) => {
-  try {
-    const { user_email_id, to_email, subject, body, email_id } = req.body;
-    if (!user_email_id || !to_email || !subject || !body) return res.status(400).json({ error: 'user_email_id, to_email, subject, body required' });
-    const accessToken = await getMicrosoftToken(user_email_id);
-    const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', { method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: { subject, body: { contentType: 'Text', content: body }, toRecipients: [{ emailAddress: { address: to_email } }] }, saveToSentItems: true }) });
-    if (!sendRes.ok) { const errData = await sendRes.json().catch(() => ({})); throw new Error(errData?.error?.message || `Send failed: ${sendRes.status}`); }
-    if (email_id) await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email_id);
-    const todayDate = today();
-    const { data: logRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', user_email_id).eq('send_date', todayDate).single();
-    await supabase.from('email_send_log').upsert({ user_email_id, send_date: todayDate, emails_sent: (logRow?.emails_sent || 0) + 1 }, { onConflict: 'user_email_id,send_date' });
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+function renderAdminUserDetail(userId){
+  var usr=STATE.users.find(function(x){return x.id===userId;});
+  if(!usr)return'';
+  var isManager=usr.role==='bd';
+  var emailAccounts=(STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===userId;});
+  var roleOpts=['ra','ra_lead','bd','bd_lead','admin'].map(function(r){
+    var labels={ra:'Research Analyst',ra_lead:'RA Team Lead',bd:'Manager',bd_lead:'BD Team Lead',admin:'Admin'};
+    return '<option value="'+r+'"'+(usr.role===r?' selected':'')+'>'+labels[r]+'</option>';
+  }).join('');
+  var emailRows=emailAccounts.map(function(a){
+    var isMicrosoft=a.platform==='Microsoft';
+    var msConnected=a.ms_connected||false;
+    var msBadge=isMicrosoft?
+      (msConnected?
+        '<span style="font-size:10px;padding:2px 7px;background:#e0f2fe;color:#0369a1;border-radius:6px;font-weight:600">✓ MS Connected</span>':
+        '<button onclick="connectMicrosoftAccount(\''+a.id+'\')" style="font-size:10px;padding:2px 8px;background:#0078d4;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:600">Connect Microsoft</button>'
+      ):'';
+    return '<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border)">'+
+      '<div style="flex:1"><div style="font-weight:500;font-size:13px">'+htmlEsc(a.display_name)+'</div>'+
+        '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(a.email_address)+'</div></div>'+
+      '<div style="font-size:12px;color:var(--text3)">'+htmlEsc(String(a.daily_send_limit||150))+'/day</div>'+
+      msBadge+
+      '<span style="font-size:11px;padding:2px 7px;border-radius:7px;font-weight:600;background:'+(a.is_active?'var(--green-l)':'var(--red-l)')+';color:'+(a.is_active?'var(--green)':'var(--red)')+'">'+( a.is_active?'Active':'Inactive')+'</span>'+
+      '<button class="btn-icon" onclick="openEditEmailAccount(\''+a.id+'\')">'+ico('edit',13)+'</button>'+
+      '<button class="btn-icon" style="color:'+(a.is_active?'var(--red)':'var(--green)')+'" onclick="toggleEmailAccount(\''+a.id+'\','+(!a.is_active)+')">'+( a.is_active?ico('trash',13):'↩')+'</button>'+
+    '</div>';
+  }).join('');
 
-app.get('/auth/microsoft/status/:userEmailId', auth, async (req, res) => {
-  try {
-    const { data } = await supabase.from('microsoft_tokens').select('email_address,expires_at').eq('user_email_id', req.params.userEmailId).single();
-    if (!data) return res.json({ connected: false });
-    res.json({ connected: true, email_address: data.email_address, expired: new Date(data.expires_at) < new Date() });
-  } catch { res.json({ connected: false }); }
-});
+  return '<div class="page">'+
+    '<div class="ph"><div class="flex aic gap3">'+
+      '<button onclick="STATE.adminSelectedUser=null;render()" style="background:transparent;border:0;color:var(--text3);font-size:22px;cursor:pointer;line-height:1">←</button>'+
+      av(usr,'40')+
+      '<div><div class="ptitle" style="margin:0">'+htmlEsc(usr.name)+'</div>'+
+        '<div class="psub" style="margin:0">'+roleLabel(usr.role)+(usr.empId?' · '+htmlEsc(usr.empId):'')+'</div></div>'+
+    '</div></div>'+
+    '<div style="max-width:600px">'+
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
+        '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Profile</div>'+
+        '<div class="g2 mb3">'+
+          '<div class="fgrp"><label class="flbl">Full name</label><input class="inp" id="ud-name" value="'+htmlEsc(usr.name)+'"/></div>'+
+          '<div class="fgrp"><label class="flbl">Work email</label><input class="inp" id="ud-email" value="'+htmlEsc(usr.email)+'"/></div>'+
+        '</div>'+
+        '<div class="g2 mb3">'+
+          '<div class="fgrp"><label class="flbl">Employee ID</label><input class="inp" id="ud-eid" value="'+htmlEsc(usr.empId||'')+'"/></div>'+
+          '<div class="fgrp"><label class="flbl">Designation</label><input class="inp" id="ud-desig" value="'+htmlEsc(usr.desig||'')+'"/></div>'+
+        '</div>'+
+        '<div class="g2 mb3">'+
+          '<div class="fgrp"><label class="flbl">Role</label><select class="sel" id="ud-role">'+roleOpts+'</select></div>'+
+          '<div class="fgrp"><label class="flbl">Platform</label><select class="sel" id="ud-plt"><option'+(usr.plt==='Gmail'?' selected':'')+'>Gmail</option><option'+(usr.plt==='Outlook'?' selected':'')+'>Outlook</option></select></div>'+
+        '</div>'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:12px;border-top:1px solid var(--border)">'+
+          '<button onclick="submitUserDetailSave(\''+userId+'\')" class="btn btn-primary">Save changes</button>'+
+          (usr.id!==STATE.user.id?'<button onclick="removeUser(\''+userId+'\',true)" style="background:transparent;color:var(--red);border:1px solid var(--red);padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer">Deactivate user</button>':'<span style="font-size:12px;color:var(--text3)">Cannot deactivate yourself</span>')+
+        '</div>'+
+      '</div>'+
+      (isManager?
+        '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;margin-bottom:16px">'+
+          '<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'+
+            '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Email IDs <span style="font-weight:400">('+emailAccounts.length+'/4)</span></div>'+
+            (emailAccounts.length<4?'<div style="display:flex;gap:6px"><button onclick="openAddEmailAccount(\''+userId+'\',true,\'Microsoft\')" style="font-size:12px;padding:5px 10px;background:var(--accent);color:#fff;border:0;border-radius:7px;cursor:pointer">+ Microsoft</button><button onclick="openAddEmailAccount(\''+userId+'\',true,\'Gmail\')" style="font-size:12px;padding:5px 10px;background:var(--card);color:var(--text2);border:1px solid var(--border);border-radius:7px;cursor:pointer">+ Gmail</button></div>':'<span style="font-size:12px;color:var(--text3)">Maximum reached</span>')+
+          '</div>'+
+          (emailRows||'<div style="padding:20px;text-align:center;font-size:13px;color:var(--text3)">No email IDs assigned yet.</div>')+
+        '</div>'
+      :'<div style="background:var(--bg);border:1px dashed var(--border2);border-radius:var(--r2);padding:14px 16px;font-size:13px;color:var(--text3)">Email IDs are only assigned to Manager-role users.</div>')+
+    '</div>'+
+  '</div>';
+}
 
-app.get('/auth/microsoft/schema-check', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
-    // Check what columns microsoft_tokens actually has by trying a select
-    const { data, error } = await supabase.from('microsoft_tokens').select('*').eq('user_id', req.user.id);
-    if (error) return res.json({ error: error.message, hint: error.hint, details: error.details });
-    res.json({ rows: data, count: (data||[]).length });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+// ── REMINDERS ─────────────────────────────────
+function renderReminders(){
+  var u=STATE.user;
+  var today=todayIST();
+  // API returns user_id, return_date, reminder_time, contact_name, company_name
+  var myReminders=(STATE.reminders||[]).filter(function(r){return r.user_id===u.id;});
+  var due=myReminders.filter(function(r){return r.status==='pending'&&r.return_date<=today;});
+  var upcoming=myReminders.filter(function(r){return r.status==='pending'&&r.return_date>today;});
+  var sent=myReminders.filter(function(r){return r.status==='sent';});
 
-app.get('/auth/microsoft/debug', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
-    // All user_emails for this user
-    const { data: userEmails } = await supabase.from('user_emails').select('id,email_address,display_name,platform,is_active').eq('user_id', req.user.id);
-    // All microsoft_tokens for this user
-    const { data: tokens } = await supabase.from('microsoft_tokens').select('user_email_id,email_address,expires_at').eq('user_id', req.user.id);
-    // Jobs assigned to this user with their sending_email_id
-    const { data: jobs } = await supabase.from('jobs').select('id,position,sending_email_id,sending_email:user_emails!sending_email_id(id,email_address,platform)').eq('assigned_to_bd', req.user.id).is('deleted_at', null);
-    // Cross-reference: which job sending_email_ids have tokens
-    const tokenIds = new Set((tokens||[]).map(t => t.user_email_id));
-    const jobSummary = (jobs||[]).map(j => ({
-      job_id: j.id, position: j.position,
-      sending_email_id: j.sending_email_id,
-      sending_email: j.sending_email?.email_address,
-      platform: j.sending_email?.platform,
-      has_token: j.sending_email_id ? tokenIds.has(j.sending_email_id) : false
-    }));
-    res.json({ user_emails: userEmails, tokens: (tokens||[]).map(t => ({ ...t, expired: new Date(t.expires_at) < new Date() })), jobs: jobSummary });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+  function daysUntil(d){return Math.ceil((new Date(d)-new Date(today))/86400000);}
 
-app.delete('/auth/microsoft/:userEmailId', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'bd_lead')) return res.status(403).json({ error: 'Admin only' });
-    await supabase.from('microsoft_tokens').delete().eq('user_email_id', req.params.userEmailId);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+  var dueCards=due.map(function(r){
+    var contactId=(r.contact&&r.contact.id)||null;
+    var isOOO=r.reminder_type==='ooo_return';
+    return '<div style="border:2px solid var(--amber);border-radius:var(--r2);padding:14px 16px;margin-bottom:10px;background:var(--amber-l)">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
+        '<div style="display:flex;align-items:center;gap:8px">'+
+          '<div style="width:8px;height:8px;border-radius:50%;background:var(--amber)"></div>'+
+          '<div style="font-weight:600;font-size:14px">'+htmlEsc(r.contact_name||'Reminder')+'</div>'+
+          '<span style="font-size:11px;padding:2px 7px;background:var(--amber);color:#fff;border-radius:10px">'+(isOOO?'OOO Return':'Due today')+'</span>'+
+        '</div>'+
+        '<div style="display:flex;gap:8px">'+
+          (contactId?'<button class="btn btn-sm" style="background:var(--amber);color:#fff" onclick="sendEmailToContact(\''+contactId+'\');dismissReminder(\''+r.id+'\')">'+ico('send',13)+' Compose email</button>':'')+
+          '<button class="btn btn-outline btn-sm" onclick="dismissReminder(\''+r.id+'\')">Dismiss</button>'+
+        '</div>'+
+      '</div>'+
+      '<div style="font-size:12px;color:var(--text2)">'+htmlEsc(r.company_name||'')+(r.email?' · '+htmlEsc(r.email):'')+'</div>'+
+      '<div style="font-size:12px;color:var(--text3);margin-top:3px">Return date: '+htmlEsc(r.return_date||'')+' · '+htmlEsc(r.reminder_time||'09:00')+' IST</div>'+
+      (r.note?'<div style="font-size:12px;margin-top:6px;padding:6px 8px;background:rgba(0,0,0,.04);border-radius:var(--r)">'+htmlEsc(r.note)+'</div>':'')+
+    '</div>';
+  }).join('');
 
-// ── START ──────────────────────────────────────────────────────
-app.listen(PORT, () => console.log(`Fute Global LMS API v3.0.0 running on port ${PORT}`));
-module.exports = app;
+  var upcomingRows=upcoming.map(function(r){
+    var days=daysUntil(r.return_date);
+    var isOOO=r.reminder_type==='ooo_return';
+    return '<tr>'+
+      '<td><div style="font-weight:500;font-size:13px">'+htmlEsc(r.contact_name||'—')+'</div>'+
+        '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(r.company_name||'')+'</div></td>'+
+      '<td style="font-size:12px;color:var(--text3)">'+htmlEsc(r.email||'—')+'</td>'+
+      '<td>'+(isOOO?'<span style="font-size:11px;padding:2px 7px;background:var(--amber-l);color:var(--amber);border-radius:8px;font-weight:600">OOO Return</span>':'<span style="font-size:11px;padding:2px 7px;background:var(--accent-l);color:var(--accent);border-radius:8px">Follow-up</span>')+'</td>'+
+      '<td><span style="font-size:11.5px;padding:2px 8px;background:'+(days<=3?'var(--red-l)':'var(--accent-l)')+';color:'+(days<=3?'var(--red)':'var(--accent)')+';border-radius:10px">'+days+' day'+(days!==1?'s':'')+'</span></td>'+
+      '<td style="font-size:12px;color:var(--text3)">'+htmlEsc(r.return_date||'')+'</td>'+
+      '<td style="font-size:12px;color:var(--text3)">'+htmlEsc(r.reminder_time||'09:00')+'</td>'+
+      '<td style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(r.note||'')+'</td>'+
+      '<td><button class="btn btn-outline btn-xs" onclick="dismissReminder(\''+r.id+'\')">Remove</button></td>'+
+    '</tr>';
+  }).join('');
+
+  var sentRows=sent.slice(0,10).map(function(r){
+    return '<tr>'+
+      '<td style="font-size:12px">'+htmlEsc(r.contact_name||'—')+'</td>'+
+      '<td style="font-size:12px;color:var(--text3)">'+htmlEsc(r.company_name||'')+'</td>'+
+      '<td style="font-size:12px;color:var(--text3)">'+htmlEsc(r.return_date||'')+'</td>'+
+      '<td><span style="font-size:11px;padding:2px 7px;background:var(--green-l);color:var(--green);border-radius:8px">Done</span></td>'+
+    '</tr>';
+  }).join('');
+
+  return '<div class="page">'+
+    '<div class="ph"><div class="ptitle">Reminders</div>'+
+      '<div class="psub">Follow-up reminders · '+myReminders.filter(function(r){return r.status==="pending";}).length+' pending</div>'+
+    '</div>'+
+
+    (due.length?
+      '<div style="background:var(--amber-l);border:1.5px solid var(--amber);border-radius:var(--r2);padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px">'+
+        '<div style="font-size:20px">\u23f0</div>'+
+        '<div style="flex:1"><div style="font-weight:600;font-size:14px">'+due.length+' reminder'+(due.length>1?'s':'')+' due today</div>'+
+          '<div style="font-size:12px;color:var(--text3)">These contacts are expected back — send your follow-up now.</div></div>'+
+      '</div>'
+    :'')+
+    dueCards+
+
+    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;margin-bottom:18px">'+
+      '<div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:600;font-size:13px">Upcoming reminders ('+upcoming.length+')</div>'+
+      (upcoming.length?
+        '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">'+
+          '<thead style="background:var(--bg);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
+            '<tr><th style="padding:10px 12px;text-align:left">Contact</th><th style="padding:10px 12px;text-align:left">Email</th><th style="padding:10px 12px;text-align:left">Type</th><th style="padding:10px 12px;text-align:left">In</th><th style="padding:10px 12px;text-align:left">Date</th><th style="padding:10px 12px;text-align:left">Time</th><th style="padding:10px 12px;text-align:left">Note</th><th style="padding:10px 12px"></th></tr>'+
+          '</thead>'+
+          '<tbody>'+upcomingRows+'</tbody>'+
+        '</table></div>'
+      :'<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px">No upcoming reminders.</div>')+
+    '</div>'+
+
+    (sent.length?
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
+        '<div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:600;font-size:13px;color:var(--text3)">Recently dismissed ('+sent.length+')</div>'+
+        '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">'+
+          '<thead style="background:var(--bg);color:var(--text3);font-size:11px;text-transform:uppercase">'+
+            '<tr><th style="padding:10px 12px;text-align:left">Contact</th><th style="padding:10px 12px;text-align:left">Company</th><th style="padding:10px 12px;text-align:left">Date</th><th style="padding:10px 12px;text-align:left">Status</th></tr>'+
+          '</thead>'+
+          '<tbody>'+sentRows+'</tbody>'+
+        '</table></div>'+
+      '</div>'
+    :'')+
+  '</div>';
+}
+
+// ── MAIL MERGE MODAL ───────────────────────────
+function renderMailMergeModal(){
+  var mm=STATE.mailMerge;
+  if(!mm||!mm.leads||!mm.leads.length)return"";
+  var idx=mm.currentIdx||0;
+  var l=mm.leads[idx];
+  var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
+  var total=mm.leads.length;
+  var sent=mm.sent||0;
+  var skipped=mm.skipped||0;
+
+  // Current email content — use edited version if available, else build from template
+  var current=mm.emails[idx]||{};
+  var subj=current.subj||fillEmail(STATE.emailSubj,l,co,STATE.user.name);
+  var body=current.body||fillEmail(STATE.emailBody,l,co,STATE.user.name);
+  if(!mm.emails[idx])mm.emails[idx]={subj:subj,body:body,sent:false};
+
+  var plt=STATE.user.plt||"Gmail";
+  var isSent=mm.emails[idx]&&mm.emails[idx].sent;
+
+  return '<div class="modal" style="width:700px;max-width:98vw;max-height:92vh;display:flex;flex-direction:column">'+
+    // Header
+    '<div class="mh">'+
+      '<div>'+
+        '<div class="mt">Mail Merge</div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+
+          sent+' sent · '+(total-sent-skipped)+' remaining · '+skipped+' skipped'+
+        '</div>'+
+      '</div>'+
+      '<button class="btn-icon" onclick="closeMailMerge()">'+ico("x",14)+'</button>'+
+    '</div>'+
+
+    // Progress bar
+    '<div style="padding:0 20px;background:var(--card)">'+
+      '<div style="height:3px;background:var(--border);border-radius:2px">'+
+        '<div style="height:3px;background:var(--accent);border-radius:2px;width:'+(sent/total*100)+'%;transition:width .3s"></div>'+
+      '</div>'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0">'+
+        // Prev arrow
+        '<button onclick="mailMergeNav(-1)" '+(idx===0?'disabled style="opacity:.3"':'')+
+          ' style="width:32px;height:32px;border-radius:50%;border:1.5px solid var(--border2);background:var(--card);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px">‹</button>'+
+        // Lead info
+        '<div style="text-align:center;flex:1;padding:0 14px">'+
+          '<div style="font-weight:600;font-size:14px">'+htmlEsc(l.fn+' '+l.ln)+'</div>'+
+          '<div style="font-size:12px;color:var(--text3)">'+htmlEsc(l.desig||"")+(co.name?' · '+htmlEsc(co.name):'')+'</div>'+
+          '<div style="font-size:12px;color:var(--accent);margin-top:2px">'+htmlEsc(l.email||"No email")+'</div>'+
+          '<div style="font-size:11px;color:var(--text3);margin-top:4px">'+
+            (idx+1)+' of '+total+
+            (isSent?' · <span style="color:var(--green);font-weight:500">✓ Sent</span>':'')+
+          '</div>'+
+        '</div>'+
+        // Next arrow
+        '<button onclick="mailMergeNav(1)" '+(idx>=total-1?'disabled style="opacity:.3"':'')+
+          ' style="width:32px;height:32px;border-radius:50%;border:1.5px solid var(--border2);background:var(--card);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px">›</button>'+
+      '</div>'+
+    '</div>'+
+
+    // Email editor
+    '<div class="mb_" style="flex:1;overflow-y:auto;padding:16px 20px">'+
+      '<div class="fgrp">'+
+        '<label class="flbl">To</label>'+
+        '<input class="inp" value="'+htmlEsc((l.fn||"")+" "+(l.ln||"")+" <"+(l.email||"")+">")+'" readonly style="background:var(--bg);color:var(--text2)"/>'+
+      '</div>'+
+      '<div class="fgrp">'+
+        '<label class="flbl">Subject</label>'+
+        '<input class="inp" id="mm-subj" value="'+htmlEsc(subj)+'" oninput="mailMergeEdit(\'subj\',this.value)"/>'+
+      '</div>'+
+      '<div class="fgrp">'+
+        '<label class="flbl">Body</label>'+
+        '<textarea class="txta w100" style="min-height:180px;font-size:13px" id="mm-body" oninput="mailMergeEdit(\'body\',this.value)">'+htmlEsc(body)+'</textarea>'+
+      '</div>'+
+    '</div>'+
+
+    // Footer
+    '<div class="mf" style="justify-content:space-between">'+
+      '<div class="flex gap2">'+
+        '<button class="btn btn-outline btn-sm" onclick="mailMergeSkip()" '+(isSent?'disabled style="opacity:.4"':'')+'>Skip</button>'+
+        '<div class="flex gap1">'+
+          '<button class="fc'+(plt==="Gmail"?" on":"")+'" onclick="setPlatform(\'Gmail\')">Gmail</button>'+
+          '<button class="fc'+(plt==="Outlook"?" on":"")+'" onclick="setPlatform(\'Outlook\')">Outlook</button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="flex gap2">'+
+        (isSent?
+          '<span style="font-size:13px;color:var(--green);font-weight:500">✓ Sent</span>':
+          '<button class="btn btn-primary" onclick="mailMergeSend()" '+(l.email?'':'disabled style="opacity:.4" title="No email address"')+'>'+ico("send",13)+' Send this email</button>'
+        )+
+        (idx<total-1?
+          '<button class="btn btn-outline" onclick="mailMergeNav(1)">Next →</button>':
+          '<button class="btn btn-outline" style="color:var(--green);border-color:var(--green)" onclick="closeMailMerge()">✓ Done</button>'
+        )+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+function renderSetReminderModal(leadId, manualEmail){
+  var lead=leadId?STATE.leads.find(function(l){return l.id===leadId}):null;
+  var co=lead?STATE.companies.find(function(c){return c.id===lead.coid})||{}:{};
+  var future=new Date();future.setDate(future.getDate()+7);
+  var futureStr=future.toISOString().split("T")[0];
+  var displayName=lead?(lead.fn+" "+lead.ln):(manualEmail||"");
+  var displaySub=lead?(lead.desig+(co.name?" · "+co.name:"")+" · "+lead.email):(manualEmail||"");
+
+  return '<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Set reminder</div><button class="btn-icon" onclick="closeModal()">'+ico("x",14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div style="padding:10px 12px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:16px;border:1px solid rgba(37,99,235,.15)">'+
+        '<div class="fw5 f13">'+htmlEsc(displayName)+'</div>'+
+        '<div class="f12 text3">'+htmlEsc(displaySub)+'</div>'+
+      '</div>'+
+      '<div class="g2 mb3">'+
+        '<div class="fgrp"><label class="flbl">Return / follow-up date</label><input class="inp" type="date" id="rem-date" value="'+futureStr+'"/></div>'+
+        '<div class="fgrp"><label class="flbl">Reminder time (IST)</label><input class="inp" type="time" id="rem-time" value="09:00"/></div>'+
+      '</div>'+
+      '<div class="fgrp"><label class="flbl">Note (optional)</label><textarea class="txta" id="rem-note" style="min-height:60px" placeholder="e.g. They are back from holiday after 15th"></textarea></div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="saveReminder(\''+( leadId||"")+'\',' +(manualEmail?'\''+manualEmail+'\'':'null')+')">Set reminder</button>'+
+    '</div>'+
+  '</div>';
+}
+
+// ── PROFILE ──────────────────────────────────
+function renderProfile(){
+  var u=STATE.user;
+  var pltOpts=["Gmail","Outlook"].map(function(p){
+    var sel=u.plt===p;
+    return '<div onclick="setProfilePlt(\''+p+'\')" style="display:flex;align-items:center;gap:11px;padding:12px 13px;border:2px solid '+(sel?"var(--accent)":"var(--border)")+';border-radius:var(--r2);cursor:pointer;margin-bottom:8px;background:'+(sel?"var(--accent-l)":"var(--card)")+';transition:all .12s">'+
+      '<div style="width:22px;height:22px;border-radius:5px;background:'+(sel?"var(--accent)":"var(--bg)")+';display:flex;align-items:center;justify-content:center">'+ico("email",13)+'</div>'+
+      '<div style="flex:1"><div style="font-weight:500;font-size:13.5px;color:'+(sel?"var(--accent)":"var(--text)")+'">'+p+'</div><div class="f12 text3">'+(p==="Gmail"?"Google Workspace":"Microsoft 365")+'</div></div>'+
+      (sel?'<div style="width:16px;height:16px;background:var(--accent);border-radius:50%;display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 10 10" width="9" height="9" fill="none" stroke="#fff" stroke-width="1.6"><polyline points="1.5,5 4,7.5 8.5,2.5"/></svg></div>':"")+
+    '</div>';
+  }).join("");
+
+  return '<div class="page">'+
+    '<div class="ph"><div class="ptitle">My Profile</div><div class="psub">Manage your account details</div></div>'+
+    '<div class="g2">'+
+      '<div>'+
+        '<div class="card cp mb4">'+
+          '<div class="flex aic gap4 mb4">'+av(u,"48")+
+            '<div><div style="font-family:var(--display);font-weight:600;font-size:18px">'+u.name+'</div>'+
+            '<div class="text3 f12 mt1">'+roleLabel(u.role)+' · '+u.empId+'</div>'+
+            '<span class="bdg '+(u.role==="admin"?"bdg-purple":u.role==="bd"?"bdg-blue":"bdg-green")+' mt1">'+roleLabel(u.role)+'</span></div>'+
+          '</div>'+
+          '<div class="hr"></div>'+
+          '<div class="g2 mb3"><div class="fgrp"><label class="flbl">Full name</label><input class="inp" id="p-name" value="'+htmlEsc(u.name)+'"/></div><div class="fgrp"><label class="flbl">Work email</label><input class="inp" id="p-email" value="'+htmlEsc(u.email)+'"/></div></div>'+
+          '<div class="g2 mb3"><div class="fgrp"><label class="flbl">Employee ID</label><input class="inp" id="p-eid" value="'+htmlEsc(u.empId)+'"/></div><div class="fgrp"><label class="flbl">Designation</label><input class="inp" id="p-desig" value="'+htmlEsc(u.desig)+'"/></div></div>'+
+          '<button class="btn btn-primary" onclick="saveProfile()">Save changes</button>'+
+        '</div>'+
+        '<div class="card cp">'+
+          '<div class="fw6 mb1">Change password</div>'+
+          '<div class="fgrp mt3"><label class="flbl">Current password</label><input class="inp" type="password" id="pw-cur" placeholder="••••••••"/></div>'+
+          '<div class="fgrp"><label class="flbl">New password</label><input class="inp" type="password" id="pw-new" placeholder="••••••••"/></div>'+
+          '<div class="fgrp"><label class="flbl">Confirm new password</label><input class="inp" type="password" id="pw-con" placeholder="••••••••"/></div>'+
+          '<button class="btn btn-outline" onclick="changePassword()">Update password</button>'+
+        '</div>'+
+      '</div>'+
+      '<div>'+
+        '<div class="card cp">'+
+          '<div class="fw6 mb1">Email platform</div>'+
+          '<div class="f12 text3 mb3">Choose your outreach platform. Emails will open in this app when you click Send.</div>'+
+          pltOpts+
+          '<div style="margin-top:13px;padding:9px 11px;background:var(--bg);border-radius:var(--r);font-size:12px;color:var(--text3)">In production: clicking Connect will open OAuth authorization to send emails from your account.</div>'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+
+// ── ADD LEAD MODAL ─────────────────────────────
+function renderAddLeadModal(){
+  var u=STATE.user;
+  var bds=u.role==="ra"?STATE.users.filter(function(x){return x.id===u.bdm}):STATE.users.filter(function(x){return x.role==="bd"||x.role==="admin"});
+  var ras=u.role==="ra"?[u]:STATE.users.filter(function(x){return x.role==="ra"&&(u.role==="admin"||x.bdm===u.id)});
+  var cos=STATE.companies;
+  var indOpts=INDUSTRIES.map(function(i){return'<option>'+i+'</option>'}).join("");
+  var srcOpts=SOURCES.map(function(s){return'<option>'+s+'</option>'}).join("");
+  var raOpts=ras.map(function(r){return'<option value="'+r.id+'">'+r.name+'</option>'}).join("");
+  var bdOpts=bds.map(function(b){return'<option value="'+b.id+'">'+b.name+'</option>'}).join("");
+  var coOpts='<option value="">— Choose existing —</option>'+cos.map(function(c){return'<option value="'+c.id+'">'+c.name+'</option>'}).join("");
+  return '<div class="modal modal-w860">'+
+    '<div class="mh"><div class="mt">Add new lead</div><button class="btn-icon" onclick="closeModal()">'+ico("x",14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div style="padding:12px 14px;background:var(--bg);border-radius:var(--r2);margin-bottom:14px">'+
+        '<div class="fw5 f13 mb2">Company</div>'+
+        '<div class="flex gap2 mb3"><button class="fc on" id="co-new-btn" onclick="toggleCoMode(true)">New company</button><button class="fc" id="co-exist-btn" onclick="toggleCoMode(false)">Existing company</button></div>'+
+        '<div id="co-new-fields">'+
+          '<div class="g3"><div class="fgrp"><label class="flbl">Company name <span style="color:var(--red)">*</span></label><input class="inp" id="f-coname" placeholder="e.g. Acme Corp"/></div>'+
+          '<div class="fgrp"><label class="flbl">Website</label><input class="inp" id="f-web" placeholder="acme.com"/></div>'+
+          '<div class="fgrp"><label class="flbl">Industry</label><select class="sel" id="f-ind">'+indOpts+'</select></div>'+
+          '<div class="fgrp"><label class="flbl">Location</label><input class="inp" id="f-loc" placeholder="City"/></div></div>'+
+        '</div>'+
+        '<div id="co-exist-fields" style="display:none"><div class="fgrp"><label class="flbl">Select company</label><select class="sel" id="f-coid">'+coOpts+'</select></div></div>'+
+      '</div>'+
+      '<div class="fw5 f13 mb3">Point of Contact</div>'+
+      '<div class="g3 mb4">'+
+        '<div class="fgrp"><label class="flbl">First name <span style="color:var(--red)">*</span></label><input class="inp" id="f-fn"/></div>'+
+        '<div class="fgrp"><label class="flbl">Last name</label><input class="inp" id="f-ln"/></div>'+
+        '<div class="fgrp"><label class="flbl">Designation</label><input class="inp" id="f-desig" placeholder="e.g. CTO"/></div>'+
+        '<div class="fgrp span2"><label class="flbl">Email ID <span style="color:var(--red)">*</span></label><input class="inp" id="f-email" type="email"/></div>'+
+        '<div class="fgrp"><label class="flbl">Phone</label><input class="inp" id="f-phone" type="tel"/></div>'+
+        '<div class="fgrp span3"><label class="flbl">LinkedIn URL</label><input class="inp" id="f-li" placeholder="linkedin.com/in/..."/></div>'+
+      '</div>'+
+      '<div class="fw5 f13 mb3">Job opening</div>'+
+      '<div class="g3 mb4">'+
+        '<div class="fgrp span2"><label class="flbl">Position / Role <span style="color:var(--red)">*</span></label><input class="inp" id="f-pos" placeholder="e.g. VP of Engineering"/></div>'+
+        '<div class="fgrp"><label class="flbl">Source</label><select class="sel" id="f-src">'+srcOpts+'</select></div>'+
+      '</div>'+
+      '<div class="g2">'+
+        '<div class="fgrp"><label class="flbl">Research Analyst</label><select class="sel" id="f-ra"'+(u.role==="ra"?" disabled":"")+'>'+raOpts+'</select></div>'+
+        '<div class="fgrp"><label class="flbl">BD Manager</label><select class="sel" id="f-bd"'+(u.role==="ra"?" disabled":"")+'>'+bdOpts+'</select></div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveLead()">Save lead</button></div>'+
+  '</div>';
+}
+
+// ── ADD/EDIT USER MODAL ────────────────────────
+function renderUserModal(existing){
+  var u=existing||{name:"",email:"",role:"ra",empId:"FG-0"+(STATE.users.length+1),desig:"",bdm:"",plt:"Gmail"};
+  var bds=STATE.users.filter(function(x){return x.role==="bd"||x.role==="admin";});
+  var bdOpts='<option value="">— Unassigned —</option>'+bds.map(function(b){return'<option value="'+b.id+'"'+(u.bdm===b.id?" selected":"")+'>'+b.name+'</option>';}).join("");
+  // Only show BD assignment field if role is RA — use onchange to show/hide dynamically
+  var isRA=u.role==="ra";
+  return '<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">'+(existing?"Edit user":"Add new user")+'</div><button class="btn-icon" onclick="closeModal()">'+ico("x",14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div class="g2 mb3">'+
+        '<div class="fgrp"><label class="flbl">Full name <span style="color:var(--red)">*</span></label><input class="inp" id="u-name" value="'+htmlEsc(u.name)+'"/></div>'+
+        '<div class="fgrp"><label class="flbl">Work email <span style="color:var(--red)">*</span></label><input class="inp" id="u-email" type="email" value="'+htmlEsc(u.email)+'"/></div>'+
+      '</div>'+
+      '<div class="g2 mb3">'+
+        '<div class="fgrp"><label class="flbl">Employee ID</label><input class="inp" id="u-eid" value="'+htmlEsc(u.empId)+'"/></div>'+
+        '<div class="fgrp"><label class="flbl">Designation</label><input class="inp" id="u-desig" value="'+htmlEsc(u.desig)+'"/></div>'+
+      '</div>'+
+      '<div class="g2 mb3">'+
+        '<div class="fgrp"><label class="flbl">Role</label>'+
+          '<select class="sel" id="u-role" onchange="toggleBDAssign(this.value)">'+
+            '<option value="ra"'+(u.role==="ra"?" selected":"")+'>Research Analyst</option>'+
+            '<option value="ra_lead"'+(u.role==="ra_lead"?" selected":"")+'>RA Team Lead</option>'+
+            '<option value="bd"'+(u.role==="bd"?" selected":"")+'>BD Manager</option>'+
+            '<option value="bd_lead"'+(u.role==="bd_lead"?" selected":"")+'>BD Team Lead</option>'+
+            '<option value="admin"'+(u.role==="admin"?" selected":"")+'>Admin</option>'+
+          '</select>'+
+        '</div>'+
+        '<div class="fgrp"><label class="flbl">Email platform</label><select class="sel" id="u-plt"><option'+(u.plt==="Gmail"?" selected":"")+'>Gmail</option><option'+(u.plt==="Outlook"?" selected":"")+'>Outlook</option></select></div>'+
+      '</div>'+
+      '<div class="fgrp" id="u-bd-wrap" style="'+(isRA?"":"display:none")+'">'+
+        '<label class="flbl">Assigned BD Manager <span style="font-size:11px;color:var(--text3)">(only for Research Analysts)</span></label>'+
+        '<select class="sel" id="u-bd">'+bdOpts+'</select>'+
+      '</div>'+
+    '</div>'+
+    '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveUser('+(existing?'\''+existing.id+'\'':null)+')">'+( existing?"Save changes":"Add user")+'</button></div>'+
+  '</div>';
+}
+
+// ── TOASTS & MODAL ─────────────────────────────
+function renderToasts(){
+  var tc={success:"var(--green)",error:"var(--red)",info:"var(--accent)",warning:"var(--amber)"};
+  return '<div class="toast-wrap">'+STATE.toasts.map(function(t){
+    var c=tc[t.type]||tc.info;
+    return'<div class="toast" style="border-left:3px solid '+c+'"><div style="width:7px;height:7px;border-radius:50%;background:'+c+';flex-shrink:0"></div>'+htmlEsc(t.msg)+'</div>';
+  }).join("")+'</div>';
+}
+function renderModal(){
+  if(STATE.modal&&STATE.modal.type==="jobDetail")return renderJobDetailModal();
+  if(STATE.modal&&STATE.modal.type==="addJob")return renderAddJobModal();
+  if(STATE.modal&&STATE.modal.type==="addContact")return renderAddContactModal();
+  if(STATE.mailMerge&&!STATE.modal)return'<div class="overlay">'+renderMailMergeModal()+'</div>';
+  if(!STATE.modal)return"";
+  return'<div class="overlay" onclick="overlayClick(event)">'+STATE.modal+'</div>';
+}
+
+function normalizeIndustry(raw){
+  if(!raw)return'Other';
+  var r=raw.toLowerCase();
+  if(r.indexOf('engineer')>-1||r.indexOf('manufactur')>-1||r.indexOf('construction')>-1||r.indexOf('civil')>-1||r.indexOf('mechanical')>-1||r.indexOf('oil')>-1||r.indexOf('gas')>-1||r.indexOf('aerospace')>-1||r.indexOf('aviation')>-1||r.indexOf('transportation')>-1||r.indexOf('logistics')>-1||r.indexOf('real estate')>-1||r.indexOf('architecture')>-1||r.indexOf('industrial')>-1||r.indexOf('defense')>-1||r.indexOf('machinery')>-1||r.indexOf('automation')>-1)return'Engineering';
+  if(r.indexOf('health')>-1||r.indexOf('medical')>-1||r.indexOf('pharma')>-1||r.indexOf('hospital')>-1||r.indexOf('wellness')>-1||r.indexOf('fitness')>-1||r.indexOf('biotech')>-1||r.indexOf('dental')>-1||r.indexOf('clinical')>-1)return'Healthcare';
+  if(r.indexOf('legal')>-1||r.indexOf('law')>-1||r.indexOf('attorney')>-1||r.indexOf('compliance')>-1||r.indexOf('litigation')>-1)return'Legal';
+  if(r.indexOf('account')>-1||r.indexOf('financ')>-1||r.indexOf('audit')>-1||r.indexOf('tax')>-1||r.indexOf('bookkeep')>-1||r.indexOf('cpa')>-1)return'Accounting';
+  if(r.indexOf('manag')>-1||r.indexOf('consult')>-1||r.indexOf('staffing')>-1||r.indexOf('recruit')>-1||r.indexOf('human resource')>-1||r.indexOf('executive')>-1||r.indexOf('strategy')>-1)return'Management';
+  return'Other';
+}
+function htmlEsc(s){
+  return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+// ════════════════════════════════════════════════
+// BIND EVENTS
+// ════════════════════════════════════════════════
+function bindLogin(){
+  var passEl=document.getElementById("login-pass");
+  if(passEl)passEl.addEventListener("keydown",function(e){if(e.key==="Enter")doLogin();});
+}
+function bindApp(){}
+
+// ════════════════════════════════════════════════
+// ACTIONS (global functions called from HTML)
+// ════════════════════════════════════════════════
+window.loginAs=function(id){STATE.user=STATE.users.find(function(u){return u.id===id});STATE.page="dashboard";render();}
+window.doLogin=function(){
+  var email=document.getElementById("login-email").value.trim();
+  var u=STATE.users.find(function(x){return x.email.toLowerCase()===email.toLowerCase()});
+  if(u){STATE.user=u;STATE.page="dashboard";render();}
+  else{var e=document.getElementById("login-err");if(e){e.textContent="No account found. Use a @futeglobal.com email.";e.style.display="block";}}
+}
+window.signOut=function(){STATE.user=null;STATE.page="dashboard";STATE.modal=null;render();}
+window.goPage=function(p){STATE.page=p;STATE.detailLead=null;STATE.modal=null;if(p!=="dashboard")STATE.viewingUser=null;render();}
+window.setPeriod=function(p){STATE.period=p;render();}
+window.setSearch=function(v){STATE.leadsFilter.search=v;STATE.leadsPage=0;render();}
+window.setFilt=function(k,v){STATE.leadsFilter[k]=v;STATE.leadsPage=0;render();}
+window.toggleSel=function(id,v){STATE.leadsSelected[id]=v;render();}
+window.toggleAll=function(v){
+  var fl=filterLeads(getMyLeads(STATE.user));
+  fl.forEach(function(l){STATE.leadsSelected[l.id]=v;});render();
+}
+window.clearSel=function(){STATE.leadsSelected={};render();}
+window.applyBulk=function(){
+  var sel=document.getElementById("bulk-stage");
+  if(!sel||!sel.value)return;
+  var stage=sel.value;
+  Object.keys(STATE.leadsSelected).forEach(function(id){
+    if(STATE.leadsSelected[id]){
+      STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{stage:stage}):l;});
+    }
+  });
+  STATE.leadsSelected={};
+  showToast("Stage updated for selected leads","success");
+}
+window.changeStage=function(id,stage){
+  STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{stage:stage}):l;});
+  if(STATE.detailLead&&STATE.detailLead.id===id)STATE.detailLead=Object.assign({},STATE.detailLead,{stage:stage});
+  STATE.activities.push({id:"a"+Date.now(),lid:id,uid:STATE.user.id,type:"stage",txt:'Stage → "'+stage+'"',dt:todayIST()});
+  showToast('Stage → "'+stage+'"',"success");
+}
+window.changeStageDetail=function(stage){if(STATE.detailLead)changeStage(STATE.detailLead.id,stage);}
+window.viewLead=function(id){
+  STATE.detailLead=STATE.leads.find(function(l){return l.id===id});
+  render();
+}
+window.closeDetail=function(){STATE.detailLead=null;render();}
+window.deleteLead=function(id){
+  STATE.leads=STATE.leads.map(function(l){return l.id===id?Object.assign({},l,{del:todayIST()}):l;});
+  if(STATE.detailLead&&STATE.detailLead.id===id)STATE.detailLead=null;
+  showToast("Lead moved to trash (deleted after 60 days)","info");
+}
+window.saveNotes=function(){
+  var el=document.getElementById("dp-notes");
+  if(el&&STATE.detailLead){
+    var notes=el.value;
+    STATE.leads=STATE.leads.map(function(l){return l.id===STATE.detailLead.id?Object.assign({},l,{notes:notes}):l;});
+    STATE.detailLead=Object.assign({},STATE.detailLead,{notes:notes});
+    showToast("Notes saved","success");
+  }
+}
+window.addContactPrompt=function(){showToast("Add contact: coming in full version","info");}
+window.openAddLead=function(){STATE.modal=renderAddLeadModal();render();}
+window.closeModal=function(){STATE.modal=null;render();}
+window.overlayClick=function(e){if(e.target.classList.contains("overlay"))closeModal();}
+
+var coNewMode=true;
+window.toggleCoMode=function(isNew){
+  coNewMode=isNew;
+  var nf=document.getElementById("co-new-fields");
+  var ef=document.getElementById("co-exist-fields");
+  var nb=document.getElementById("co-new-btn");
+  var eb=document.getElementById("co-exist-btn");
+  if(nf&&ef){nf.style.display=isNew?"":"none";ef.style.display=isNew?"none":"";}
+  if(nb&&eb){nb.className="fc"+(isNew?" on":"");eb.className="fc"+(!isNew?" on":"");}
+}
+
+window.saveLead=function(){
+  var fn=document.getElementById("f-fn");
+  var email=document.getElementById("f-email");
+  var pos=document.getElementById("f-pos");
+  if(!fn||!fn.value||!email||!email.value||!pos||!pos.value){showToast("First name, email and position are required","warning");return;}
+  var coid;
+  if(coNewMode){
+    var coname=document.getElementById("f-coname");
+    if(!coname||!coname.value){showToast("Company name is required","warning");return;}
+    var newco={id:"c"+Date.now(),name:coname.value,web:(document.getElementById("f-web")||{}).value||"",ind:(document.getElementById("f-ind")||{}).value||"Technology",loc:(document.getElementById("f-loc")||{}).value||""};
+    STATE.companies.push(newco);
+    coid=newco.id;
+  } else {
+    coid=(document.getElementById("f-coid")||{}).value||STATE.companies[0].id;
+  }
+  var aid=(document.getElementById("f-ra")||{}).value||STATE.user.id;
+  var bid=(document.getElementById("f-bd")||{}).value||STATE.user.bdm;
+  var newlead={id:"l"+Date.now(),coid:coid,pos:pos.value,fn:fn.value,ln:(document.getElementById("f-ln")||{}).value||"",desig:(document.getElementById("f-desig")||{}).value||"",email:email.value,phone:(document.getElementById("f-phone")||{}).value||"",li:(document.getElementById("f-li")||{}).value||"",src:(document.getElementById("f-src")||{}).value||"LinkedIn",aid:aid,bid:bid||"u1",stage:"Active",date:todayIST(),sent:null,plt:null,notes:"",del:null};
+  STATE.leads.push(newlead);
+  STATE.activities.push({id:"a"+Date.now(),lid:newlead.id,uid:STATE.user.id,type:"created",txt:"Lead created",dt:todayIST()});
+  closeModal();
+  showToast("Lead added successfully","success");
+}
+
+window.exportXL=function(){
+  try{
+    var filtered=filterLeads(getMyLeads(STATE.user));
+    var rows=filtered.map(function(l){
+      var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
+      return{Date:l.date,Company:co.name,Website:co.web,Position:l.pos,Location:co.loc,Industry:co.ind,FirstName:l.fn,LastName:l.ln,Designation:l.desig,Email:l.email,Phone:l.phone,LinkedIn:l.li,Source:l.src,Stage:l.stage,Analyst:uname(l.aid,STATE.users),BDManager:uname(l.bid,STATE.users)};
+    });
+    if(typeof XLSX!=="undefined"){
+      var ws=XLSX.utils.json_to_sheet(rows);
+      var wb=XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb,ws,"Leads");
+      XLSX.writeFile(wb,"FuteGlobal_Leads_"+todayIST()+".xlsx");
+      showToast("Excel exported","success");
+    } else {
+      // CSV fallback
+      var h=Object.keys(rows[0]);
+      var csv=[h.join(",")].concat(rows.map(function(r){return h.map(function(k){return'"'+(r[k]||"")+'"'}).join(",")})).join("\n");
+      var a=document.createElement("a");a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);a.download="FuteGlobal_Leads.csv";a.click();
+      showToast("CSV exported","success");
+    }
+  }catch(e){showToast("Export failed: "+e.message,"error");}
+}
+
+window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;STATE.composeFromEmailId=null;STATE.pendingEmailsSel={};STATE.previewPendingId=null;STATE.pendingPage=0;render();}
+
+// ── Manager Users functions ──────────────────────────────────
+window.loadUserEmails=function(userId){
+  apiGet('/users/'+userId+'/emails').then(function(d){
+    STATE.userEmailsCache=STATE.userEmailsCache||{};
+    STATE.userEmailsCache[userId]=d||[];
+    render();
+  }).catch(function(){});
+};
+
+window.toggleUserRole=function(userId,role,checked){
+  var usr=STATE.users.find(function(x){return x.id===userId;});
+  if(!usr)return;
+  var roles=usr.roles?usr.roles.slice():[usr.role];
+  if(checked&&roles.indexOf(role)===-1)roles.push(role);
+  else if(!checked)roles=roles.filter(function(r){return r!==role;});
+  if(!roles.length){showToast('User must have at least one role','warning');return;}
+  apiPut('/users/'+userId+'/roles',{roles:roles}).then(function(u){
+    STATE.users=STATE.users.map(function(x){return x.id===userId?normaliseUser(u):x;});
+    showToast('Roles updated','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.openAddUserEmail=function(userId,platform){
+  platform=platform||'Microsoft';
+  var isMicrosoft=platform==='Microsoft';
+  STATE._addEmailUserId=userId;
+  STATE._addEmailPlatform=platform;
+  STATE.modal='<div class="modal modal-w420">'
+    +'<div class="mh"><div class="mt">Add '+platform+' Email</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'
+    +'<div class="mb_">'
+    +'<div class="fgrp"><label class="flbl">Email address *</label><input class="inp" id="ue-email" placeholder="e.g. john@futeglobal.com"/></div>'
+    +'<div class="fgrp"><label class="flbl">Display name</label><input class="inp" id="ue-name" placeholder="John Smith"/></div>'
+    +'<div class="fgrp"><label class="flbl">Daily limit</label><input class="inp" type="number" id="ue-limit" value="150" min="1" max="500" style="width:120px"/></div>'
+    +'<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:6px 0">'
+    +'<input type="checkbox" id="ue-primary"/> Set as primary email (login email)</label>'
+    +'</div>'
+    +'<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button>'
+    +(isMicrosoft
+      ?'<button class="btn btn-primary" onclick="submitAddUserEmailMicrosoft(STATE._addEmailUserId)" style="background:#0078d4">Save &amp; Connect Microsoft</button>'
+      :'<button class="btn btn-primary" onclick="submitAddUserEmail(STATE._addEmailUserId,STATE._addEmailPlatform)" style="background:#16a34a">Save Gmail</button>')
+    +'</div></div>';
+  render();
+};
+
+window.submitAddUserEmail=function(userId,platform){
+  var email=(document.getElementById('ue-email')||{}).value||'';
+  var name=(document.getElementById('ue-name')||{}).value||'';
+  var limit=parseInt((document.getElementById('ue-limit')||{}).value||'150');
+  var isPrimary=(document.getElementById('ue-primary')||{}).checked||false;
+  if(!email){showToast('Email address required','warning');return;}
+  apiPost('/users/'+userId+'/emails',{email_address:email,display_name:name||email,platform:platform||'Gmail',daily_send_limit:limit,is_primary:isPrimary}).then(function(e){
+    STATE.userEmailsCache=STATE.userEmailsCache||{};
+    STATE.userEmailsCache[userId]=(STATE.userEmailsCache[userId]||[]).concat([e]);
+    closeModal();showToast('Email added','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.submitAddUserEmailMicrosoft=function(userId){
+  var email=(document.getElementById('ue-email')||{}).value||'';
+  var name=(document.getElementById('ue-name')||{}).value||'';
+  var limit=parseInt((document.getElementById('ue-limit')||{}).value||'150');
+  var isPrimary=(document.getElementById('ue-primary')||{}).checked||false;
+  if(!email){showToast('Email address required','warning');return;}
+  apiPost('/users/'+userId+'/emails',{email_address:email,display_name:name||email,platform:'Microsoft',daily_send_limit:limit,is_primary:isPrimary}).then(function(e){
+    STATE.userEmailsCache=STATE.userEmailsCache||{};
+    STATE.userEmailsCache[userId]=(STATE.userEmailsCache[userId]||[]).concat([e]);
+    closeModal();render();
+    // Open Microsoft OAuth popup
+    var url=API_URL+'/auth/microsoft/connect?userEmailId='+e.id+'&token='+STATE.token;
+    window.open(url,'ms_oauth','width=600,height=700,scrollbars=yes');
+    showToast('Complete Microsoft login in the popup','info');
+    window._msOAuthHandler=function(event){
+      if(event.data&&event.data.type==='ms_oauth_success'){
+        window.removeEventListener('message',window._msOAuthHandler);
+        loadUserEmails(userId);
+        showToast('Microsoft connected: '+event.data.email,'success');
+      } else if(event.data&&event.data.type==='ms_oauth_error'){
+        window.removeEventListener('message',window._msOAuthHandler);
+        showToast('Connection failed: '+event.data.error,'error');
+      }
+    };
+    window.addEventListener('message',window._msOAuthHandler);
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.connectMicrosoftUserEmail=function(userId,userEmailId){
+  var url=API_URL+'/auth/microsoft/connect?userEmailId='+userEmailId+'&token='+STATE.token;
+  window.open(url,'ms_oauth','width=600,height=700,scrollbars=yes');
+  showToast('Complete Microsoft login in the popup','info');
+  window._msOAuthHandler=function(event){
+    if(event.data&&event.data.type==='ms_oauth_success'){
+      window.removeEventListener('message',window._msOAuthHandler);
+      loadUserEmails(userId);
+      showToast('Connected: '+event.data.email,'success');
+    } else if(event.data&&event.data.type==='ms_oauth_error'){
+      window.removeEventListener('message',window._msOAuthHandler);
+      showToast('Failed: '+event.data.error,'error');
+    }
+  };
+  window.addEventListener('message',window._msOAuthHandler);
+};
+
+window.toggleUserEmailActive=function(userId,emailId,active){
+  apiPatch('/users/'+userId+'/emails/'+emailId,{is_active:active}).then(function(e){
+    STATE.userEmailsCache[userId]=(STATE.userEmailsCache[userId]||[]).map(function(x){return x.id===emailId?e:x;});
+    showToast(active?'Activated':'Deactivated','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.setPrimaryEmail=function(userId,emailId){
+  apiPatch('/users/'+userId+'/emails/'+emailId,{is_primary:true}).then(function(){
+    loadUserEmails(userId);
+    showToast('Primary email updated','success');
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.deleteUserEmail=function(userId,emailId){
+  if(!confirm('Remove this email ID?'))return;
+  apiDelete('/users/'+userId+'/emails/'+emailId).then(function(){
+    STATE.userEmailsCache[userId]=(STATE.userEmailsCache[userId]||[]).filter(function(x){return x.id!==emailId;});
+    showToast('Email removed','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.openAssignToBDLead=function(leadId){
+  STATE._assignManagerId=leadId;
+  STATE._assignType='bd_to_bdlead';
+  var bdManagers=STATE.users.filter(function(x){return userHasRole(x,'bd');});
+  var existing=(STATE.teamAssignments||[]).filter(function(a){return a.manager_id===leadId&&a.assignment_type==='bd_to_bdlead';}).map(function(a){return a.member_id;});
+  var available=bdManagers.filter(function(x){return existing.indexOf(x.id)===-1;});
+  if(!available.length){showToast('All BD Managers already assigned to this lead','info');return;}
+  var opts=available.map(function(u){return '<option value="'+u.id+'">'+htmlEsc(u.name)+'</option>';}).join('');
+  STATE.modal='<div class="modal modal-w400"><div class="mh"><div class="mt">Assign BD Manager</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'
+    +'<div class="mb_"><div class="fgrp"><label class="flbl">Select BD Manager</label><select class="sel" id="assign-member"><option value="">— select —</option>'+opts+'</select></div></div>'
+    +'<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="submitAssignment(STATE._assignManagerId,STATE._assignType)">Assign</button></div></div>';
+  render();
+};
+
+window.openAssignRAToManager=function(managerId){
+  STATE._assignManagerId=managerId;
+  STATE._assignType='ra_to_bd';
+  var raUsers=STATE.users.filter(function(x){return userHasRole(x,'ra');});
+  var existing=(STATE.teamAssignments||[]).filter(function(a){return a.manager_id===managerId&&a.assignment_type==='ra_to_bd';}).map(function(a){return a.member_id;});
+  var available=raUsers.filter(function(x){return existing.indexOf(x.id)===-1;});
+  if(!available.length){showToast('All RAs already assigned to this manager','info');return;}
+  var opts=available.map(function(u){return '<option value="'+u.id+'">'+htmlEsc(u.name)+'</option>';}).join('');
+  STATE.modal='<div class="modal modal-w400"><div class="mh"><div class="mt">Assign Research Analyst</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'
+    +'<div class="mb_"><div class="fgrp"><label class="flbl">Select RA</label><select class="sel" id="assign-member"><option value="">— select —</option>'+opts+'</select></div></div>'
+    +'<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="submitAssignment(STATE._assignManagerId,STATE._assignType)">Assign</button></div></div>';
+  render();
+};
+
+window.submitAssignment=function(managerId,type){
+  managerId=managerId||STATE._assignManagerId;
+  type=type||STATE._assignType;
+  var memberId=(document.getElementById('assign-member')||{}).value||'';
+  if(!memberId){showToast('Please select a user','warning');return;}
+  apiPost('/team-assignments',{member_id:memberId,manager_id:managerId,assignment_type:type}).then(function(a){
+    STATE.teamAssignments=(STATE.teamAssignments||[]).concat([a]);
+    closeModal();showToast('Assigned','success');
+    apiGet('/team-assignments').then(function(d){STATE.teamAssignments=d||[];render();});
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.removeAssignment=function(event,assignmentId){
+  event.stopPropagation();
+  if(!confirm('Remove this assignment?'))return;
+  apiDelete('/team-assignments/'+assignmentId).then(function(){
+    STATE.teamAssignments=(STATE.teamAssignments||[]).filter(function(a){return a.id!==assignmentId;});
+    showToast('Removed','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.connectMicrosoftAccount=function(accountId){
+  // Legacy shim — delegates to the correct connectMicrosoftUserEmail
+  // accountId here is actually a user_email id, so pass current user id + email id
+  connectMicrosoftUserEmail(STATE.user.id, accountId);
+};
+
+window.saveOutreachTemplate=function(key,subjId,bodyId){
+  var subj=(document.getElementById(subjId)||{}).value||'';
+  var body=(document.getElementById(bodyId)||{}).value||'';
+  // Normalise key: 'outreach' -> 'o1' so it matches the DB key used everywhere
+  var dbKey=key==='outreach'?'o1':key;
+  // Update local STATE
+  if(key==='outreach'){STATE.emailSubj=subj;STATE.emailBody=body;}
+  else if(key==='fu1'){STATE.fu1Subj=subj;STATE.fu1Body=body;}
+  else if(key==='fu2'){STATE.fu2Subj=subj;STATE.fu2Body=body;}
+  STATE.myOutreachPlan=STATE.myOutreachPlan||{};
+  STATE.myOutreachPlan['tmpl_'+dbKey+'_subject']=subj;
+  STATE.myOutreachPlan['tmpl_'+dbKey+'_body']=body;
+  var saves=[
+    apiPost('/outreach-plan',{key:'tmpl_'+dbKey+'_subject',value:subj}),
+    apiPost('/outreach-plan',{key:'tmpl_'+dbKey+'_body',value:body})
+  ];
+  Promise.all(saves).then(function(){showToast('Template saved','success');}).catch(function(e){showToast('Save failed: '+e.message,'error');});
+};
+
+window.saveOutreachDay=function(key,val){
+  if(!val)return;
+  var day=parseInt(val,10);
+  STATE.myOutreachPlan=STATE.myOutreachPlan||{};
+  STATE.myOutreachPlan[key]=String(day);
+  apiPost('/outreach-plan',{key:key,value:String(day)}).then(function(){
+    showToast('Schedule saved — '+key.replace('_day','').toUpperCase()+' set to Day '+day,'success');
+    render();
+  }).catch(function(e){showToast('Save failed: '+e.message,'error');});
+};
+
+window.saveEmailTemplate=function(key,subjId,bodyId){
+  var subj=(document.getElementById(subjId)||{}).value||'';
+  var body=(document.getElementById(bodyId)||{}).value||'';
+  if(key==='outreach'){STATE.emailSubj=subj;STATE.emailBody=body;}
+  else if(key==='fu1'){STATE.fu1Subj=subj;STATE.fu1Body=body;}
+  else if(key==='fu2'){STATE.fu2Subj=subj;STATE.fu2Body=body;}
+  var saves=[
+    apiPost('/app-settings',{key:'template_'+key+'_subject',value:subj}),
+    apiPost('/app-settings',{key:'template_'+key+'_body',value:body})
+  ];
+  Promise.all(saves).then(function(){showToast('Template saved','success');}).catch(function(e){showToast('Save failed: '+e.message,'error');});
+};
+
+window.openEmailEngineModal=function(){
+  var outreachTime=(STATE.appSettings&&STATE.appSettings['outreach_send_time'])||'08:00';
+  var followupTime=(STATE.appSettings&&STATE.appSettings['followup_send_time'])||'08:30';
+  var tzOpts=[
+    {val:'Asia/Kolkata',label:'IST — India (UTC+5:30)'},
+    {val:'America/New_York',label:'EST — New York (UTC-5)'},
+    {val:'America/Chicago',label:'CST — Chicago (UTC-6)'},
+    {val:'America/Denver',label:'MST — Denver (UTC-7)'},
+    {val:'America/Los_Angeles',label:'PST — Los Angeles (UTC-8)'}
+  ].map(function(tz){
+    var sel=tz.val==='Asia/Kolkata';
+    return '<option value="'+tz.val+'"'+(sel?' selected':'')+'>'+tz.label+'</option>';
+  }).join('');
+  STATE.modal='<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Email Engine Schedule</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div style="font-size:13px;color:var(--text2);margin-bottom:18px">Set the daily send times for outreach and follow-up emails. The engine runs automatically at these times every day.</div>'+
+      '<div class="fgrp"><label class="flbl">Timezone</label><select class="sel" id="engine-tz">'+tzOpts+'</select></div>'+
+      '<div class="g2">'+
+        '<div class="fgrp"><label class="flbl">Outreach send time</label><input class="inp" type="time" id="admin-outreach-time" value="'+outreachTime+'"/></div>'+
+        '<div class="fgrp"><label class="flbl">Follow-up send time</label><input class="inp" type="time" id="admin-followup-time" value="'+followupTime+'"/></div>'+
+      '</div>'+
+      '<div style="padding:10px 12px;background:var(--amber-l);border-radius:var(--r);font-size:12px;color:var(--amber);margin-top:4px">'+
+        '<strong>Testing:</strong> Use "Run now" to trigger the follow-up engine immediately without waiting for the scheduled time.'+
+      '</div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline btn-sm" onclick="runFollowupEngineNow()" style="color:var(--amber);border-color:var(--amber);margin-right:auto">▶ Run now</button>'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="saveAdminSendTimes()">Save schedule</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+
+window.saveAdminSendTimes=function(){
+  var ot=(document.getElementById('admin-outreach-time')||{}).value||'08:00';
+  var ft=(document.getElementById('admin-followup-time')||{}).value||'08:30';
+  var saves=[
+    apiPost('/app-settings',{key:'outreach_send_time',value:ot}),
+    apiPost('/app-settings',{key:'followup_send_time',value:ft})
+  ];
+  Promise.all(saves).then(function(){
+    STATE.appSettings=STATE.appSettings||{};
+    STATE.appSettings['outreach_send_time']=ot;
+    STATE.appSettings['followup_send_time']=ft;
+    closeModal();
+    showToast('Send times saved','success');
+  }).catch(function(e){showToast('Save failed: '+e.message,'error');});
+};
+
+window.generatePendingEmails=function(){
+  // Get all assigned job IDs
+  var assignedJobs=STATE.jobs.filter(function(j){return j.stage==='Assigned';});
+  if(!assignedJobs.length){showToast('No assigned leads found','warning');return;}
+  var jobIds=assignedJobs.map(function(j){return j.id;});
+  showToast('Generating emails for '+jobIds.length+' leads...','info');
+  apiPost('/emails/generate',{job_ids:jobIds}).then(function(r){
+    showToast(r.generated+' emails generated','success');
+    apiGet('/emails?status=pending').then(function(d){
+      STATE.pendingEmails=d||[];render();
+    });
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.runFollowupEngineNow=function(){
+  showToast('Running follow-up engine...','info');
+  apiPost('/follow-ups/run',{}).then(function(r){
+    showToast('Done — FU1: '+r.fu1_queued+', FU2: '+r.fu2_queued+', Skipped quota: '+r.skipped_quota,'success');
+    apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];render();});
+  }).catch(function(e){showToast('Error: '+e.message,'error');});
+};
+window.previewEmail=function(id){
+  var e=STATE.emails.find(function(x){return x.id===id;});
+  STATE.previewEmail=e||null;
+  render();
+};
+window.setMergeLead=function(id){STATE.mergeLeadId=id;STATE.genEmail=null;render();}
+window.setPlatform=function(p){STATE.user.plt=p;render();}
+
+window.openEmailPreviewModal=function(){
+  // Build genEmail if not already set
+  if(!STATE.genEmail){
+    // Path 1: production — contact selected via composeContactId (contactId|jobId)
+    if(STATE.composeContactId){
+      var parts=STATE.composeContactId.split('|');
+      var cc=STATE.contacts.find(function(c){return c.id===parts[0];});
+      var cj=STATE.jobs.find(function(j){return j.id===parts[1];});
+      if(cc&&cj){
+        var co={name:cj.company_name||'',ind:cj.company_ind||'',loc:cj.location||''};
+        var l={first_name:cc.first_name,last_name:cc.last_name||'',designation:cc.designation||'',position:cj.position||''};
+        STATE.genEmail={
+          to:(cc.first_name||'')+' '+(cc.last_name||''),
+          email:cc.email,
+          subj:fillEmail(STATE.emailSubj,l,co,STATE.user.name),
+          body:fillEmail(STATE.emailBody,l,co,STATE.user.name),
+          lid:null
+        };
+      } else { showToast('Contact or job not found','warning');return; }
+    }
+    // Path 2: seed/legacy lead via mergeLeadId
+    else if(STATE.mergeLeadId){
+      var ml=STATE.leads.find(function(l){return l.id==STATE.mergeLeadId;});
+      if(ml){
+        var co={
+          name:ml.coName||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).name||(ml.company&&ml.company.name)||'',
+          ind:ml.coInd||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).ind||(ml.company&&ml.company.industry)||'',
+          loc:ml.coLoc||(STATE.companies.find(function(c){return c.id==ml.coid;})||{}).loc||(ml.company&&ml.company.location)||''
+        };
+        STATE.genEmail={to:(ml.fn||'')+' '+(ml.ln||''),email:ml.email,subj:fillEmail(STATE.emailSubj,ml,co,STATE.user.name),body:fillEmail(STATE.emailBody,ml,co,STATE.user.name),lid:ml.id};
+      } else { showToast('Select a recipient first','warning');return; }
+    }
+    // Path 3: manual email — strip unfilled variables
+    else if(STATE.manualEmail){
+      STATE.genEmail={to:STATE.manualEmail,email:STATE.manualEmail,subj:STATE.emailSubj.replace(/{{[\w]+}}/g,''),body:STATE.emailBody.replace(/{{[\w]+}}/g,''),lid:null};
+    } else {
+      showToast('Select a recipient first','warning');return;
+    }
+  }
+  var ge=STATE.genEmail;
+  STATE.modal='<div class="modal modal-w640">'+
+    '<div class="mh">'+
+      '<div class="mt">Email Preview</div>'+
+      '<button class="btn-icon" onclick="closeModal()">'+ico("x",14)+'</button>'+
+    '</div>'+
+    '<div class="mb_" style="padding:0">'+
+      '<div style="padding:12px 20px;background:var(--accent-l);border-bottom:1px solid rgba(37,99,235,.15)">'+
+        '<div class="f12 text3"><strong style="color:var(--text)">To:</strong> '+htmlEsc(ge.to)+' &lt;'+htmlEsc(ge.email)+'&gt;</div>'+
+        '<div class="f12 text3 mt1"><strong style="color:var(--text)">Subject:</strong> '+htmlEsc(ge.subj)+'</div>'+
+      '</div>'+
+      '<div style="padding:18px 20px;font-size:13.5px;line-height:1.8;white-space:pre-wrap;max-height:60vh;overflow-y:auto">'+htmlEsc(ge.body)+'</div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Close</button>'+
+      '<button class="btn btn-primary" onclick="closeModal();sendEmail()">'+ico("send",13)+' Send this email</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+
+window.appendPrompt=function(text){
+  STATE.aiPrompt=(STATE.aiPrompt||STATE.aiPromptDefault)+"\n"+text;
+  var el=document.getElementById("ai-prompt-inp");
+  if(el)el.value=STATE.aiPrompt;
+}
+window.resetAIPrompt=function(){
+  STATE.aiPrompt=STATE.aiPromptDefault;
+  var el=document.getElementById("ai-prompt-inp");
+  if(el)el.value=STATE.aiPromptDefault;
+  showToast("Prompt reset to default","info");
+}
+
+window.emailSearchInput=function(v){
+  STATE.emailSearch=v;
+  if(v){STATE.mergeLeadId=null;STATE.manualEmail=null;STATE.manualEmailName=null;STATE.genEmail=null;}
+  render();
+  setTimeout(function(){var el=document.getElementById("email-search-inp");if(el){el.focus();el.setSelectionRange(v.length,v.length);}},0);
+}
+window.selectEmailRecipient=function(lid){
+  STATE.mergeLeadId=lid;STATE.manualEmail=null;STATE.manualEmailName=null;
+  STATE.emailSearch=null;STATE.genEmail=null;render();
+}
+window.useManualEmail=function(){
+  var email=STATE.emailSearch||"";
+  if(!email.includes("@")){showToast("Please enter a valid email address","warning");return;}
+  STATE.manualEmail=email;STATE.manualEmailName=email;
+  STATE.mergeLeadId=null;STATE.emailSearch=null;STATE.genEmail=null;render();
+}
+
+window.generateAI=function(){
+  var customInstructions=STATE.aiPrompt||STATE.aiPromptDefault;
+  // resolve recipient from composeContactId
+  if(STATE.composeContactId&&!STATE.mergeLeadId){
+    var parts=STATE.composeContactId.split('|');
+    var cc=STATE.contacts.find(function(c){return c.id===parts[0];});
+    var cj=STATE.jobs.find(function(j){return j.id===parts[1];});
+    if(cc&&cj){
+      STATE.mergeLeadId=null;
+      STATE.manualEmail=cc.email;
+      STATE.manualEmailName=(cc.first_name||'')+' '+(cc.last_name||'');
+      // pass contact+company into AI call directly
+      STATE.aiGenerating=true;render();
+      apiPost('/ai/generate-email',{
+        contact:{first_name:cc.first_name,last_name:cc.last_name,designation:cc.designation,position:cj.position},
+        company:{name:cj.company_name,industry:cj.company_ind,location:cj.location},
+        position:cj.position
+      }).then(function(d){
+        STATE.genEmail={to:(cc.first_name||'')+' '+(cc.last_name||''),email:cc.email,subj:d.subject,body:d.body,lid:null};
+        STATE.aiGenerating=false;render();
+      }).catch(function(e){STATE.aiGenerating=false;showToast('AI error: '+e.message,'error');render();});
+      return;
+    }
+  }
+  var promptEl=document.getElementById("ai-prompt-inp");
+  if(promptEl&&promptEl.value)customInstructions=promptEl.value;
+
+  // Handle manual email — no AI needed
+  if(STATE.manualEmail&&!STATE.mergeLeadId){
+    var subj=STATE.emailSubj.replace(/{{[\w]+}}/g,"");
+    var body=STATE.emailBody.replace(/{{fn}}/g,"").replace(/{{[\w]+}}/g,"");
+    STATE.genEmail={to:STATE.manualEmailName||STATE.manualEmail,email:STATE.manualEmail,subj:subj,body:body,lid:null};
+    render();return;
+  }
+  if(!STATE.mergeLeadId){showToast("Select a recipient first","warning");return;}
+  var ml=STATE.leads.find(function(l){return l.id==STATE.mergeLeadId;});
+  if(!ml){showToast("Selected lead not found","error");return;}
+  var co=STATE.companies.find(function(c){return c.id==ml.coid;})||{name:ml.coName,ind:ml.coInd,loc:ml.coLoc};
+
+  // Show spinner — render() preserves scroll
+  STATE.aiGenerating=true;render();
+
+  // Helper: build a fallback genEmail from template (no AI)
+  function fallbackToTemplate(){
+    STATE.genEmail={to:ml.fn+" "+ml.ln,email:ml.email,subj:fillEmail(STATE.emailSubj,ml,co,STATE.user.name),body:fillEmail(STATE.emailBody,ml,co,STATE.user.name),lid:ml.id};
+    STATE.aiGenerating=false;render();
+  }
+
+  // If running in LIVE (API layer present), call backend proxy. Otherwise fall back to local template fill.
+  if(typeof apiPost==="function"){
+    apiPost("/ai/generate-email",{
+      lead:{first_name:ml.fn,last_name:ml.ln,position:ml.pos,designation:ml.desig,email:ml.email},
+      company:{name:co.name,industry:co.ind,location:co.loc},
+      template:{subject:STATE.emailSubj,body:STATE.emailBody},
+      instructions:customInstructions
+    }).then(function(data){
+      var subj=data.subject||fillEmail(STATE.emailSubj,ml,co,STATE.user.name);
+      var body=data.body||fillEmail(STATE.emailBody,ml,co,STATE.user.name);
+      STATE.genEmail={to:ml.fn+" "+ml.ln,email:ml.email,subj:subj,body:body,lid:ml.id};
+      STATE.aiGenerating=false;render();
+      showToast("Email generated","success");
+    }).catch(function(err){
+      console.error("[generateAI] backend call failed:",err);
+      showToast("AI generation failed — used template instead","warning");
+      fallbackToTemplate();
+    });
+  } else {
+    // Standalone offline mode — just use template fill
+    fallbackToTemplate();
+  }
+};
+
+window.sendEmail=function(){
+  // If no generated email, build one from template + current recipient
+  var ge=STATE.genEmail;
+  if(!ge){
+    // Path 1: production contact selected via composeContactId
+    if(STATE.composeContactId){
+      var parts=STATE.composeContactId.split('|');
+      var cc=STATE.contacts.find(function(c){return c.id===parts[0];});
+      var cj=STATE.jobs.find(function(j){return j.id===parts[1];});
+      if(cc&&cj){
+        var co={name:cj.company_name||'',ind:cj.company_ind||'',loc:cj.location||''};
+        var l={first_name:cc.first_name,last_name:cc.last_name||'',designation:cc.designation||'',position:cj.position||''};
+        ge={to:(cc.first_name||'')+' '+(cc.last_name||''),email:cc.email,subj:fillEmail(STATE.emailSubj,l,co,STATE.user.name),body:fillEmail(STATE.emailBody,l,co,STATE.user.name),lid:null};
+      } else {showToast('Contact or job not found','warning');return;}
+    }
+    // Path 2: manual email
+    else if(STATE.manualEmail){
+      ge={to:STATE.manualEmailName||STATE.manualEmail,email:STATE.manualEmail,subj:STATE.emailSubj.replace(/{{[\w]+}}/g,''),body:STATE.emailBody.replace(/{{[\w]+}}/g,''),lid:null};
+    }
+    // Path 3: legacy lead via mergeLeadId
+    else if(STATE.mergeLeadId){
+      var ml=STATE.leads.find(function(l){return l.id===STATE.mergeLeadId;});
+      if(ml){
+        var co=STATE.companies.find(function(c){return c.id===ml.coid;})||{};
+        ge={to:(ml.fn||'')+' '+(ml.ln||''),email:ml.email,subj:fillEmail(STATE.emailSubj,ml,co,STATE.user.name),body:fillEmail(STATE.emailBody,ml,co,STATE.user.name),lid:ml.id};
+      } else {showToast('Select a recipient first','warning');return;}
+    }
+    else {showToast('Select a recipient first','warning');return;}
+  }
+  // Attach from email if selected
+  var fromEmail=null;
+  if(STATE.composeFromEmailId){
+    var fromEm=(STATE.userEmailsCache[STATE.user.id]||[]).find(function(e){return e.id===STATE.composeFromEmailId;});
+    if(fromEm)fromEmail=fromEm.email_address;
+  }
+  var plt=STATE.user.plt||"Gmail";
+  var gmailFrom=fromEmail||STATE.user.email||'';
+  var url=plt==="Gmail"
+    ?"https://mail.google.com/mail/?view=cm&to="+encodeURIComponent(ge.email)+"&su="+encodeURIComponent(ge.subj)+"&body="+encodeURIComponent(ge.body)+(gmailFrom?"&authuser="+encodeURIComponent(gmailFrom):'')
+    :"https://outlook.live.com/mail/0/deeplink/compose?to="+encodeURIComponent(ge.email)+"&subject="+encodeURIComponent(ge.subj)+"&body="+encodeURIComponent(ge.body);
+  window.open(url,"_blank");
+  STATE.emails.push({id:"e"+Date.now(),lid:ge.lid,by:STATE.user.id,to:ge.email,from_email:fromEmail||null,subj:ge.subj,body:ge.body,plt:plt,dt:todayIST(),status:"sent"});
+  showToast("Email opened in "+plt+(fromEmail?' from '+fromEmail:''),"success");
+}
+
+window.copyToClip=function(text){
+  if(navigator.clipboard){
+    navigator.clipboard.writeText(text).then(function(){showToast("Copied: "+text,"success");}).catch(function(){fallbackCopy(text);});
+  } else {fallbackCopy(text);}
+};
+function fallbackCopy(text){
+  var el=document.createElement("textarea");
+  el.value=text;el.style.position="fixed";el.style.opacity="0";
+  document.body.appendChild(el);el.select();
+  try{document.execCommand("copy");showToast("Copied: "+text,"success");}catch(e){showToast("Copy failed","error");}
+  document.body.removeChild(el);
+}
+
+window.insertVar=function(v){
+  if(el){var s=el.selectionStart||el.value.length;STATE.emailBody=STATE.emailBody.slice(0,s)+v+STATE.emailBody.slice(s);render();}
+}
+
+window.toggleBDAssign=function(role){
+  var wrap=document.getElementById("u-bd-wrap");
+  if(wrap)wrap.style.display=role==="ra"?"":"none";
+};
+window.openAddUser=function(){
+  var managers=STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead'||x.role==='admin';});
+  var roleOpts=['ra','ra_lead','bd','bd_lead','admin'].map(function(r){
+    var labels={ra:'Research Analyst',ra_lead:'RA Team Lead',bd:'Manager',bd_lead:'BD Team Lead',admin:'Admin'};
+    return '<option value="'+r+'">'+labels[r]+'</option>';
+  }).join('');
+  STATE.modal='<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Add new user</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div class="g2 mb3">'+
+        '<div class="fgrp"><label class="flbl">Full name <span style="color:var(--red)">*</span></label><input class="inp" id="u-name"/></div>'+
+        '<div class="fgrp"><label class="flbl">Work email <span style="color:var(--red)">*</span></label><input class="inp" id="u-email" type="email"/></div>'+
+      '</div>'+
+      '<div class="g2 mb3">'+
+        '<div class="fgrp"><label class="flbl">Employee ID</label><input class="inp" id="u-eid"/></div>'+
+        '<div class="fgrp"><label class="flbl">Designation</label><input class="inp" id="u-desig"/></div>'+
+      '</div>'+
+      '<div class="g2 mb3">'+
+        '<div class="fgrp"><label class="flbl">Role</label><select class="sel" id="u-role">'+roleOpts+'</select></div>'+
+        '<div class="fgrp"><label class="flbl">Platform</label><select class="sel" id="u-plt"><option>Gmail</option><option>Outlook</option></select></div>'+
+      '</div>'+
+      '<div style="font-size:12px;color:var(--text3);padding:8px 10px;background:var(--bg);border-radius:var(--r)">Default password: <strong>Fute@2024</strong></div>'+
+    '</div>'+
+    '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="saveUser(null)">Add user</button></div>'+
+  '</div>';
+  render();
+};
+window.editUser=function(id){var u=STATE.users.find(function(x){return x.id===id});if(u){STATE.modal=renderUserModal(u);render();}}
+window.removeUser=function(id,fromDetail){
+  if(id===STATE.user.id){showToast("Cannot remove yourself","warning");return;}
+  if(!confirm("Deactivate this user? They will no longer be able to log in."))return;
+  apiDelete('/users/'+id).then(function(){
+    STATE.users=STATE.users.filter(function(u){return u.id!==id;});
+    if(fromDetail){STATE.adminSelectedUser=null;}
+    showToast("User deactivated","success");render();
+  }).catch(function(e){showToast("Failed: "+e.message,"error");});
+};
+window.unassignRA=function(id){
+  STATE.users=STATE.users.map(function(u){return u.id===id?Object.assign({},u,{bdm:null}):u;});
+  showToast("RA unassigned","info");render();
+}
+window.saveUser=function(existingId){
+  var name=(document.getElementById('u-name')||{}).value||'';
+  var email=(document.getElementById('u-email')||{}).value||'';
+  name=name.trim();email=email.trim();
+  if(!name||!email){showToast('Name and email required','warning');return;}
+  var role=(document.getElementById('u-role')||{}).value||'ra';
+  var eid=(document.getElementById('u-eid')||{}).value||'';
+  var desig=(document.getElementById('u-desig')||{}).value||'';
+  var plt=(document.getElementById('u-plt')||{}).value||'Gmail';
+  var payload={name:name,email:email,role:role,employee_id:eid||undefined,designation:desig||undefined,platform:plt};
+  apiPost('/users',payload).then(function(u){
+    STATE.users.push(normaliseUser(u));
+    closeModal();
+    showToast('User added — '+name,'success');
+    render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+}
+
+window.saveProfile=function(){
+  var name=(document.getElementById("p-name")||{}).value||STATE.user.name;
+  var email=(document.getElementById("p-email")||{}).value||STATE.user.email;
+  var eid=(document.getElementById("p-eid")||{}).value||STATE.user.empId;
+  var desig=(document.getElementById("p-desig")||{}).value||STATE.user.desig;
+  STATE.users=STATE.users.map(function(u){return u.id===STATE.user.id?Object.assign({},u,{name:name,email:email,empId:eid,desig:desig}):u;});
+  STATE.user=Object.assign({},STATE.user,{name:name,email:email,empId:eid,desig:desig});
+  showToast("Profile updated","success");render();
+}
+window.setProfilePlt=function(p){
+  STATE.user=Object.assign({},STATE.user,{plt:p});
+  STATE.users=STATE.users.map(function(u){return u.id===STATE.user.id?Object.assign({},u,{plt:p}):u;});
+  showToast("Platform set to "+p,"success");render();
+}
+window.changePassword=function(){
+  var n=(document.getElementById("pw-new")||{}).value;
+  var c=(document.getElementById("pw-con")||{}).value;
+  if(!n||n.length<6){showToast("Password must be at least 6 characters","warning");return;}
+  if(n!==c){showToast("Passwords don't match","warning");return;}
+  showToast("Password updated","success");
+}
+
+window.setAdminView=function(v){STATE.adminView=v;render();}
+
+window.submitUserDetailSave=function(existingId){
+  var name=(document.getElementById('ud-name')||{}).value||'';
+  var email=(document.getElementById('ud-email')||{}).value||'';
+  var eid=(document.getElementById('ud-eid')||{}).value||'';
+  var desig=(document.getElementById('ud-desig')||{}).value||'';
+  var role=(document.getElementById('ud-role')||{}).value||'ra';
+  var plt=(document.getElementById('ud-plt')||{}).value||'Gmail';
+  if(!name||!email){showToast('Name and email required','warning');return;}
+  apiPut('/users/'+existingId,{name:name,email:email,employee_id:eid,designation:desig,role:role,platform:plt}).then(function(updated){
+    STATE.users=STATE.users.map(function(u){return u.id===existingId?normaliseUser(updated):u;});
+    showToast('User updated','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.dismissReminder=function(rid){
+  apiFetch('PATCH','/reminders/'+rid,{status:'sent'}).then(function(){
+    STATE.reminders=(STATE.reminders||[]).map(function(r){return r.id===rid?Object.assign({},r,{status:'sent'}):r;});
+    render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.viewAs=function(uid){
+  var target=STATE.users.find(function(u){return u.id===uid});
+  if(!target)return;
+  STATE.viewingUser=target;
+  STATE.page="dashboard";
+  render();
+}
+window.stopViewing=function(){
+  STATE.viewingUser=null;
+  STATE.page="dashboard";
+  render();
+}
+
+window.reminderSearchInput=function(v){
+  STATE.reminderSearch=v;render();
+  setTimeout(function(){var el=document.getElementById("rem-search-inp");if(el){el.focus();el.setSelectionRange(v.length,v.length);}},0);
+}
+window.openNewReminder=function(){STATE.modal=renderSetReminderModal(null,null);render();}
+window.openSetReminderFromSearch=function(lid){STATE.reminderSearch=null;STATE.modal=renderSetReminderModal(lid,null);render();}
+window.openSetReminderManual=function(email){STATE.reminderSearch=null;STATE.modal=renderSetReminderModal(null,email);render();}
+window.openSetReminder=function(lid){STATE.modal=renderSetReminderModal(lid,null);render();}
+
+window.saveReminder=function(lid,manualEmail){
+  var lead=lid?STATE.leads.find(function(l){return l.id===lid}):null;
+  var co=lead?STATE.companies.find(function(c){return c.id===lead.coid})||{}:{};
+  var dt=(document.getElementById("rem-date")||{}).value;
+  var tm=(document.getElementById("rem-time")||{}).value||"09:00";
+  var note=(document.getElementById("rem-note")||{}).value||"";
+  if(!dt){showToast("Please set a date","warning");return;}
+  STATE.reminders.push({
+    id:"r"+Date.now(),lid:lid||null,uid:STATE.user.id,
+    name:lead?(lead.fn+" "+lead.ln):(manualEmail||""),
+    company:lead?(co.name||""):"",
+    email:lead?lead.email:(manualEmail||""),
+    returnDate:dt,reminderTime:tm,note:note,status:"pending",createdAt:todayIST()
+  });
+  closeModal();STATE.reminderSearch=null;
+  showToast("Reminder set for "+fmtDate(dt)+" at "+tm,"success");
+  render();
+}
+
+window.editReminder=function(rid){
+  var r=STATE.reminders.find(function(x){return x.id===rid});
+  if(!r)return;
+  STATE.modal=renderSetReminderModal(r.lid||null,r.lid?null:r.email);
+  render();
+}
+window.dismissReminder=function(rid){
+  STATE.reminders=STATE.reminders.filter(function(r){return r.id!==rid});
+  showToast("Reminder removed","info");render();
+}
+window.sendReminderEmail=function(rid){
+  var r=STATE.reminders.find(function(x){return x.id===rid});
+  if(!r)return;
+  var subj="Following up — hope you're back!";
+  var body="Hi "+((r.contact_name||r.name||"").split(" ")[0]||"there")+",\n\nHope you had a great break! I wanted to follow up on my earlier message.\n\nWould you have 15 minutes for a quick call this week?\n\nWarm regards,\n"+STATE.user.name+"\nFute Global LLC";
+  var plt=STATE.user.plt||"Gmail";
+  window.open(plt==="Gmail"
+    ?"https://mail.google.com/mail/?view=cm&to="+encodeURIComponent(r.email)+"&su="+encodeURIComponent(subj)+"&body="+encodeURIComponent(body)
+    :"https://outlook.live.com/mail/0/deeplink/compose?to="+encodeURIComponent(r.email)+"&subject="+encodeURIComponent(subj)+"&body="+encodeURIComponent(body),"_blank");
+  STATE.reminders=STATE.reminders.map(function(x){return x.id===rid?Object.assign({},x,{status:"sent"}):x;});
+  showToast("Follow-up email opened","success");render();
+}
+window.sendAllDue=function(){
+  var today=todayIST();
+  var due=STATE.reminders.filter(function(r){return r.user_id===STATE.user.id&&r.status==="pending"&&r.return_date<=today});
+  due.forEach(function(r){sendReminderEmail(r.id);});
+}
+
+// ── PAGINATION ─────────────────────────────────
+window.setLeadsPage=function(p){STATE.leadsPage=Math.max(0,p);render();}
+window.toggleJobFilter=function(key,val,checked){
+  var arr=(STATE.jobsFilter[key]||[]).slice();
+  if(checked){if(arr.indexOf(val)===-1)arr.push(val);}
+  else{arr=arr.filter(function(x){return x!==val;});}
+  STATE.jobsFilter[key]=arr;STATE.leadsPage=0;render();
+};
+window.openEditPendingEmail=function(id){
+  var pe=(STATE.pendingEmails||[]).find(function(e){return e.id===id;});
+  if(!pe)return;
+  STATE.modal='<div class="modal modal-w640">'+
+    '<div class="mh"><div class="mt">Edit Email \u2014 '+htmlEsc(pe.to_email||'')+'</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_" style="padding:18px 20px">'+
+      '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="edit-pe-subj" value="'+htmlEsc(pe.subject||'')+'"/></div>'+
+      '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" id="edit-pe-body" style="min-height:300px;line-height:1.7">'+htmlEsc(pe.body||'')+'</textarea></div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="savePendingEmailEdit(\''+id+'\')">Save changes</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+window.savePendingEmailEdit=function(id){
+  var subj=(document.getElementById('edit-pe-subj')||{}).value||'';
+  var body=(document.getElementById('edit-pe-body')||{}).value||'';
+  apiFetch('PATCH','/emails/'+id,{subject:subj,body:body}).then(function(updated){
+    STATE.pendingEmails=(STATE.pendingEmails||[]).map(function(e){return e.id===id?Object.assign({},e,{subject:updated.subject||subj,body:updated.body||body}):e;});
+    closeModal();showToast('Email updated','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+document.addEventListener('click',function(){
+  if(STATE.openDrop!==null){STATE.openDrop=null;render();}
+});
+window.setLeadsPageSize=function(n){STATE.leadsPageSize=n;STATE.leadsPage=0;render();}
+
+// ── MAIL MERGE ─────────────────────────────────
+window.openMailMerge=function(ids){
+  if(!ids||!ids.length){showToast("No leads selected","warning");return;}
+  var leads=ids.map(function(id){return STATE.leads.find(function(l){return l.id===id;});}).filter(function(l){return l&&!l.del;});
+  if(!leads.length){showToast("No valid leads","warning");return;}
+  STATE.mailMerge={leads:leads,currentIdx:0,emails:{},sent:0,skipped:0};
+  // Pre-fill emails for all leads
+  leads.forEach(function(l,i){
+    var co=STATE.companies.find(function(c){return c.id===l.coid;})||{};
+    STATE.mailMerge.emails[i]={subj:fillEmail(STATE.emailSubj,l,co,STATE.user.name),body:fillEmail(STATE.emailBody,l,co,STATE.user.name),sent:false};
+  });
+  STATE.modal=renderMailMergeModal();
+  render();
+}
+
+window.closeMailMerge=function(){
+  var mm=STATE.mailMerge;
+  if(mm&&mm.sent>0)showToast(mm.sent+" email"+(mm.sent>1?"s":"")+" sent via mail merge","success");
+  STATE.mailMerge=null;STATE.modal=null;STATE.leadsSelected={};render();
+}
+
+window.mailMergeNav=function(dir){
+  var mm=STATE.mailMerge;
+  if(!mm)return;
+  // Save current edits before navigating
+  var subjEl=document.getElementById("mm-subj");
+  var bodyEl=document.getElementById("mm-body");
+  if(subjEl)mm.emails[mm.currentIdx].subj=subjEl.value;
+  if(bodyEl)mm.emails[mm.currentIdx].body=bodyEl.value;
+  mm.currentIdx=Math.max(0,Math.min(mm.leads.length-1,mm.currentIdx+dir));
+  STATE.modal=renderMailMergeModal();render();
+}
+
+window.mailMergeEdit=function(field,val){
+  if(!STATE.mailMerge)return;
+  STATE.mailMerge.emails[STATE.mailMerge.currentIdx][field]=val;
+}
+
+window.mailMergeSend=function(){
+  var mm=STATE.mailMerge;
+  if(!mm)return;
+  var idx=mm.currentIdx;
+  var l=mm.leads[idx];
+  var e=mm.emails[idx];
+  if(!l.email){showToast("No email for this lead","warning");return;}
+  if(mm.emails[idx].sent){showToast("Already sent to this lead","info");return;}
+
+  // Save edits from textarea
+  var subjEl=document.getElementById("mm-subj");
+  var bodyEl=document.getElementById("mm-body");
+  if(subjEl)e.subj=subjEl.value;
+  if(bodyEl)e.body=bodyEl.value;
+
+  var plt=STATE.user.plt||"Gmail";
+  // Open in correct Gmail/Outlook account
+  var url=plt==="Gmail"
+    ?"https://mail.google.com/mail/u/0/?view=cm&to="+encodeURIComponent(l.email)+"&su="+encodeURIComponent(e.subj)+"&body="+encodeURIComponent(e.body)
+    :"https://outlook.live.com/mail/0/deeplink/compose?to="+encodeURIComponent(l.email)+"&subject="+encodeURIComponent(e.subj)+"&body="+encodeURIComponent(e.body);
+  window.open(url,"_blank");
+
+  // Mark as sent
+  mm.emails[idx].sent=true;
+  mm.sent=(mm.sent||0)+1;
+
+  // Log
+  STATE.emails.push({id:"e"+Date.now(),lid:l.id,by:STATE.user.id,to:l.email,subj:e.subj,body:e.body,plt:plt,dt:todayIST(),status:"sent"});
+  STATE.activities.push({id:"a"+Date.now(),lid:l.id,uid:STATE.user.id,type:"email",txt:"Email sent via mail merge ("+plt+")",dt:todayIST()});
+
+  // Auto-advance to next unsent lead
+  var next=mm.currentIdx+1;
+  while(next<mm.leads.length&&mm.emails[next]&&mm.emails[next].sent)next++;
+  if(next<mm.leads.length)mm.currentIdx=next;
+
+  STATE.modal=renderMailMergeModal();render();
+}
+
+window.mailMergeSkip=function(){
+  var mm=STATE.mailMerge;
+  if(!mm)return;
+  mm.skipped=(mm.skipped||0)+1;
+  mm.currentIdx=Math.min(mm.leads.length-1,mm.currentIdx+1);
+  STATE.modal=renderMailMergeModal();render();
+}
+// ════════════════════════════════════════════════
+// MAIL MERGE ENGINE
+// ════════════════════════════════════════════════
+window.openMailMerge=function(ids){
+  if(!ids||!ids.length)return;
+  var leads=ids.map(function(id){return STATE.leads.find(function(l){return l.id===id;});}).filter(function(l){return l&&l.email;});
+  if(!leads.length){showToast("No email addresses in selected leads","warning");return;}
+
+  // Build per-lead email drafts
+  var queue=leads.map(function(l){
+    var co=STATE.companies.find(function(c){return c.id===l.coid;})||{name:l.coName,ind:l.coInd,loc:l.coLoc};
+    return{
+      lid:l.id,
+      name:l.fn+" "+l.ln,
+      desig:l.desig,
+      company:co.name||l.coName||"",
+      email:l.email,
+      subj:fillEmail(STATE.emailSubj,l,co,STATE.user.name),
+      body:fillEmail(STATE.emailBody,l,co,STATE.user.name),
+      status:"pending"
+    };
+  });
+
+  STATE.mailMerge={queue:queue,index:0};
+  STATE.modal=renderMailMergeModal();
+  render();
+};
+
+function renderMailMergeModal(){
+  var mm=STATE.mailMerge;
+  if(!mm)return"";
+  var q=mm.queue;
+  var i=mm.index;
+  var current=q[i];
+  var total=q.length;
+  var sentCount=q.filter(function(x){return x.status==="sent";}).length;
+  var plt=STATE.user.plt||"Gmail";
+  var allDone=q.every(function(x){return x.status==="sent"||x.status==="skipped";});
+
+  return '<div class="modal" style="width:680px;max-width:95vw;max-height:90vh;display:flex;flex-direction:column">'+
+    // Header
+    '<div class="mh">'+
+      '<div>'+
+        '<div class="mt">Mail Merge</div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+sentCount+' sent · '+(total-sentCount-(q.filter(function(x){return x.status==="skipped";}).length))+' remaining · '+total+' total</div>'+
+      '</div>'+
+      '<button class="btn-icon" onclick="STATE.mailMerge=null;closeModal()">'+ico("x",14)+'</button>'+
+    '</div>'+
+
+    // Progress counter
+    '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 20px;background:var(--bg);border-bottom:1px solid var(--border)">'+
+      '<div style="font-size:13px;font-weight:500;color:var(--text2)">Email <span style="color:var(--accent);font-weight:700">'+(i+1)+'</span> of <span style="font-weight:700">'+total+'</span></div>'+
+      '<div style="display:flex;gap:6px;align-items:center">'+
+        (sentCount>0?'<span style="font-size:12px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:10px;font-weight:500">'+sentCount+' sent ✓</span>':"")+
+        (q.filter(function(x){return x.status==="skipped";}).length>0?'<span style="font-size:12px;padding:2px 8px;background:var(--bg);color:var(--text3);border-radius:10px">'+q.filter(function(x){return x.status==="skipped";}).length+' skipped</span>':"")+
+      '</div>'+
+    '</div>'+
+
+    (allDone?
+      '<div style="padding:40px;text-align:center">'+
+        '<div style="font-size:40px;margin-bottom:12px">✅</div>'+
+        '<div style="font-family:var(--display);font-size:18px;font-weight:600;margin-bottom:6px">All done!</div>'+
+        '<div style="font-size:13px;color:var(--text3);margin-bottom:20px">'+sentCount+' email'+(sentCount!==1?"s":"")+" sent successfully."+'</div>'+
+        '<button class="btn btn-primary" onclick="STATE.mailMerge=null;closeModal()">Close</button>'+
+      '</div>'
+    :
+      '<div style="padding:18px 20px;flex:1;overflow-y:auto">'+
+        '<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:14px;border:1px solid rgba(37,99,235,.15)">'+
+          '<div style="flex:1">'+
+            '<div style="font-weight:600;font-size:14px">'+htmlEsc(current.name)+'<span style="font-weight:400;color:var(--text2);font-size:12.5px"> · '+htmlEsc(current.desig||"")+'</span></div>'+
+            '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+htmlEsc(current.company)+' · '+htmlEsc(current.email)+'</div>'+
+          '</div>'+
+          (current.status==="sent"?'<span style="font-size:11px;padding:3px 9px;background:var(--green);color:#fff;border-radius:10px">✓ Sent</span>':"")+
+        '</div>'+
+        '<div class="fgrp">'+
+          '<label class="flbl">Subject</label>'+
+          '<input class="inp" id="mm-subj" value="'+htmlEsc(current.subj)+'" oninput="mmUpdateSubj(this.value)"/>'+
+        '</div>'+
+        '<div class="fgrp">'+
+          '<label class="flbl">Body</label>'+
+          '<textarea class="txta w100" id="mm-body" style="min-height:200px;font-size:13px;line-height:1.6" oninput="mmUpdateBody(this.value)">'+htmlEsc(current.body)+'</textarea>'+
+        '</div>'+
+      '</div>'+
+
+      '<div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--card)">'+
+        '<button class="btn btn-outline btn-sm" onclick="mmPrev()" '+(i===0?'disabled style="opacity:.4"':'')+'>← Prev</button>'+
+        '<button class="btn btn-outline btn-sm" onclick="mmNext()">Next →</button>'+
+        '<button class="btn btn-outline btn-sm" style="color:var(--red);border-color:var(--red)" onclick="mmSkipAll()">Skip all</button>'+
+        '<div style="flex:1"></div>'+
+        '<div class="flex gap1">'+
+          '<button class="fc'+(plt==="Gmail"?" on":"")+'" onclick="setPlatform(\'Gmail\')" style="font-size:12px">Gmail</button>'+
+          '<button class="fc'+(plt==="Outlook"?" on":"")+'" onclick="setPlatform(\'Outlook\')" style="font-size:12px">Outlook</button>'+
+        '</div>'+
+        '<button class="btn btn-outline btn-sm" style="color:var(--accent);border-color:var(--accent)" onclick="mmSendAll()" title="Opens all remaining emails at once in '+plt+'">'+
+          ico("send",13)+' Send all ('+q.filter(function(x){return x.status==="pending";}).length+')'+
+        '</button>'+
+        '<button class="btn btn-primary btn-sm" onclick="mmSend()">'+
+          ico("send",13)+' Send'+(i<total-1?' & Next':' & Finish')+
+        '</button>'+
+      '</div>'
+    )+
+  '</div>';
+}
+
+window.mmGoTo=function(idx){
+  STATE.mailMerge.index=idx;
+  STATE.modal=renderMailMergeModal();render();
+};
+window.mmPrev=function(){
+  if(STATE.mailMerge.index>0){STATE.mailMerge.index--;STATE.modal=renderMailMergeModal();render();}
+};
+window.mmNext=function(){
+  var mm=STATE.mailMerge;
+  if(mm.index<mm.queue.length-1){mm.index++;STATE.modal=renderMailMergeModal();render();}
+};
+window.mmSkip=function(){
+  var mm=STATE.mailMerge;
+  mm.queue[mm.index].status="skipped";
+  var next=mm.queue.findIndex(function(x,idx){return idx>mm.index&&x.status==="pending";});
+  if(next>=0)mm.index=next;
+  STATE.modal=renderMailMergeModal();render();
+};
+window.mmSkipAll=function(){
+  if(!confirm("Skip all remaining unsent emails?"))return;
+  STATE.mailMerge.queue.forEach(function(x){if(x.status==="pending")x.status="skipped";});
+  STATE.modal=renderMailMergeModal();render();
+};
+window.mmSendAll=function(){
+  var mm=STATE.mailMerge;
+  var pending=mm.queue.filter(function(x){return x.status==="pending";});
+  if(!pending.length){showToast("No pending emails","info");return;}
+  if(!confirm("Open all "+pending.length+" remaining emails in "+( STATE.user.plt||"Gmail")+"? Your browser may block multiple popups — allow them if prompted."))return;
+
+  var plt=STATE.user.plt||"Gmail";
+  var gmailUser=STATE.user.email||"";
+  pending.forEach(function(item,idx){
+    setTimeout(function(){
+      // Sync any edits on current
+      if(mm.queue[mm.index]===item){
+        var subjEl=document.getElementById("mm-subj");
+        var bodyEl=document.getElementById("mm-body");
+        if(subjEl)item.subj=subjEl.value;
+        if(bodyEl)item.body=bodyEl.value;
+      }
+      var url;
+      if(plt==="Gmail"){
+        url="https://mail.google.com/mail/u/0/?authuser="+encodeURIComponent(gmailUser)+
+            "&view=cm&to="+encodeURIComponent(item.email)+
+            "&su="+encodeURIComponent(item.subj)+
+            "&body="+encodeURIComponent(item.body);
+      } else {
+        url="https://outlook.office.com/mail/deeplink/compose?to="+encodeURIComponent(item.email)+
+            "&subject="+encodeURIComponent(item.subj)+
+            "&body="+encodeURIComponent(item.body);
+      }
+      window.open(url,"_blank");
+      item.status="sent";
+      STATE.emails.push({id:"e"+Date.now()+idx,lid:item.lid,by:STATE.user.id,to:item.email,subj:item.subj,body:item.body,plt:plt,dt:todayIST(),status:"sent"});
+    },idx*600); // 600ms gap between each to avoid popup blocker
+  });
+
+  // Mark all as sent after delay and refresh
+  setTimeout(function(){
+    STATE.modal=renderMailMergeModal();render();
+    showToast(pending.length+" emails opened in "+plt,"success");
+  },pending.length*600+200);
+};
+window.mmUpdateBody=function(v){if(STATE.mailMerge)STATE.mailMerge.queue[STATE.mailMerge.index].body=v;};
+
+window.mmSend=function(){
+  var mm=STATE.mailMerge;
+  var current=mm.queue[mm.index];
+  var plt=STATE.user.plt||"Gmail";
+
+  // Sync any edits from textarea
+  var subjEl=document.getElementById("mm-subj");
+  var bodyEl=document.getElementById("mm-body");
+  if(subjEl)current.subj=subjEl.value;
+  if(bodyEl)current.body=bodyEl.value;
+
+  // Build Gmail URL with user's actual account
+  var gmailUser=STATE.user.email||"";
+  var url;
+  if(plt==="Gmail"){
+    // authuser param forces correct Google account
+    url="https://mail.google.com/mail/u/0/?authuser="+encodeURIComponent(gmailUser)+
+        "&view=cm&to="+encodeURIComponent(current.email)+
+        "&su="+encodeURIComponent(current.subj)+
+        "&body="+encodeURIComponent(current.body);
+  } else {
+    url="https://outlook.office.com/mail/deeplink/compose?to="+encodeURIComponent(current.email)+
+        "&subject="+encodeURIComponent(current.subj)+
+        "&body="+encodeURIComponent(current.body);
+  }
+  window.open(url,"_blank");
+
+  // Mark sent and log
+  current.status="sent";
+  STATE.emails.push({id:"e"+Date.now(),lid:current.lid,by:STATE.user.id,to:current.email,subj:current.subj,body:current.body,plt:plt,dt:todayIST(),status:"sent"});
+  STATE.activities.push({id:"a"+Date.now(),lid:current.lid,uid:STATE.user.id,type:"email",txt:"Email sent via "+plt+" (mail merge)",dt:todayIST()});
+
+  // Move to next unsent
+  var next=mm.queue.findIndex(function(x,idx){return idx>mm.index&&x.status==="pending";});
+  if(next>=0){mm.index=next;}
+  // else stay on current (all done state will show)
+
+  STATE.modal=renderMailMergeModal();render();
+};
+
+// Keep quickSendEmail for single row icon
+window.quickSendEmail=function(lid){
+  openMailMerge([lid]);
+};
+
+window.bulkSendEmail=function(){
+  var ids=Object.keys(STATE.leadsSelected).filter(function(id){return STATE.leadsSelected[id];});
+  openMailMerge(ids);
+};
+// Parse date from Excel — handles dd/mm/yyyy, yyyy-mm-dd, Excel serial numbers
+function parseExcelDateToISO(v){
+  if(!v)return null;
+  if(!isNaN(v)){var d=new Date(Math.round((Number(v)-25569)*86400000));return d.toISOString().split('T')[0];}
+  var d2=new Date(v);
+  if(!isNaN(d2))return d2.toISOString().split('T')[0];
+  return null;
+}
+function parseExcelDate(val){
+  if(!val)return todayIST();
+  if(typeof val==="number"){var d=new Date((val-25569)*86400000);return d.toISOString().split("T")[0];}
+  var s=String(val).trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
+  var m=s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+  if(m)return m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
+  var d2=new Date(s);
+  if(!isNaN(d2))return d2.toISOString().split("T")[0];
+  return todayIST();
+}
+
+window.triggerImport=function(){
+  var el=document.getElementById("xl-import");
+  if(el){el.value="";el.click();}
+}
+
+window.importXL=function(input){
+  if(!input.files||!input.files[0])return;
+  var file=input.files[0];
+  var reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      var data=new Uint8Array(e.target.result);
+      var wb=XLSX.read(data,{type:"array"});
+      var sheets=wb.SheetNames;
+      STATE.importWB=wb;
+      if(sheets.length===1){
+        // Only one sheet — go straight to preview
+        var ws=wb.Sheets[sheets[0]];
+        var rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+        if(!rows.length){showToast("No data found in file","warning");return;}
+        STATE.importPreview=rows;
+        STATE.importSheet=sheets[0];
+        STATE.modal=renderImportModal(rows,sheets[0]);
+      } else {
+        // Multiple sheets — show sheet picker first
+        STATE.modal=renderSheetPickerModal(sheets);
+      }
+      render();
+    }catch(err){showToast("Could not read file: "+err.message,"error");}
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function renderSheetPickerModal(sheets){
+  var items=sheets.map(function(s,i){
+    return '<div onclick="selectSheet(\''+htmlEsc(s)+'\')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1.5px solid var(--border);border-radius:var(--r2);cursor:pointer;margin-bottom:8px;transition:all .12s" onmouseenter="this.style.borderColor=\'var(--accent)\';this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.borderColor=\'var(--border)\';this.style.background=\'\'">'+
+      '<div style="width:32px;height:32px;background:var(--accent-l);border-radius:var(--r);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:13px;color:var(--accent)">'+(i+1)+'</div>'+
+      '<div><div style="font-weight:500;font-size:13.5px">'+htmlEsc(s)+'</div>'+
+      '<div class="f12 text3">Sheet '+(i+1)+' of '+sheets.length+'</div></div>'+
+      '<div style="margin-left:auto;color:var(--text3);font-size:18px">›</div>'+
+    '</div>';
+  }).join("");
+  return '<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Select sheet to import</div><button class="btn-icon" onclick="closeModal()">'+ico("x",14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div style="font-size:13px;color:var(--text3);margin-bottom:14px">This file has '+sheets.length+' sheets. Choose which one contains your leads.</div>'+
+      items+
+    '</div>'+
+  '</div>';
+}
+
+window.selectSheet=function(sheetName){
+  if(!STATE.importWB)return;
+  var ws=STATE.importWB.Sheets[sheetName];
+  var rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+  if(!rows.length){showToast("No data found in sheet: "+sheetName,"warning");return;}
+  STATE.importPreview=rows;
+  STATE.importSheet=sheetName;
+  STATE.modal=renderImportModal(rows,sheetName);
+  render();
+}
+
+// Column name mapping — accepts many variations
+function mapCol(row, keys){
+  var r={};
+  Object.keys(row).forEach(function(k){
+    var kl=k.toLowerCase().replace(/[\s_\-\.]/g,"");
+    keys.forEach(function(pair){
+      if(pair[0].some(function(v){return kl===v||kl.includes(v);})){
+        if(!r[pair[1]])r[pair[1]]=String(row[k]||"").trim();
+      }
+    });
+  });
+  return r;
+}
+
+var COL_MAP=[
+  [["companyname","company","firm","organisation","organization"],"company"],
+  [["website","web","url","site"],"website"],
+  [["industry","sector","vertical"],"industry"],
+  [["location","city","place","region"],"location"],
+  [["position","role","jobtitle","jobrole","openrole","vacancy","opening"],"position"],
+  [["firstname","fname","first"],"firstName"],
+  [["lastname","lname","last","surname"],"lastName"],
+  [["designation","title","jobtitle","currenttitle"],"designation"],
+  [["email","emailid","emailaddress","mail"],"email"],
+  [["contact","phone","mobile","phonenumber","contactno","contactnumber"],"phone"],
+  [["linkedin","linkedinurl","linkedinprofile","li"],"linkedin"],
+  [["source","leadsource","foundon","platform"],"source"],
+  [["date","leaddate","dateadded","createdon"],"date"],
+  [["notes","note","comments","remarks"],"notes"],
+  [["analystname","analyst","raname","researchanalyst","ra"],"analystName"],
+  [["bdmassigned","bdm","bdmanager","managername","assignedto"],"bdmAssigned"],
+  [["salaryrange","salary","compensation","pay","salaryband"],"salaryRange"],
+  [["jobcreateddate","jobcreated","datecreated","createdate"],"jobCreatedDate"],
+  [["jobopeneddate","jobopened","dateopened","opendate","posteddate","jobposted"],"jobOpenedDate"],
+];
+
+function renderImportModal(rows, sheetName){
+  var sample=rows.slice(0,3);
+  var cols=Object.keys(rows[0]);
+  var mapped=rows.map(function(r){return mapCol(r,COL_MAP);});
+  var groups=groupImportRows(mapped);
+  var totalContacts=groups.reduce(function(s,g){return s+g.contacts.length;},0);
+  var skippedRows=rows.length-totalContacts;
+  var multiSheet=STATE.importWB&&STATE.importWB.SheetNames.length>1;
+
+  // new companies not yet in STATE
+  var newCoNames={};
+  groups.forEach(function(g){
+    if(!g.coName)return;
+    var exists=STATE.companies.find(function(c){return c.name.toLowerCase()===g.coName.toLowerCase();});
+    if(!exists)newCoNames[g.coName.toLowerCase()]=1;
+  });
+  var newCoCnt=Object.keys(newCoNames).length;
+
+  // duplicate jobs (already exist client-side)
+  var dupeCnt=0;
+  groups.forEach(function(g){
+    var exists=STATE.jobs.find(function(j){
+      return j.company_name.toLowerCase()===g.coName.toLowerCase()&&
+             j.position.toLowerCase()===g.position.toLowerCase();
+    });
+    if(exists)dupeCnt++;
+  });
+  var newJobs=groups.length-dupeCnt;
+
+  var colRows=cols.map(function(c){
+    var kl=c.toLowerCase().replace(/[\s_\-\.]/g,"");
+    var match=COL_MAP.find(function(pair){return pair[0].some(function(v){return kl===v||kl.includes(v);});});
+    var status=match?
+      '<span style="color:var(--green);font-weight:500">\u2192 '+match[1]+'</span>':
+      '<span style="color:var(--text3)">\u2014 not mapped</span>';
+    return '<tr><td style="padding:5px 10px;font-size:12.5px">'+htmlEsc(c)+'</td><td style="padding:5px 10px">'+status+'</td></tr>';
+  }).join("");
+
+  return '<div class="modal modal-w640">'+
+    '<div class="mh">'+
+      '<div>'+
+        '<div class="mt">Import Jobs from Excel</div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:3px">Sheet: <strong style="color:var(--accent)">'+htmlEsc(sheetName||"Sheet1")+'</strong>'+
+        (multiSheet?' \u00b7 <span style="cursor:pointer;color:var(--accent);text-decoration:underline" onclick="STATE.modal=renderSheetPickerModal(STATE.importWB.SheetNames);render()">Change sheet</span>':'')+
+        '</div>'+
+      '</div>'+
+      '<button class="btn-icon" onclick="closeModal()">'+ico("x",14)+'</button>'+
+    '</div>'+
+    '<div class="mb_">'+
+      '<div style="padding:12px 14px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:14px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">'+
+        '<div><div style="font-size:22px;font-weight:700;color:var(--accent)">'+newJobs+'</div><div style="color:var(--text2);font-size:11px;margin-top:2px">NEW JOBS</div></div>'+
+        '<div><div style="font-size:22px;font-weight:700;color:var(--teal)">'+totalContacts+'</div><div style="color:var(--text2);font-size:11px;margin-top:2px">CONTACTS</div></div>'+
+        '<div><div style="font-size:22px;font-weight:700;color:var(--purple)">'+newCoCnt+'</div><div style="color:var(--text2);font-size:11px;margin-top:2px">NEW COMPANIES</div></div>'+
+      '</div>'+
+      (dupeCnt?'<div style="padding:8px 12px;background:var(--amber-l);border-radius:var(--r2);margin-bottom:10px;font-size:12.5px;color:var(--amber)">\u26a0 '+dupeCnt+' job'+(dupeCnt>1?'s':'')+' already exist and will be skipped.</div>':'')+
+      (skippedRows?'<div style="padding:8px 12px;background:var(--bg);border-radius:var(--r2);margin-bottom:10px;font-size:12.5px;color:var(--text3)">'+skippedRows+' row'+(skippedRows>1?'s':'')+' skipped (no company/name).</div>':'')+
+      '<div class="fw5 f13 mb2">Column mapping</div>'+
+      '<div class="tbl-wrap mb4" style="max-height:180px;overflow-y:auto">'+
+        '<table><thead><tr><th>Your column</th><th>Maps to</th></tr></thead>'+
+        '<tbody>'+colRows+'</tbody></table>'+
+      '</div>'+
+      '<div class="fw5 f13 mb2">Preview (first 3 rows)</div>'+
+      '<div style="background:var(--bg);border-radius:var(--r2);padding:10px;font-size:12px;max-height:130px;overflow-y:auto">'+
+        sample.map(function(r){
+          var m=mapCol(r,COL_MAP);
+          return '<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap">'+
+            (m.firstName?'<span class="bdg bdg-blue">'+htmlEsc(m.firstName+(m.lastName?" "+m.lastName:""))+'</span>':"")+
+            (m.company?'<span class="bdg bdg-gray">'+htmlEsc(m.company)+'</span>':"")+
+            (m.position?'<span class="bdg bdg-gray">'+htmlEsc(m.position)+'</span>':"")+
+            (m.email?'<span class="bdg bdg-teal" style="background:var(--teal-l);color:var(--teal)">'+htmlEsc(m.email)+'</span>':"")+
+          '</div>';
+        }).join("")+
+      '</div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      (newJobs>0
+        ?'<button class="btn btn-primary" onclick="confirmImport()">'+ico("plus",13)+' Import '+newJobs+' job'+(newJobs>1?'s':'')+'</button>'
+        :'<button class="btn btn-primary" disabled style="opacity:.5;cursor:not-allowed">Nothing new to import</button>')+
+    '</div>'+
+  '</div>';
+}
+
+// ── Drop C helpers ──────────────────────────────
+function groupImportRows(mapped){
+  var groups={};var order=[];
+  var norm=function(s){return(s||"").trim().toLowerCase().replace(/\s+/g," ");};
+  mapped.forEach(function(r){
+    if(!r.company&&!r.firstName){return;}
+    var coKey=norm(r.company||"unknown");
+    var posKey=norm(r.position||"unknown");
+    var key=coKey+"||"+posKey;
+    if(!groups[key]){
+      groups[key]={
+        coName:(r.company||"").trim(),
+        website:(r.website||"").trim(),
+        industry:(r.industry||"").trim(),
+        location:(r.location||"").trim(),
+        position:(r.position||"").trim(),
+        source:(r.source||"Import").trim(),
+        salaryRange:(r.salaryRange||"").trim(),
+        jobCreatedDate:(r.jobCreatedDate||"").trim(),
+        jobOpenedDate:(r.jobOpenedDate||"").trim(),
+        bdmAssigned:(r.bdmAssigned||"").trim(),
+        analystName:(r.analystName||"").trim(),
+        contacts:[]
+      };
+      order.push(key);
+    }
+    if(r.firstName||r.email){
+      groups[key].contacts.push({
+        first_name:(r.firstName||"").trim(),
+        last_name:(r.lastName||"").trim(),
+        designation:(r.designation||"").trim(),
+        email:(r.email||"").trim(),
+        phone:(r.phone||"").trim(),
+        linkedin:(r.linkedin||"").trim()
+      });
+    }
+  });
+  return order.map(function(k){return groups[k];}).filter(function(g){return g.contacts.length>0;});
+}
+
+function renderImportProgressModal(done,total,logLines,finished,summary){
+  var pct=total>0?Math.round(done/total*100):0;
+  return '<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">'+(finished?'Import complete':'Importing\u2026')+'</div></div>'+
+    '<div class="mb_">'+
+      '<div style="margin-bottom:12px">'+
+        '<div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--text2);margin-bottom:6px">'+
+          '<span>'+(finished?'Done':'Processing job '+Math.min(done+1,total)+' of '+total)+'</span>'+
+          '<span>'+pct+'%</span>'+
+        '</div>'+
+        '<div style="height:8px;background:var(--border);border-radius:99px;overflow:hidden">'+
+          '<div style="height:100%;width:'+pct+'%;background:var(--accent);border-radius:99px;transition:width .3s"></div>'+
+        '</div>'+
+      '</div>'+
+      (finished&&summary?'<div style="padding:10px 12px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:10px;font-size:13px">'+htmlEsc(summary)+'</div>':'')+
+      '<div style="background:var(--bg);border-radius:var(--r2);padding:8px 10px;font-size:11.5px;max-height:160px;overflow-y:auto;font-family:var(--mono);color:var(--text2)" id="import-log">'+
+        (logLines.length?logLines.map(function(l){return '<div style="padding:2px 0">'+htmlEsc(l)+'</div>';}).join(''):'<div style="color:var(--text3)">Starting\u2026</div>')+
+      '</div>'+
+    '</div>'+
+    (finished?'<div class="mf"><button class="btn btn-primary" onclick="closeModal();refreshJobs().then(function(){if(STATE.user&&(STATE.user.role===\'bd\'||STATE.user.role===\'bd_lead\')){var myJobIds=STATE.jobs.filter(function(j){return j.assigned_to_bd===STATE.user.id&&j.stage===\'Unassigned\';}).map(function(j){return j.id;});if(myJobIds.length)apiPost(\'/emails/generate\',{job_ids:myJobIds}).then(function(r){showToast(r.generated+\' emails generated\',\'success\');apiGet(\'/emails?status=pending\').then(function(d){STATE.pendingEmails=d;render();});});}});">Done</button></div>':'')+
+  '</div>';
+}
+
+window.confirmImport=function(){
+  if(!STATE.importPreview||!STATE.importPreview.length){closeModal();return;}
+  var mapped=STATE.importPreview.map(function(r){return mapCol(r,COL_MAP);});
+  var groups=groupImportRows(mapped);
+  STATE.importPreview=null;
+
+  var toProcess=groups.filter(function(g){
+    return !STATE.jobs.find(function(j){
+      return j.company_name.toLowerCase()===g.coName.toLowerCase()&&
+             j.position.toLowerCase()===g.position.toLowerCase();
+    });
+  });
+  if(!toProcess.length){closeModal();showToast('All jobs already exist \u2014 nothing to import.','warning');return;}
+
+  var allEmails=[];
+  toProcess.forEach(function(g){
+    g.contacts.forEach(function(c){if(c.email)allEmails.push(c.email.toLowerCase().trim());});
+  });
+
+  function startImport(dupEmailMap){
+    STATE._pendingImport=toProcess;
+    STATE._pendingDupMap=dupEmailMap||{};
+    doImportProcess(toProcess,dupEmailMap||{});
+  }
+
+  if(allEmails.length){
+    apiPost('/jobs/check-duplicates',{emails:allEmails}).then(function(res){
+      var dupEmailMap={};
+      (res.duplicates||[]).forEach(function(d){
+        if(d.email){dupEmailMap[d.email.toLowerCase()]={
+          position:(d.job&&d.job.position)||'',
+          company:(d.job&&d.job.company&&d.job.company.name)||''
+        };}
+      });
+      if(Object.keys(dupEmailMap).length){
+        STATE._pendingImport=toProcess;
+        STATE._pendingDupMap=dupEmailMap;
+        STATE.modal=renderDuplicateWarningModal(toProcess,dupEmailMap);
+        render();
+      } else { startImport({}); }
+    }).catch(function(){startImport({});});
+  } else { startImport({}); }
+};
+
+function renderDuplicateWarningModal(groups,dupEmailMap){
+  var dupCount=Object.keys(dupEmailMap).length;
+  var items=Object.keys(dupEmailMap).slice(0,6).map(function(email){
+    var d=dupEmailMap[email];
+    return '<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">'+
+      '<span style="color:var(--amber);font-weight:600">'+htmlEsc(email)+'</span>'+
+      (d.company?' \u2014 already in <strong>'+htmlEsc(d.company)+'</strong>'+(d.position?' ('+htmlEsc(d.position)+')':''):'')+
+    '</div>';
+  }).join('');
+  return '<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">\u26a0 Duplicate emails found</div>'+
+    '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div style="padding:10px 12px;background:var(--amber-l);border-radius:var(--r2);margin-bottom:12px;font-size:13px;color:var(--amber)">'+
+        '<strong>'+dupCount+' email ID'+(dupCount>1?'s':'')+' already exist</strong> in the system. These leads will be imported but flagged as <strong>DUPLICATE</strong> for the Team Lead to review.'+
+      '</div>'+
+      items+
+      (Object.keys(dupEmailMap).length>6?'<div style="font-size:12px;color:var(--text3);padding-top:6px">+'+(Object.keys(dupEmailMap).length-6)+' more</div>':'')+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="doImportProcess(STATE._pendingImport,STATE._pendingDupMap)">Proceed (flag as duplicates)</button>'+
+    '</div>'+
+  '</div>';
+}
+
+window.doImportProcess=function(toProcess,dupEmailMap){
+  STATE.modal=null;
+  var total=toProcess.length;
+  STATE.modal=renderImportProgressModal(0,total,['Preparing batch\u2026 '+total+' jobs'],false,'');
+  render();
+
+  // ── Step 1: resolve all companies in bulk ──
+  var newCoNames={};
+  toProcess.forEach(function(g){
+    var key=g.coName.toLowerCase();
+    if(!STATE.companies.find(function(c){return c.name.toLowerCase()===key;})){
+      newCoNames[key]=g;
+    }
+  });
+  var newCoList=Object.values(newCoNames);
+
+  function buildAndSend(coCache){
+    // Build job payloads
+    var jobPayloads=toProcess.map(function(g){
+      var key=g.coName.toLowerCase();
+      var coId=coCache[key];
+      if(!coId)return null; // skip if company resolution failed
+      var groupIsDup=g.contacts.some(function(c){return c.email&&dupEmailMap[c.email.toLowerCase().trim()];});
+      var payload={
+        company_id:coId,
+        position:g.position||'(unknown)',
+        contacts:g.contacts,
+        is_duplicate:groupIsDup
+      };
+      if(g.location)payload.location=g.location;
+      if(g.source)payload.source=g.source;
+      if(g.industry)payload.industry=g.industry;
+      if(g.salaryRange)payload.salary_range=g.salaryRange;
+      if(g.jobCreatedDate)payload.job_created_date=parseExcelDateToISO(g.jobCreatedDate);
+      if(g.jobOpenedDate)payload.job_opened_date=parseExcelDateToISO(g.jobOpenedDate);
+      if(g.bdmAssigned)payload.bdm_assigned_name=g.bdmAssigned;
+      return payload;
+    }).filter(Boolean);
+
+    if(!jobPayloads.length){
+      STATE.modal=renderImportProgressModal(total,total,['No valid jobs to import.'],true,'0 jobs imported.');
+      render();return;
+    }
+
+    STATE.modal=renderImportProgressModal(0,total,['Uploading '+jobPayloads.length+' jobs in one batch\u2026'],false,'');
+    render();
+
+    // Single bulk API call
+    apiPost('/jobs/bulk',{jobs:jobPayloads}).then(function(res){
+      var summary=res.imported+' job'+(res.imported!==1?'s':'')+' imported, '+res.contacts+' contacts created.';
+      var logs=[
+        '\u2713 Batch complete',
+        'Jobs imported: '+res.imported,
+        'Contacts created: '+res.contacts,
+        (Object.keys(dupEmailMap).length?' Flagged as duplicates: '+toProcess.filter(function(g){return g.contacts.some(function(c){return c.email&&dupEmailMap[c.email.toLowerCase().trim()];});}).length:'')
+      ].filter(Boolean);
+      STATE.modal=renderImportProgressModal(res.imported,res.imported,logs,true,summary);
+      render();
+    }).catch(function(err){
+      var logs=['\u2717 Batch failed: '+err.message,'Check your data and try again.'];
+      STATE.modal=renderImportProgressModal(0,total,logs,true,'Import failed: '+err.message);
+      render();
+    });
+  }
+
+  // Build company cache from existing
+  var coCache={};
+  STATE.companies.forEach(function(c){coCache[c.name.toLowerCase()]=c.id;});
+
+  if(newCoList.length){
+    STATE.modal=renderImportProgressModal(0,total,['Creating '+newCoList.length+' new companies\u2026'],false,'');
+    render();
+    // Bulk create new companies
+    var coPayloads=newCoList.map(function(g){
+      var p={name:g.coName};
+      if(g.website)p.website=g.website;
+      if(g.industry)p.industry=g.industry;
+      if(g.location)p.location=g.location;
+      return p;
+    });
+    apiPost('/companies/bulk',{companies:coPayloads}).then(function(created){
+      created.forEach(function(c){
+        coCache[c.name.toLowerCase()]=c.id;
+        STATE.companies.push({id:c.id,name:c.name,web:'',ind:'',loc:''});
+      });
+      buildAndSend(coCache);
+    }).catch(function(err){
+      // If bulk company creation fails, fall back to individual
+      var promises=coPayloads.map(function(p){
+        return apiPost('/companies',p).then(function(c){
+          coCache[c.name.toLowerCase()]=c.id;
+          STATE.companies.push({id:c.id,name:c.name,web:'',ind:'',loc:''});
+        }).catch(function(){});
+      });
+      Promise.all(promises).then(function(){buildAndSend(coCache);});
+    });
+  } else {
+    buildAndSend(coCache);
+  }
+};
+
+
+
+// ════════════════════════════════════════════════
+// RA LEAD ENTRY FORM — Drop P
+// ════════════════════════════════════════════════
+function renderRALeadForm(){
+  var f=STATE.raForm;
+  var isEditing=!!f.editJobId;
+  var indOpts=['','Engineering','Healthcare','Legal','Accounting','Management'].map(function(v){
+    return '<option value="'+v+'"'+(f.industry===v?' selected':'')+'>'+( v||'— Select Industry —')+'</option>';
+  }).join('');
+
+  // Company info banner
+  var coBanner='';
+  if(f.coInfo){
+    var ci=f.coInfo;
+    coBanner='<div style="margin-top:6px;padding:8px 12px;background:var(--accent-l);border-radius:var(--r);font-size:12px;color:var(--text2)">'+
+      '\u2139\ufe0f <strong>'+htmlEsc(ci.name)+'</strong> already exists'+
+      (ci.job_count?' \u00b7 '+ci.job_count+' open job'+(ci.job_count!==1?'s':'')+' in system':'')+
+      (ci.bd_name?' \u00b7 Manager: <strong>'+htmlEsc(ci.bd_name)+'</strong>':'')+
+    '</div>';
+  }
+
+  // Zip suggestions dropdown
+  var zipSuggestions='';
+  if(STATE.raFormZipSuggestions&&STATE.raFormZipSuggestions.length){
+    zipSuggestions='<div style="position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);z-index:100;margin-top:2px" id="zip-suggestions">'+
+      STATE.raFormZipSuggestions.map(function(z,i){
+        return '<div class="_zip-sug" data-idx="'+i+'" style="padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px">'+
+          htmlEsc(z.display)+'</div>';
+      }).join('')+
+    '</div>';
+  }
+
+  // Contact rows
+  var contactRows=(f.contacts||[]).map(function(c,idx){
+    var dupWarning='';
+    if(c.emailDupInfo&&c.emailDupInfo.duplicate){
+      var d=c.emailDupInfo;
+      dupWarning='<div style="margin-top:4px;padding:6px 10px;background:var(--red-l);border-radius:var(--r);font-size:11.5px;color:var(--red)">'+
+        '\u26a0 Added '+d.days_ago+' day'+(d.days_ago!==1?'s':'')+' ago'+(d.added_by?' by <strong>'+htmlEsc(d.added_by)+'</strong>':'')+
+        (d.company?' at <strong>'+htmlEsc(d.company)+'</strong>':'')+'. Will be flagged duplicate.</div>';
+    } else if(c.emailStatus==='ok'){
+      dupWarning='<div style="margin-top:3px;font-size:11px;color:var(--green)">\u2713 Email looks good</div>';
+    }
+    return '<div style="background:var(--bg);border:1px solid var(--border2);border-radius:var(--r2);padding:14px;margin-bottom:10px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+        '<div style="font-weight:600;font-size:12px;color:var(--text2)">Contact '+(idx+1)+(idx===0?' <span style="font-size:10px;color:var(--green);background:var(--green-l);padding:1px 6px;border-radius:5px;margin-left:4px">PRIMARY</span>':'')+'</div>'+
+        (idx>0?'<button onclick="raFormRemoveContact('+idx+')" style="background:transparent;border:0;color:var(--red);font-size:12px;cursor:pointer">\u2715 Remove</button>':'')+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">'+
+        '<input class="inp" placeholder="First name *" value="'+htmlEsc(c.firstName||'')+'" oninput="raFormUpdateContact('+idx+',\'firstName\',this.value)"/>'+
+        '<input class="inp" placeholder="Last name" value="'+htmlEsc(c.lastName||'')+'" oninput="raFormUpdateContact('+idx+',\'lastName\',this.value)"/>'+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">'+
+        '<input class="inp" placeholder="Designation" value="'+htmlEsc(c.designation||'')+'" oninput="raFormUpdateContact('+idx+',\'designation\',this.value)"/>'+
+        '<div>'+
+          '<input class="inp" placeholder="Email ID *" value="'+htmlEsc(c.email||'')+'" oninput="raFormUpdateContact('+idx+',\'email\',this.value)" onblur="raFormCheckEmail('+idx+',this.value)"/>'+
+          dupWarning+
+        '</div>'+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
+        '<input class="inp" placeholder="Phone" value="'+htmlEsc(c.phone||'')+'" oninput="raFormUpdateContact('+idx+',\'phone\',this.value)"/>'+
+        '<input class="inp" placeholder="LinkedIn URL (POC\'s profile)" value="'+htmlEsc(c.linkedin||'')+'" oninput="raFormUpdateContact('+idx+',\'linkedin\',this.value)"/>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+
+  return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:20px;margin-bottom:8px">'+
+    '<div style="font-weight:700;font-size:14px;margin-bottom:16px;color:var(--text)">'+(isEditing?'\u270f\ufe0f Edit Lead':'Add New Lead')+'</div>'+
+
+    // ── Company ──
+    '<div style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Company</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
+      '<div>'+
+        '<div style="position:relative">'+
+          '<input class="inp" id="ra-co-name" placeholder="Company name *" value="'+htmlEsc(f.coName||'')+'" autocomplete="off" oninput="raFormCoSearch(this.value)" onblur="raFormCoBlur()"/>'+
+          (STATE.raFormCoSuggestions&&STATE.raFormCoSuggestions.length?
+            '<div style="position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);z-index:100;max-height:200px;overflow-y:auto;margin-top:2px" id="co-suggestions">'+
+              STATE.raFormCoSuggestions.map(function(co,i){
+                return '<div class="_co-sug" data-idx="'+i+'" style="padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border)">'+
+                  '<div style="font-weight:500;font-size:13px">'+htmlEsc(co.name)+'</div>'+
+                  '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(co.industry||'')+(co.location?' \u00b7 '+htmlEsc(co.location):'')+( co.job_count?' \u00b7 '+co.job_count+' jobs':'')+( co.bd_name?' \u00b7 '+htmlEsc(co.bd_name):'')+'</div>'+
+                '</div>';
+              }).join('')+
+            '</div>':'')+
+        '</div>'+
+        coBanner+
+      '</div>'+
+      '<input class="inp" placeholder="Website" value="'+htmlEsc(f.website||'')+'" oninput="raFormSet(\'website\',this.value)"/>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
+      '<select class="sel" onchange="raFormSet(\'industry\',this.value)">'+indOpts+'</select>'+
+      '<div>'+
+        '<div style="position:relative">'+
+          '<input class="inp" id="ra-zip" placeholder="Zip code (e.g. 10001)" value="'+htmlEsc(f.zipCode||'')+'" autocomplete="off" oninput="raFormZipSearch(this.value)" onblur="raFormZipBlur()"/>'+
+          zipSuggestions+
+        '</div>'+
+        '<div style="font-size:11px;color:var(--text3);margin-top:3px">Type zip to auto-fill location</div>'+
+      '</div>'+
+    '</div>'+
+    '<div style="margin-bottom:16px">'+
+      '<input class="inp" id="ra-location" placeholder="Location (City, State) *" value="'+htmlEsc(f.location||'')+'" oninput="raFormSet(\'location\',this.value)" style="border-color:'+(f.location?'var(--border)':'')+'"/>'+
+      (!f.location?'<div style="font-size:11px;color:var(--red);margin-top:3px">Location is required</div>':'')+
+    '</div>'+
+
+    // ── Job ──
+    '<div style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Job Details</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
+      '<input class="inp" placeholder="Job title *" value="'+htmlEsc(f.position||'')+'" oninput="raFormSet(\'position\',this.value)"/>'+
+      '<input class="inp" placeholder="Job URL" value="'+htmlEsc(f.jobUrl||'')+'" oninput="raFormSet(\'jobUrl\',this.value)"/>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
+      '<input class="inp" placeholder="Salary range (e.g. $80,000)" value="'+htmlEsc(f.salaryRange||'')+'" oninput="raFormSet(\'salaryRange\',this.value)"/>'+
+      '<input class="inp" placeholder="Source (LinkedIn, Indeed...)" value="'+htmlEsc(f.source||'')+'" oninput="raFormSet(\'source\',this.value)"/>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">'+
+      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Job Created Date</label><input type="date" class="inp" value="'+htmlEsc(f.jobCreatedDate||'')+'" oninput="raFormSet(\'jobCreatedDate\',this.value)"/></div>'+
+      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Job Opened Date</label><input type="date" class="inp" value="'+htmlEsc(f.jobOpenedDate||'')+'" oninput="raFormSet(\'jobOpenedDate\',this.value)"/></div>'+
+    '</div>'+
+
+    // ── Contacts ──
+    '<div style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Contacts / POCs</div>'+
+    contactRows+
+    '<button onclick="raFormAddContact()" style="background:transparent;border:1.5px dashed var(--border2);color:var(--text3);padding:8px 16px;border-radius:8px;font-size:12px;cursor:pointer;width:100%;margin-bottom:16px">+ Add another contact</button>'+
+
+    // ── Actions ──
+    '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;border-top:1px solid var(--border)">'+
+      '<button onclick="raFormClear()" style="background:transparent;border:1px solid var(--border);color:var(--text3);padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer">'+(isEditing?'Cancel edit':'Clear form')+'</button>'+
+      '<button onclick="raFormSubmit()" style="background:var(--accent);color:#fff;border:0;padding:10px 24px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer'+(STATE.raFormSubmitting?';opacity:.6':'')+'">'+( STATE.raFormSubmitting?'Saving\u2026':(isEditing?'Save changes':'Submit Lead'))+'</button>'+
+    '</div>'+
+  '</div>';
+}
+
+// ── RA Form actions ──────────────────────────────
+window.raFormSet=function(field,val){
+  STATE.raForm[field]=val;
+};
+
+window.raFormDetectTimezone=function(location){
+  if(!location)return;
+  var tzMap={ny:'EST',nj:'EST',fl:'EST',ma:'EST',pa:'EST',ga:'EST',nc:'EST',sc:'EST',va:'EST',ct:'EST',oh:'EST',mi:'EST',ky:'EST',tn:'EST',tx:'CST',il:'CST',mn:'CST',wi:'CST',mo:'CST',ok:'CST',la:'CST',ar:'CST',ms:'CST',al:'CST',co:'MST',az:'MST',nm:'MST',ut:'MST',ca:'PST',wa:'PST',or:'PST',nv:'PST'};
+  var loc=location.toLowerCase();
+  var tz='EST';
+  Object.keys(tzMap).forEach(function(state){if(loc.indexOf(state)>-1)tz=tzMap[state];});
+  STATE.raForm.timezone=tz;
+  var el=document.querySelector('input[placeholder="Timezone (auto-detected)"]');
+  if(el)el.value=tz;
+};
+
+window.raFormEdit=function(jobId){
+  var j=STATE.jobs.find(function(x){return x.id===jobId;});
+  if(!j)return;
+  var cs=STATE.contacts.filter(function(c){return c.job_id===jobId;})
+    .sort(function(a,b){return (b.is_primary?1:0)-(a.is_primary?1:0);});
+  var co=STATE.companies.find(function(c){return c.id===j.company_id;})||{};
+  STATE.raForm={
+    editJobId:jobId,
+    coName:j.company_name||'',coId:j.company_id,coInfo:null,
+    website:co.web||'',industry:j.industry||co.ind||'',
+    location:j.location||'',zipCode:'',
+    position:j.position||'',jobUrl:j.job_url||'',
+    salaryRange:j.salary_range||'',source:j.source||'',
+    jobCreatedDate:j.job_created_date||'',jobOpenedDate:j.job_opened_date||'',
+    contacts:cs.length?cs.map(function(c){
+      return{firstName:c.first_name,lastName:c.last_name,designation:c.designation,
+             email:c.email,phone:c.phone,linkedin:c.linkedin,emailStatus:'',emailDupInfo:null};
+    }):[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}]
+  };
+  STATE.raFormCoSuggestions=[];
+  STATE.raFormZipSuggestions=[];
+  // Scroll to top of page
+  window.scrollTo(0,0);
+  render();
+};
+
+window.raFormZipSearch=function(val){
+  STATE.raForm.zipCode=val;
+  if(!val||val.length<3){STATE.raFormZipSuggestions=[];render();return;}
+  apiGet('/lookup/zipcode?zip='+encodeURIComponent(val)).then(function(results){
+    STATE.raFormZipSuggestions=results;
+    render();
+    setTimeout(function(){
+      var items=document.querySelectorAll('._zip-sug');
+      Array.prototype.forEach.call(items,function(el){
+        el.addEventListener('mouseenter',function(){this.style.background='var(--accent-l)';});
+        el.addEventListener('mouseleave',function(){this.style.background='';});
+        el.addEventListener('click',function(){
+          var idx=parseInt(this.getAttribute('data-idx'));
+          var z=STATE.raFormZipSuggestions[idx];
+          if(!z)return;
+          STATE.raForm.location=z.display;
+          STATE.raForm.zipCode=z.zip;
+          STATE.raFormZipSuggestions=[];
+          // Update location field directly
+          var el2=document.getElementById('ra-location');
+          if(el2)el2.value=z.display;
+          render();
+        });
+      });
+    },50);
+  }).catch(function(){STATE.raFormZipSuggestions=[];});
+};
+
+window.raFormZipBlur=function(){
+  setTimeout(function(){STATE.raFormZipSuggestions=[];render();},200);
+};
+
+window.raFormCoSearch=function(val){
+  STATE.raForm.coName=val;
+  STATE.raForm.coId=null;
+  STATE.raForm.coInfo=null;
+  if(!val||val.length<3){STATE.raFormCoSuggestions=[];render();return;}
+  apiGet('/companies/search?q='+encodeURIComponent(val)).then(function(results){
+    STATE.raFormCoSuggestions=results;
+    render();
+    // Bind click handlers after render
+    setTimeout(function(){
+      var items=document.querySelectorAll('._co-sug');
+      Array.prototype.forEach.call(items,function(el){
+        el.addEventListener('mouseenter',function(){this.style.background='var(--accent-l)';});
+        el.addEventListener('mouseleave',function(){this.style.background='';});
+        el.addEventListener('click',function(){
+          var idx=parseInt(this.getAttribute('data-idx'));
+          var co=STATE.raFormCoSuggestions[idx];
+          if(!co)return;
+          STATE.raForm.coName=co.name;
+          STATE.raForm.coId=co.id;
+          STATE.raForm.coInfo=co;
+          STATE.raForm.industry=co.industry||STATE.raForm.industry;
+          STATE.raForm.location=co.location||STATE.raForm.location;
+          STATE.raForm.website=co.website||STATE.raForm.website;
+          STATE.raFormCoSuggestions=[];
+          if(co.location)raFormDetectTimezone(co.location);
+          render();
+        });
+      });
+    },50);
+  }).catch(function(){STATE.raFormCoSuggestions=[];});
+};
+
+window.raFormCoBlur=function(){
+  setTimeout(function(){STATE.raFormCoSuggestions=[];render();},200);
+};
+
+window.raFormCheckEmail=function(idx,email){
+  if(!email||email.indexOf('@')<0)return;
+  var contacts=STATE.raForm.contacts;
+  apiPost('/contacts/check-email',{email:email}).then(function(res){
+    contacts[idx].emailStatus=res.duplicate?'dup':'ok';
+    contacts[idx].emailDupInfo=res;
+    render();
+  }).catch(function(){});
+};
+
+window.raFormUpdateContact=function(idx,field,val){
+  STATE.raForm.contacts[idx][field]=val;
+  if(field==='email')STATE.raForm.contacts[idx].emailStatus='';
+};
+
+window.raFormAddContact=function(){
+  STATE.raForm.contacts.push({firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null});
+  render();
+};
+
+window.raFormRemoveContact=function(idx){
+  STATE.raForm.contacts.splice(idx,1);
+  render();
+};
+
+window.raFormClear=function(){
+  STATE.raForm={coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',position:'',jobUrl:'',jobCreatedDate:'',jobOpenedDate:'',salaryRange:'',source:'',editJobId:null,contacts:[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}]};
+  STATE.raFormCoSuggestions=[];
+  STATE.raFormZipSuggestions=[];
+  render();
+};
+
+window.raFormSubmit=function(){
+  var f=STATE.raForm;
+  if(!f.coName){showToast('Company name is required','warning');return;}
+  if(!f.location){showToast('Location is required','warning');return;}
+  if(!f.position){showToast('Job title is required','warning');return;}
+  var validContacts=f.contacts.filter(function(c){return c.firstName||c.email;});
+  if(!validContacts.length){showToast('At least one contact is required','warning');return;}
+
+  STATE.raFormSubmitting=true;render();
+
+  function doSave(coId){
+    var hasDup=validContacts.some(function(c){return c.emailDupInfo&&c.emailDupInfo.duplicate;});
+    var payload={
+      company_id:coId,
+      position:f.position,
+      stage:'Unassigned',
+      source:f.source||'Manual',
+      location:f.location||undefined,
+      industry:f.industry||undefined,
+      salary_range:f.salaryRange||undefined,
+      job_created_date:f.jobCreatedDate||undefined,
+      job_opened_date:f.jobOpenedDate||undefined,
+      job_url:f.jobUrl||undefined,
+      is_duplicate:hasDup,
+      contacts:validContacts.map(function(c){
+        return{first_name:c.firstName,last_name:c.lastName,designation:c.designation,email:c.email,phone:c.phone,linkedin:c.linkedin};
+      })
+    };
+    var isEdit=!!f.editJobId;
+    var apiCall=isEdit?apiPut('/jobs/'+f.editJobId,payload):apiPost('/jobs',payload);
+    apiCall.then(function(){
+      showToast(isEdit?'Lead updated':'Lead submitted successfully','success');
+      STATE.raFormSubmitting=false;
+      raFormClear();
+      refreshJobs();
+    }).catch(function(e){
+      STATE.raFormSubmitting=false;
+      showToast('Failed: '+e.message,'error');
+      render();
+    });
+  }
+
+  if(f.coId){
+    doSave(f.coId);
+  } else {
+    // Create new company first
+    var cp={name:f.coName};
+    if(f.website)cp.website=f.website;
+    if(f.industry)cp.industry=f.industry;
+    if(f.location)cp.location=f.location;
+    apiPost('/companies',cp).then(function(co){
+      STATE.companies.push({id:co.id,name:co.name,web:co.website||'',ind:co.industry||'',loc:co.location||''});
+      doSave(co.id);
+    }).catch(function(e){
+      STATE.raFormSubmitting=false;
+      showToast('Failed to create company: '+e.message,'error');
+      render();
+    });
+  }
+};
+
+// ── Export leads (RA Lead / Admin) ───────────────
+window.openExportLeads=function(){
+  var today=todayIST();
+  var monthAgo=new Date();monthAgo.setMonth(monthAgo.getMonth()-1);
+  var fromDefault=monthAgo.toISOString().split('T')[0];
+  STATE.modal='<div class="modal modal-w400">'+
+    '<div class="mh"><div class="mt">Export Leads</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div class="g2 mb3">'+
+        '<div class="fgrp"><label class="flbl">From date</label><input type="date" class="inp" id="exp-from" value="'+fromDefault+'"/></div>'+
+        '<div class="fgrp"><label class="flbl">To date</label><input type="date" class="inp" id="exp-to" value="'+today+'"/></div>'+
+      '</div>'+
+      '<div class="fgrp"><label class="flbl">Stage filter</label>'+
+        '<select class="sel" id="exp-stage">'+
+          '<option value="">All stages</option>'+
+          ['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'].map(function(s){return'<option value="'+s+'">'+s+'</option>';}).join('')+
+        '</select>'+
+      '</div>'+
+    '</div>'+
+    '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="submitExportLeads()">'+ico('dl',13)+' Download Excel</button></div>'+
+  '</div>';
+  render();
+};
+
+window.submitExportLeads=function(){
+  var from=(document.getElementById('exp-from')||{}).value||'';
+  var to=(document.getElementById('exp-to')||{}).value||'';
+  var stage=(document.getElementById('exp-stage')||{}).value||'';
+  var url='/jobs/export?from='+from+'&to='+to+(stage?'&stage='+stage:'');
+  closeModal();
+  showToast('Preparing export\u2026','info');
+  apiGet(url).then(function(data){
+    if(!data||!data.length){showToast('No leads found for selected range','warning');return;}
+    // Build XLSX using the XLSX library
+    var rows=[['Date','Company','Website','Industry','Location','Timezone','Freshness','Job Title','Job Created Date','Job Opened Date','Salary Range','Source','BDM Assigned','Stage','First Name','Last Name','Designation','Email','Phone','LinkedIn']];
+    data.forEach(function(j){
+      var co=j.company||{};
+      var contacts=j.contacts||[];
+      if(!contacts.length)contacts=[{}];
+      contacts.forEach(function(c,ci){
+        rows.push([
+          ci===0?(j.created_at||'').slice(0,10):'',
+          ci===0?htmlEsc(co.name||''):'',
+          ci===0?htmlEsc(co.website||''):'',
+          ci===0?htmlEsc(j.industry||co.industry||''):'',
+          ci===0?htmlEsc(j.location||co.location||''):'',
+          ci===0?htmlEsc(j.timezone||''):'',
+          ci===0?htmlEsc(j.freshness||''):'',
+          ci===0?htmlEsc(j.position||''):'',
+          ci===0?htmlEsc(j.job_created_date||''):'',
+          ci===0?htmlEsc(j.job_opened_date||''):'',
+          ci===0?htmlEsc(j.salary_range||''):'',
+          ci===0?htmlEsc(j.source||''):'',
+          ci===0?htmlEsc(j.bdm_assigned_name||''):'',
+          ci===0?htmlEsc(j.stage||''):'',
+          htmlEsc(c.first_name||''),
+          htmlEsc(c.last_name||''),
+          htmlEsc(c.designation||''),
+          htmlEsc(c.email||''),
+          htmlEsc(c.phone||''),
+          htmlEsc(c.linkedin||'')
+        ]);
+      });
+    });
+    var ws=XLSX.utils.aoa_to_sheet(rows);
+    var wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,'Leads');
+    XLSX.writeFile(wb,'FuteGlobal_Leads_'+from+'_to_'+to+'.xlsx');
+    showToast(data.length+' leads exported','success');
+  }).catch(function(e){showToast('Export failed: '+e.message,'error');});
+};
+
+// ════════════════════════════════════════════════
+// INSIGHTS TAB — RA activity + RA Lead team view
+// ════════════════════════════════════════════════
+function renderInsights(){
+  var u=STATE.user;
+  var isRALead=(u.role==='ra_lead'||u.role==='admin');
+  var selectedRA=STATE.insightsSelectedRA;
+  var data=STATE.insightsData;
+
+  // If RA Lead and no RA selected, show RA list
+  if(isRALead&&!selectedRA){
+    var ras=STATE.users.filter(function(x){return x.role==='ra';});
+    var raCards=ras.map(function(ra){
+      // Quick stats from STATE.jobs (last 30 days approx)
+      var raJobs=STATE.jobs.filter(function(j){return j.created_by===ra.id;});
+      return '<div onclick="loadRAInsights(\''+ra.id+'\')" style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px 16px;display:flex;align-items:center;gap:14px;margin-bottom:10px;cursor:pointer;transition:background .1s">'+
+        av(ra,'36')+
+        '<div style="flex:1">'+
+          '<div style="font-weight:600;font-size:13.5px">'+htmlEsc(ra.name)+'</div>'+
+          '<div style="font-size:11.5px;color:var(--text3);margin-top:2px">'+htmlEsc(ra.email)+'</div>'+
+        '</div>'+
+        '<div style="text-align:center;min-width:60px">'+
+          '<div style="font-size:20px;font-weight:700;color:var(--accent)">'+raJobs.length+'</div>'+
+          '<div style="font-size:10px;color:var(--text3)">leads</div>'+
+        '</div>'+
+        '<div style="color:var(--text3);font-size:18px">\u203a</div>'+
+      '</div>';
+    }).join('');
+    return '<div class="page">'+
+      '<div class="ph"><div class="ptitle">Insights</div><div class="psub">Team activity \u00b7 '+ras.length+' RAs</div></div>'+
+      (raCards||'<div style="padding:40px;text-align:center;color:var(--text3)">No RAs in the system yet.</div>')+
+    '</div>';
+  }
+
+  // Show individual RA insights
+  var raUser=isRALead?STATE.users.find(function(x){return x.id===selectedRA;}):u;
+  var d=data||{total_month:0,total_week:0,total_today:0,duplicates:0,last_7_days:{},by_industry:{},by_timezone:{},by_freshness:{},by_stage:{}};
+
+  // Bar chart for last 7 days
+  var l7=d.last_7_days||{};
+  var l7keys=Object.keys(l7);
+  var l7max=Math.max(1,Math.max.apply(null,l7keys.map(function(k){return l7[k];})));
+  var barChart=l7keys.map(function(k){
+    var val=l7[k];
+    var pct=Math.round(val/l7max*100);
+    var day=new Date(k).toLocaleDateString('en-US',{weekday:'short'});
+    return '<div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1">'+
+      '<div style="font-size:11px;font-weight:600;color:var(--accent)">'+val+'</div>'+
+      '<div style="width:100%;background:var(--border);border-radius:4px;height:48px;display:flex;align-items:flex-end">'+
+        '<div style="width:100%;background:var(--accent);border-radius:4px;height:'+pct+'%;min-height:'+(val>0?'4px':'0')+'"></div>'+
+      '</div>'+
+      '<div style="font-size:10px;color:var(--text3)">'+day+'</div>'+
+    '</div>';
+  }).join('');
+
+  function categoryRows(obj,isIndustry){
+    var src=isIndustry?normalizeIndustryMap(obj):obj;
+    var entries=Object.keys(src).map(function(k){return{k:k,v:src[k]};}).sort(function(a,b){return b.v-a.v;});
+    var total=entries.reduce(function(s,e){return s+e.v;},0)||1;
+    return entries.map(function(e){
+      var pct=Math.round(e.v/total*100);
+      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'+
+        '<div style="width:90px;font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+htmlEsc(e.k)+'</div>'+
+        '<div style="flex:1;background:var(--border);border-radius:99px;height:6px">'+
+          '<div style="width:'+pct+'%;background:var(--accent);border-radius:99px;height:6px"></div>'+
+        '</div>'+
+        '<div style="width:36px;text-align:right;font-size:12px;font-weight:600">'+e.v+'</div>'+
+      '</div>';
+    }).join('');
+  }
+
+  return '<div class="page">'+
+    '<div class="ph"><div class="flex aic gap3">'+
+      (isRALead?'<button onclick="STATE.insightsSelectedRA=null;STATE.insightsData=null;render()" style="background:transparent;border:0;color:var(--text3);font-size:22px;cursor:pointer">\u2190</button>':'')+
+      (raUser?av(raUser,'40'):'')+
+      '<div><div class="ptitle" style="margin:0">'+(raUser?htmlEsc(raUser.name):'My')+' Insights</div>'+
+        '<div class="psub" style="margin:0">Last 30 days activity</div></div>'+
+    '</div></div>'+
+
+    // ── Top stats ──
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:18px">'+
+      [['Today',d.total_today,'var(--accent)'],['This Week',d.total_week,'var(--teal)'],['This Month',d.total_month,'var(--purple)'],['Duplicates',d.duplicates,'var(--amber)']].map(function(s){
+        return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;text-align:center">'+
+          '<div style="font-size:28px;font-weight:700;color:'+s[2]+'">'+s[1]+'</div>'+
+          '<div style="font-size:12px;color:var(--text3);margin-top:3px">'+s[0]+'</div>'+
+        '</div>';
+      }).join('')+
+    '</div>'+
+
+    // ── Last 7 days bar chart ──
+    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:16px;margin-bottom:14px">'+
+      '<div style="font-weight:600;font-size:13px;margin-bottom:12px">Last 7 days</div>'+
+      '<div style="display:flex;gap:6px;align-items:flex-end">'+barChart+'</div>'+
+    '</div>'+
+
+    // ── Category breakdowns ──
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px">'+
+        '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Industry</div>'+
+        categoryRows(d.by_industry,true)+
+      '</div>'+
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px">'+
+        '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Timezone</div>'+
+        categoryRows(d.by_timezone)+
+      '</div>'+
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px">'+
+        '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Freshness</div>'+
+        categoryRows(d.by_freshness)+
+      '</div>'+
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px">'+
+        '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Stage</div>'+
+        categoryRows(d.by_stage)+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+
+window.loadRAInsights=function(raId){
+  STATE.insightsSelectedRA=raId;
+  STATE.insightsData=null;
+  render();
+  apiGet('/insights/ra/'+raId).then(function(d){
+    STATE.insightsData=d;render();
+  }).catch(function(e){showToast('Could not load insights: '+e.message,'error');});
+};
+
+// Auto-load insights for RA on page visit
+function loadMyInsights(){
+  var u=STATE.user;
+  if(u&&u.role==='ra'){
+    apiGet('/insights/ra/'+u.id).then(function(d){STATE.insightsData=d;render();}).catch(function(){});
+  }
+}
+
+// ════════════════════════════════════════════════
+// RESEARCH SECTION — inside job detail modal
+// ════════════════════════════════════════════════
+function renderResearchSection(j, canEdit){
+  var r=j.research||{};
+  var company=r.company||{};
+  var outreach=r.outreach||{};
+
+  var fundingOpts=['','Unknown','Pre-seed','Seed','Series A','Series B','Series C','Series D+','Public','Private/Bootstrapped'].map(function(v){
+    return '<option value="'+v+'"'+(company.funding===v?' selected':'')+'>'+( v||'— Select —')+'</option>';
+  }).join('');
+  var headcountOpts=['','1-10','11-50','51-200','201-500','500+'].map(function(v){
+    return '<option value="'+v+'"'+(company.headcount===v?' selected':'')+'>'+( v||'— Select —')+'</option>';
+  }).join('');
+  var hiringOpts=['','Low','Medium','High'].map(function(v){
+    return '<option value="'+v+'"'+(company.hiring_volume===v?' selected':'')+'>'+( v||'— Select —')+'</option>';
+  }).join('');
+
+  // Contact intel rows
+  var cs=(j.contacts||[]);
+  var contactIntel=cs.map(function(c,idx){
+    var ci=(r.contacts||[])[idx]||{};
+    var senOpts=['','Junior','Mid','Senior','Director','VP','C-Level'].map(function(v){
+      return '<option value="'+v+'"'+(ci.seniority===v?' selected':'')+'>'+( v||'— Select —')+'</option>';
+    }).join('');
+    var dmOpts=['','Yes','No','Unknown'].map(function(v){
+      return '<option value="'+v+'"'+(ci.decision_maker===v?' selected':'')+'>'+( v||'— Select —')+'</option>';
+    }).join('');
+    var timeOpts=['','Morning','Afternoon','Evening'].map(function(v){
+      return '<option value="'+v+'"'+(ci.best_time===v?' selected':'')+'>'+( v||'— Select —')+'</option>';
+    }).join('');
+    var cName=escHtml((c.first_name||'')+' '+(c.last_name||'')).trim();
+
+    if(!canEdit){
+      // Read-only for BD
+      if(!ci.seniority&&!ci.decision_maker&&!ci.best_time&&!ci.notes)return '';
+      return '<div style="padding:8px 0;border-bottom:1px solid var(--border)">'+
+        '<div style="font-weight:500;font-size:12px;margin-bottom:4px">'+cName+'</div>'+
+        '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--text2)">'+
+          (ci.seniority?'<span>\ud83d\udcbc '+htmlEsc(ci.seniority)+'</span>':'')+
+          (ci.decision_maker?'<span>\ud83d\udd11 Decision maker: '+htmlEsc(ci.decision_maker)+'</span>':'')+
+          (ci.best_time?'<span>\u23f0 Best time: '+htmlEsc(ci.best_time)+'</span>':'')+
+          (ci.notes?'<div style="width:100%;margin-top:3px;color:var(--text3)">'+htmlEsc(ci.notes)+'</div>':'')+
+        '</div>'+
+      '</div>';
+    }
+
+    return '<div style="padding:10px 0;border-bottom:1px solid var(--border)">'+
+      '<div style="font-weight:500;font-size:12px;margin-bottom:8px;color:var(--text2)">'+cName+'</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:6px">'+
+        '<div><label style="font-size:10px;color:var(--text3)">Seniority</label><select class="sel" style="font-size:12px;padding:5px 8px" onchange="researchUpdateContact(\''+j.id+'\','+idx+',\'seniority\',this.value)">'+senOpts+'</select></div>'+
+        '<div><label style="font-size:10px;color:var(--text3)">Decision maker?</label><select class="sel" style="font-size:12px;padding:5px 8px" onchange="researchUpdateContact(\''+j.id+'\','+idx+',\'decision_maker\',this.value)">'+dmOpts+'</select></div>'+
+        '<div><label style="font-size:10px;color:var(--text3)">Best time</label><select class="sel" style="font-size:12px;padding:5px 8px" onchange="researchUpdateContact(\''+j.id+'\','+idx+',\'best_time\',this.value)">'+timeOpts+'</select></div>'+
+      '</div>'+
+      '<input class="inp" style="font-size:12px" placeholder="Notes about this contact..." value="'+htmlEsc(ci.notes||'')+'" oninput="researchUpdateContact(\''+j.id+'\','+idx+',\'notes\',this.value)"/>'+
+    '</div>';
+  }).join('');
+
+  if(!canEdit){
+    // BD read-only view
+    var hasData=company.funding||company.headcount||company.notes||company.tech_stack||outreach.angle||outreach.avoid;
+    if(!hasData&&!contactIntel.trim())return '';
+    return '<div style="background:var(--bg);border:1px solid var(--border2);border-radius:var(--r2);padding:14px;margin-top:14px">'+
+      '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">\ud83d\udd2c RA Research</div>'+
+      (company.funding||company.headcount||company.hiring_volume||company.tech_stack||company.notes?
+        '<div style="margin-bottom:10px">'+
+          '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Company</div>'+
+          '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--text2)">'+
+            (company.funding?'<span style="background:var(--accent-l);color:var(--accent);padding:2px 8px;border-radius:6px">'+htmlEsc(company.funding)+'</span>':'')+
+            (company.headcount?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">'+htmlEsc(company.headcount)+' employees</span>':'')+
+            (company.hiring_volume?'<span style="background:var(--green-l);color:var(--green);padding:2px 8px;border-radius:6px">Hiring: '+htmlEsc(company.hiring_volume)+'</span>':'')+
+          '</div>'+
+          (company.tech_stack?'<div style="font-size:12px;color:var(--text2);margin-top:6px">Tech: '+htmlEsc(company.tech_stack)+'</div>':'')+
+          (company.notes?'<div style="font-size:12px;color:var(--text2);margin-top:6px;padding:8px;background:var(--card);border-radius:var(--r)">'+htmlEsc(company.notes)+'</div>':'')+
+        '</div>':'')+
+      (contactIntel?'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Contacts</div>'+contactIntel+'</div>':'')+
+      (outreach.angle||outreach.avoid?
+        '<div>'+
+          '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Outreach notes</div>'+
+          (outreach.angle?'<div style="font-size:12px;color:var(--text2);margin-bottom:4px">\ud83c\udfaf Angle: '+htmlEsc(outreach.angle)+'</div>':'')+
+          (outreach.avoid?'<div style="font-size:12px;color:var(--red)">\u26d4 Avoid: '+htmlEsc(outreach.avoid)+'</div>':'')+
+        '</div>':'')+
+    '</div>';
+  }
+
+  // RA editable view
+  return '<div style="border-top:2px solid var(--border2);margin-top:18px;padding-top:16px">'+
+    '<div style="font-weight:700;font-size:13px;margin-bottom:14px">\ud83d\udd2c Research Notes</div>'+
+
+    '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Company Intel</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'+
+      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Funding stage</label><select class="sel" style="font-size:12px" id="res-funding" onchange="researchUpdate(\''+j.id+'\',\'company\',\'funding\',this.value)">'+fundingOpts+'</select></div>'+
+      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Headcount</label><select class="sel" style="font-size:12px" id="res-headcount" onchange="researchUpdate(\''+j.id+'\',\'company\',\'headcount\',this.value)">'+headcountOpts+'</select></div>'+
+      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Hiring volume</label><select class="sel" style="font-size:12px" id="res-hiring" onchange="researchUpdate(\''+j.id+'\',\'company\',\'hiring_volume\',this.value)">'+hiringOpts+'</select></div>'+
+    '</div>'+
+    '<div class="fgrp mb3"><label class="flbl">Tech stack (comma separated)</label><input class="inp" style="font-size:12px" id="res-tech" placeholder="e.g. Salesforce, SAP, Oracle" value="'+htmlEsc(company.tech_stack||'')+'" oninput="researchUpdate(\''+j.id+'\',\'company\',\'tech_stack\',this.value)"/></div>'+
+    '<div class="fgrp mb4"><label class="flbl">Company notes / recent news</label><textarea class="txta w100" style="min-height:60px;font-size:12px" id="res-notes" oninput="researchUpdate(\''+j.id+'\',\'company\',\'notes\',this.value)" placeholder="Any relevant company news, context...">'+htmlEsc(company.notes||'')+'</textarea></div>'+
+
+    (cs.length?
+      '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Contact Intel</div>'+
+      contactIntel:'') +
+
+    '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 10px">Outreach Notes</div>'+
+    '<div class="fgrp mb2"><label class="flbl">Recommended angle</label><input class="inp" style="font-size:12px" placeholder="What angle to use in outreach..." value="'+htmlEsc(outreach.angle||'')+'" oninput="researchUpdate(\''+j.id+'\',\'outreach\',\'angle\',this.value)"/></div>'+
+    '<div class="fgrp mb3"><label class="flbl">What to avoid</label><input class="inp" style="font-size:12px" placeholder="Topics or approaches to avoid..." value="'+htmlEsc(outreach.avoid||'')+'" oninput="researchUpdate(\''+j.id+'\',\'outreach\',\'avoid\',this.value)"/></div>'+
+
+    '<div style="display:flex;justify-content:flex-end;padding-top:10px;border-top:1px solid var(--border2)">'+
+      '<button onclick="saveResearch(\''+j.id+'\')" class="btn btn-primary btn-sm">\ud83d\udcbe Save research</button>'+
+    '</div>'+
+  '</div>';
+}
+
+// ── Research state management ──────────────────
+if(!window._researchDraft)window._researchDraft={};
+
+window.researchUpdate=function(jobId,section,field,val){
+  if(!window._researchDraft[jobId])window._researchDraft[jobId]=JSON.parse(JSON.stringify(STATE.jobs.find(function(j){return j.id===jobId;})||{}).research||'{}');
+  if(!window._researchDraft[jobId][section])window._researchDraft[jobId][section]={};
+  window._researchDraft[jobId][section][field]=val;
+};
+
+window.researchUpdateContact=function(jobId,idx,field,val){
+  if(!window._researchDraft[jobId])window._researchDraft[jobId]={};
+  if(!window._researchDraft[jobId].contacts)window._researchDraft[jobId].contacts=[];
+  while(window._researchDraft[jobId].contacts.length<=idx)window._researchDraft[jobId].contacts.push({});
+  window._researchDraft[jobId].contacts[idx][field]=val;
+};
+
+window.saveResearch=function(jobId){
+  var draft=window._researchDraft[jobId];
+  if(!draft){showToast('Nothing to save','warning');return;}
+  // Merge with existing research
+  var j=STATE.jobs.find(function(x){return x.id===jobId;})||{};
+  var merged=Object.assign({},j.research||{},draft);
+  if(draft.company)merged.company=Object.assign({},( j.research&&j.research.company)||{},draft.company);
+  if(draft.outreach)merged.outreach=Object.assign({},(j.research&&j.research.outreach)||{},draft.outreach);
+  if(draft.contacts)merged.contacts=draft.contacts;
+  apiFetch('PATCH','/jobs/'+jobId+'/research',{research:merged}).then(function(res){
+    // Update STATE
+    STATE.jobs=STATE.jobs.map(function(x){return x.id===jobId?Object.assign({},x,{research:merged}):x;});
+    delete window._researchDraft[jobId];
+    showToast('Research saved','success');
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+// ════════════════════════════════════════════════
+// DROP G — Email status + OOO + Reminder actions
+// ════════════════════════════════════════════════
+window.changeEmailStatus=function(cid, newStatus, email, contactName){
+  if(newStatus==='out_of_office'){
+    // Show OOO date picker modal
+    STATE.modal='<div class="modal modal-w480">'+
+      '<div class="mh"><div class="mt">Out of Office — '+htmlEsc(contactName)+'</div>'+
+      '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+      '<div class="mb_">'+
+        '<div style="font-size:13px;color:var(--text2);margin-bottom:14px">'+
+          htmlEsc(contactName)+' ('+htmlEsc(email)+') will be marked as Out of Office.<br>'+
+          'A reminder will be created for their return date and shown on your dashboard.'+
+        '</div>'+
+        '<div class="fgrp"><label class="flbl">Out of office until <span style="color:var(--red)">*</span></label>'+
+          '<input type="date" class="inp" id="ooo-date-inp" style="font-size:13px" min="'+todayIST()+'"/>'+
+        '</div>'+
+      '</div>'+
+      '<div class="mf">'+
+        '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+        '<button class="btn btn-primary" onclick="submitOOO(\''+cid+'\',\''+htmlEsc(contactName)+'\')">Set OOO & Create Reminder</button>'+
+      '</div>'+
+    '</div>';
+    render();
+  } else {
+    // Directly update status
+    apiFetch('PATCH','/contacts/'+cid+'/email-status',{email_status:newStatus}).then(function(){
+      showToast(htmlEsc(contactName)+' marked as '+(newStatus==='valid'?'Valid':newStatus),'success');
+      return refreshJobs();
+    }).catch(function(e){showToast('Failed: '+e.message,'error');});
+  }
+};
+
+window.submitOOO=function(cid, contactName){
+  var dateEl=document.getElementById('ooo-date-inp');
+  if(!dateEl||!dateEl.value){showToast('Please pick a return date','warning');return;}
+  var oooUntil=dateEl.value;
+  closeModal();
+  apiFetch('PATCH','/contacts/'+cid+'/email-status',{email_status:'out_of_office',ooo_until:oooUntil}).then(function(){
+    showToast(htmlEsc(contactName)+' marked OOO until '+oooUntil+' \u2014 reminder created','success');
+    return Promise.all([refreshJobs(), loadReminders()]);
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+function loadReminders(){
+  return apiGet('/reminders').then(function(d){
+    STATE.reminders=d;render();
+  }).catch(function(){});
+}
+
+// ════════════════════════════════════════════════
+// EMAIL ACTIONS — Drop F
+// ════════════════════════════════════════════════
+window.previewPendingEmail=function(id){STATE.previewPendingId=id;render();};
+
+window.runMsDebug=function(){
+  apiGet('/auth/microsoft/debug').then(function(res){
+    var ue=(res.user_emails||[]).map(function(e){
+      return '<tr style="border-bottom:1px solid var(--border)">'+
+        '<td style="padding:6px 10px;font-size:12px">'+htmlEsc(e.email_address)+'</td>'+
+        '<td style="padding:6px 10px;font-size:12px">'+htmlEsc(e.platform||'—')+'</td>'+
+        '<td style="padding:6px 10px;font-size:12px">'+(e.is_active?'<span style="color:var(--green)">Active</span>':'<span style="color:var(--red)">Inactive</span>')+'</td>'+
+        '<td style="padding:6px 10px;font-size:11px;font-family:monospace">'+htmlEsc(e.id.slice(0,8))+'…</td>'+
+      '</tr>';
+    }).join('');
+    var tk=(res.tokens||[]).map(function(t){
+      return '<tr style="border-bottom:1px solid var(--border)">'+
+        '<td style="padding:6px 10px;font-size:12px">'+htmlEsc(t.email_address)+'</td>'+
+        '<td style="padding:6px 10px;font-size:11px;font-family:monospace">'+htmlEsc(t.user_email_id.slice(0,8))+'…</td>'+
+        '<td style="padding:6px 10px;font-size:12px">'+(t.expired?'<span style="color:var(--red)">Expired</span>':'<span style="color:var(--green)">Valid</span>')+'</td>'+
+      '</tr>';
+    }).join('');
+    var jb=(res.jobs||[]).map(function(j){
+      return '<tr style="border-bottom:1px solid var(--border)">'+
+        '<td style="padding:6px 10px;font-size:12px">'+htmlEsc(j.position||'—')+'</td>'+
+        '<td style="padding:6px 10px;font-size:12px">'+htmlEsc(j.sending_email||'—')+'</td>'+
+        '<td style="padding:6px 10px;font-size:12px">'+(j.has_token?'<span style="color:var(--green)">✓ Has token</span>':'<span style="color:var(--red)">✗ No token</span>')+'</td>'+
+      '</tr>';
+    }).join('');
+    STATE.modal='<div class="modal" style="max-width:680px;width:90vw">'+
+      '<div class="mh"><div class="mt">Microsoft OAuth Debug</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+      '<div class="mb_" style="max-height:70vh;overflow-y:auto">'+
+        '<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Your Email IDs (user_emails)</div>'+
+        '<table style="width:100%;border-collapse:collapse;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:16px">'+
+          '<thead><tr style="background:var(--bg)"><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">Email</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">Platform</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">Status</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">ID</th></tr></thead>'+
+          '<tbody>'+(ue||'<tr><td colspan="4" style="padding:10px;text-align:center;color:var(--text3)">None</td></tr>')+'</tbody>'+
+        '</table>'+
+        '<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Saved Microsoft Tokens</div>'+
+        '<table style="width:100%;border-collapse:collapse;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:16px">'+
+          '<thead><tr style="background:var(--bg)"><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">Email</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">user_email_id</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">Token</th></tr></thead>'+
+          '<tbody>'+(tk||'<tr><td colspan="3" style="padding:10px;text-align:center;color:var(--red)">No tokens found — Microsoft not connected</td></tr>')+'</tbody>'+
+        '</table>'+
+        '<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Jobs → Token Match</div>'+
+        '<table style="width:100%;border-collapse:collapse;border:1px solid var(--border);border-radius:var(--r);overflow:hidden">'+
+          '<thead><tr style="background:var(--bg)"><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">Job</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">Sending Email</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text3)">Token</th></tr></thead>'+
+          '<tbody>'+(jb||'<tr><td colspan="3" style="padding:10px;text-align:center;color:var(--text3)">No jobs</td></tr>')+'</tbody>'+
+        '</table>'+
+      '</div>'+
+      '<div class="mf"><button class="btn btn-primary" onclick="closeModal()">Close</button></div>'+
+    '</div>';
+    render();
+  }).catch(function(e){showToast('Debug failed: '+e.message,'error');});
+};
+
+// Update ratio total_to_send when count input changes
+window.updateAssignCount=function(val){
+  var n=parseInt(val,10);
+  if(!n||n<1)return;
+  var pool=STATE.distributePoolStats||{total:0};
+  n=Math.min(n,pool.total);
+  if(STATE._assignRatio){
+    STATE._assignRatio=Object.assign({},STATE._assignRatio,{total_to_send:n});
+    showRatioPreview(STATE._assignRatio);
+  } else {
+    // No ratio yet — trigger auto with this count
+    var managerId=STATE._assignManagerId;
+    var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
+    var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
+    var ps=Object.assign({},pool,{capacity:capacity});
+    apiPost('/distribute/generate-ratio',{priority_text:'balanced auto distribution',pool_stats:ps,manager_id:managerId}).then(function(ratio){
+      ratio.total_to_send=n;
+      showRatioPreview(ratio);
+    }).catch(function(){});
+  }
+};
+
+window.useAllLeads=function(){
+  var pool=STATE.distributePoolStats||{total:0};
+  var el=document.getElementById('assign-count');
+  if(el)el.value=pool.total;
+  updateAssignCount(pool.total);
+};
+
+// Send only selected pending emails
+window.openSendSelectedConfirm=function(){
+  var ids=Object.keys(STATE.pendingEmailsSel||{}).filter(function(k){return STATE.pendingEmailsSel[k];});
+  if(!ids.length){showToast('Select emails first','warning');return;}
+  var selected=ids.map(function(id){return (STATE.pendingEmails||[]).find(function(e){return e.id===id;});}).filter(Boolean);
+  var now=new Date();
+  var dateStr=now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  var timeStr=now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  STATE.modal='<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Send selected emails</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div style="padding:16px;background:var(--teal-l);border:1px solid rgba(13,148,136,.2);border-radius:var(--r2);margin-bottom:12px">'+
+        '<div style="font-size:28px;font-weight:700;color:var(--teal);margin-bottom:4px">'+selected.length+'</div>'+
+        '<div style="font-size:13px;color:var(--text2)">selected emails will be sent</div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:4px">'+dateStr+' · '+timeStr+'</div>'+
+      '</div>'+
+      '<div style="font-size:13px;color:var(--text2)">Only the <strong>'+selected.length+' checked emails</strong> will be sent via Microsoft Outlook. The rest remain pending.</div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="submitSendSelected()" style="background:var(--teal)">Confirm & Send</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+
+window.submitSendSelected=function(){
+  var ids=Object.keys(STATE.pendingEmailsSel||{}).filter(function(k){return STATE.pendingEmailsSel[k];});
+  closeModal();
+  showToast('Queuing '+ids.length+' emails with random delays…','info');
+  apiPost('/emails/send-selected',{email_ids:ids}).then(function(res){
+    STATE.pendingEmailsSel={};
+    STATE.modal='<div class="modal modal-w480">'+
+      '<div class="mh"><div class="mt">Sending in progress</div></div>'+
+      '<div class="mb_">'+
+        '<div style="padding:20px;text-align:center">'+
+          '<div style="font-size:36px;margin-bottom:12px">📤</div>'+
+          '<div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px">'+(res.queued||ids.length)+' emails queued</div>'+
+          '<div style="font-size:13px;color:var(--text2);line-height:1.6">Emails are being sent with a random delay of <strong>1–120 seconds</strong> between each one to protect your domain reputation.</div>'+
+          '<div style="font-size:12px;color:var(--text3);margin-top:12px">Check the <strong>Sent</strong> tab to see emails as they arrive.</div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="mf"><button class="btn btn-primary" onclick="closeModal();refreshPendingAndSent()">Got it</button></div>'+
+    '</div>';
+    return Promise.all([
+      apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];}),
+      apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];})
+    ]).then(function(){render();});
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.openSendAllConfirm=function(){
+  var pending=STATE.pendingEmails||[];
+  if(!pending.length){showToast('No pending emails','warning');return;}
+  var now=new Date();
+  var dateStr=now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  var timeStr=now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  STATE.modal='<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Confirm: Send all pending</div></div>'+
+    '<div class="mb_">'+
+      '<div style="padding:16px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:12px">'+
+        '<div style="font-size:22px;font-weight:700;color:var(--accent);margin-bottom:4px">'+pending.length+' emails</div>'+
+        '<div style="font-size:14px;color:var(--text2)">→ '+pending.length+' recipients</div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:6px">'+dateStr+' · '+timeStr+'</div>'+
+      '</div>'+
+      '<div style="font-size:13px;color:var(--text2)">Emails will be sent <strong>immediately</strong> via your connected Microsoft Outlook account. Each email is unique — generated by AI for each contact.</div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="submitSendAll()">Confirm & Send Now</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+
+window.submitSendAll=function(){
+  closeModal();
+  showToast('Sending emails via Microsoft Outlook with random delays…','info');
+  apiPost('/emails/queue-all',{}).then(function(res){
+    // Backend responds immediately — emails send in background
+    // Show progress modal and start polling
+    STATE.modal='<div class="modal modal-w480">'+
+      '<div class="mh"><div class="mt">Sending in progress</div></div>'+
+      '<div class="mb_">'+
+        '<div style="padding:20px;text-align:center">'+
+          '<div style="font-size:36px;margin-bottom:12px">📤</div>'+
+          '<div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px)">'+(res.queued||0)+' emails queued</div>'+
+          '<div style="font-size:13px;color:var(--text2);line-height:1.6">Emails are being sent with a random delay of <strong>1–120 seconds</strong> between each one to protect your domain reputation.</div>'+
+          '<div style="font-size:12px;color:var(--text3);margin-top:12px">Check the <strong>Sent</strong> tab to see emails as they arrive.</div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="mf"><button class="btn btn-primary" onclick="closeModal();refreshPendingAndSent()">Got it</button></div>'+
+    '</div>';
+    render();
+    return Promise.all([
+      apiGet('/emails?status=pending'),
+      apiGet('/emails?status=sent')
+    ]).then(function(results){
+      STATE.pendingEmails=results[0]||[];
+      STATE.sentEmails=results[1]||[];
+      // Build results modal
+      var sentCount=res.sent||0;
+      var failedCount=res.failed||0;
+      var failDetails=res.failDetails||[];
+      var failRows=failDetails.map(function(f){
+        return '<tr style="border-bottom:1px solid var(--border)">'+
+          '<td style="padding:8px 10px;font-size:12px;color:var(--text2)">'+htmlEsc(f.to||'')+'</td>'+
+          '<td style="padding:8px 10px;font-size:11px;color:var(--text3)">'+htmlEsc(f.from||'—')+'</td>'+
+          '<td style="padding:8px 10px;font-size:12px;color:var(--red)">'+htmlEsc(f.error||'Unknown error')+'</td>'+
+          '</tr>';
+      }).join('');
+      STATE.modal='<div class="modal modal-w600">'+
+        '<div class="mh">'+
+          '<div class="mt">Send Results</div>'+
+          '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button>'+
+        '</div>'+
+        '<div class="mb_">'+
+          '<div style="display:flex;gap:12px;margin-bottom:16px">'+
+            '<div style="flex:1;padding:14px 16px;background:var(--green-l);border:1px solid #bbf7d0;border-radius:var(--r2);text-align:center">'+
+              '<div style="font-size:28px;font-weight:700;color:var(--green)">'+sentCount+'</div>'+
+              '<div style="font-size:12px;color:var(--green);margin-top:2px">Sent successfully</div>'+
+            '</div>'+
+            '<div style="flex:1;padding:14px 16px;background:'+(failedCount?'var(--red-l)':'var(--bg)')+';border:1px solid '+(failedCount?'#fecaca':'var(--border)')+';border-radius:var(--r2);text-align:center">'+
+              '<div style="font-size:28px;font-weight:700;color:'+(failedCount?'var(--red)':'var(--text3)')+'">'+failedCount+'</div>'+
+              '<div style="font-size:12px;color:'+(failedCount?'var(--red)':'var(--text3)')+';margin-top:2px">Failed</div>'+
+            '</div>'+
+          '</div>'+
+          (failedCount?
+            '<div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:8px">Failed emails</div>'+
+            '<div style="border:1px solid var(--border);border-radius:var(--r);overflow:hidden;max-height:280px;overflow-y:auto">'+
+              '<table style="width:100%;border-collapse:collapse">'+
+                '<thead><tr style="background:var(--bg)">'+
+                  '<th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">To</th>'+
+                  '<th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">From</th>'+
+                  '<th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Reason</th>'+
+                '</tr></thead>'+
+                '<tbody>'+failRows+'</tbody>'+
+              '</table>'+
+            '</div>'
+          :
+            '<div style="padding:14px;background:var(--green-l);border-radius:var(--r2);font-size:13px;color:var(--green);text-align:center">'+
+              '🎉 All emails sent successfully via Microsoft Outlook!'+
+            '</div>'
+          )+
+        '</div>'+
+        '<div class="mf">'+
+          '<button class="btn btn-primary" onclick="closeModal()">Done</button>'+
+        '</div>'+
+      '</div>';
+      render();
+    });
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.refreshPendingAndSent=function(){
+  Promise.all([
+    apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];}),
+    apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];})
+  ]).then(function(){render();}).catch(function(){});
+};
+
+window.togglePendingEmailSel=function(id,v){
+  STATE.pendingEmailsSel=STATE.pendingEmailsSel||{};
+  STATE.pendingEmailsSel[id]=v;
+  render();
+};
+
+window.toggleAllPendingEmails=function(v){
+  STATE.pendingEmailsSel=STATE.pendingEmailsSel||{};
+  // Only select/deselect the current page
+  var pg=STATE.pendingPage||0;
+  var pagePending=(STATE.pendingEmails||[]).slice(pg*20,(pg+1)*20);
+  pagePending.forEach(function(e){STATE.pendingEmailsSel[e.id]=v;});
+  render();
+};
+
+window.deleteSelectedPendingEmails=function(){
+  var ids=Object.keys(STATE.pendingEmailsSel||{}).filter(function(k){return STATE.pendingEmailsSel[k];});
+  if(!ids.length)return;
+  if(!confirm('Delete '+ids.length+' pending email'+(ids.length>1?'s':'')+'?'))return;
+  // Delete all in parallel
+  Promise.all(ids.map(function(id){return apiFetch('DELETE','/emails/'+id);}))
+    .then(function(){
+      STATE.pendingEmails=(STATE.pendingEmails||[]).filter(function(e){return ids.indexOf(e.id)===-1;});
+      STATE.pendingEmailsSel={};
+      STATE.previewPendingId=null;
+      showToast(ids.length+' email'+(ids.length>1?'s':'')+' deleted','success');
+      render();
+    })
+    .catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.deletePendingEmail=function(id){
+  if(!confirm('Delete this pending email?'))return;
+  apiFetch('DELETE','/emails/'+id).then(function(){
+    STATE.pendingEmails=(STATE.pendingEmails||[]).filter(function(e){return e.id!==id;});
+    STATE.previewPendingId=null;
+    showToast('Email deleted','success');
+    render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.saveEmailEdit=function(id){
+  var el=document.getElementById('edit-email-body-'+id);
+  if(!el)return;
+  apiPut='/emails/'+id; // using apiPatch
+  apiFetch('PATCH','/emails/'+id,{body:el.value}).then(function(updated){
+    STATE.pendingEmails=(STATE.pendingEmails||[]).map(function(e){return e.id===id?Object.assign({},e,{body:updated.body}):e;});
+    showToast('Email updated','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+function normalizeIndustryMap(obj){
+  var out={};
+  Object.keys(obj).forEach(function(k){
+    var norm=normalizeIndustry(k);
+    out[norm]=(out[norm]||0)+obj[k];
+  });
+  return out;
+}
+function renderTodaySummaryCard(ts){
+  var bf=ts.by_freshness||{};
+  var bi=normalizeIndustryMap(ts.by_industry||{});
+  var btz=ts.by_timezone||{};
+  function rows(obj){
+    return Object.keys(obj).sort().map(function(k){
+      return '<div style="display:flex;justify-content:space-between;padding:1px 0">'+
+        '<span>'+htmlEsc(k)+'</span><span style="font-weight:600">'+obj[k]+'</span></div>';
+    }).join('');
+  }
+  return '<div style="background:var(--accent-l);border:1.5px solid var(--accent);border-radius:var(--r2);padding:14px 18px">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+      '<div style="font-weight:700;font-size:14px;color:var(--accent)">Today\'s assignment summary</div>'+
+      '<div style="font-size:24px;font-weight:700;color:var(--accent)">'+ts.total+' leads</div>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:12px">'+
+      '<div><div style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Freshness</div>'+rows(bf)+'</div>'+
+      '<div><div style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Industry</div>'+rows(bi)+'</div>'+
+      '<div><div style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Timezone</div>'+rows(btz)+'</div>'+
+    '</div>'+
+  '</div>';
+}
+
+// ════════════════════════════════════════════════
+// DISTRIBUTION ACTIONS — Drop N
+// ════════════════════════════════════════════════
+
+function refreshPoolStats(){
+  apiGet('/distribute/pool-stats').then(function(d){
+    STATE.distributePoolStats=d;render();
+  }).catch(function(){});
+}
+
+window.getTodaySummary=function(){
+  // Show loading modal
+  STATE.modal='<div class="modal modal-w540">'+
+    '<div class="mh"><div class="mt">📋 Today\'s Lead Summary</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_" style="text-align:center;padding:30px">'+
+      '<div style="font-size:13px;color:var(--text3)">✨ Generating summary\u2026</div>'+
+    '</div>'+
+  '</div>';
+  render();
+
+  apiGet('/jobs/today-summary').then(function(data){
+    if(!data.total){
+      STATE.modal='<div class="modal modal-w540">'+
+        '<div class="mh"><div class="mt">📋 Today\'s Lead Summary</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+        '<div class="mb_"><div style="padding:20px;text-align:center;color:var(--text3);font-size:13px">No leads imported today yet.</div></div>'+
+        '<div class="mf"><button class="btn btn-primary" onclick="closeModal()">Close</button></div>'+
+      '</div>';
+      render();
+      return;
+    }
+
+    // Build a structured prompt for Claude to write a natural language summary
+    var prompt = 'You are an assistant for Fute Global LLC, a staffing and recruitment firm. Write a short natural language daily briefing for the BD team based on today\'s lead import data. Warm, clear, professional tone — like a manager summarising in a message. No bullet points or lists. Plain prose, 3-4 sentences. Include: leads imported, top industries, freshness, duplicates flagged, and total pool size.\n\nData: Date: '+data.date+', Total imported: '+data.total+', Clean: '+data.clean+', Duplicates: '+data.duplicates+', Contacts: '+data.totalContacts+', Industries: '+JSON.stringify(data.byIndustry)+', Freshness: '+JSON.stringify(data.byFreshness)+', Top positions: '+data.topPositions.join(', ')+', Total unassigned pool: '+data.poolSize;
+
+    // Call Claude AI via backend
+    apiPost('/ai/generate-summary',{prompt:prompt}).then(function(res){
+      var summaryText=res.summary||'Summary unavailable.';
+      STATE.modal='<div class="modal modal-w540">'+
+        '<div class="mh"><div class="mt">📋 Today\'s Lead Summary</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+        '<div class="mb_">'+
+          '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">'+data.date+' · '+data.total+' leads imported</div>'+
+          '<div style="background:var(--purple-l);border:1px solid rgba(124,58,237,.2);border-radius:var(--r2);padding:16px 18px;font-size:14px;line-height:1.8;color:var(--text)">'+
+            htmlEsc(summaryText)+
+          '</div>'+
+          '<div style="display:flex;gap:16px;margin-top:14px;flex-wrap:wrap">'+
+            '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:10px 14px;flex:1;min-width:120px;text-align:center">'+
+              '<div style="font-size:22px;font-weight:700;color:var(--accent)">'+data.total+'</div>'+
+              '<div style="font-size:11px;color:var(--text3);margin-top:2px">Today\'s imports</div>'+
+            '</div>'+
+            '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:10px 14px;flex:1;min-width:120px;text-align:center">'+
+              '<div style="font-size:22px;font-weight:700;color:var(--green)">'+data.clean+'</div>'+
+              '<div style="font-size:11px;color:var(--text3);margin-top:2px">Clean leads</div>'+
+            '</div>'+
+            (data.duplicates?'<div style="background:var(--amber-l);border:1px solid rgba(217,119,6,.2);border-radius:var(--r2);padding:10px 14px;flex:1;min-width:120px;text-align:center">'+
+              '<div style="font-size:22px;font-weight:700;color:var(--amber)">'+data.duplicates+'</div>'+
+              '<div style="font-size:11px;color:var(--text3);margin-top:2px">Duplicates flagged</div>'+
+            '</div>':'')+
+            '<div style="background:var(--accent-l);border:1px solid rgba(37,99,235,.15);border-radius:var(--r2);padding:10px 14px;flex:1;min-width:120px;text-align:center">'+
+              '<div style="font-size:22px;font-weight:700;color:var(--accent)">'+data.poolSize+'</div>'+
+              '<div style="font-size:11px;color:var(--text3);margin-top:2px">Total in pool</div>'+
+            '</div>'+
+          '</div>'+
+        '</div>'+
+        '<div class="mf"><button class="btn btn-primary" onclick="closeModal()">Done</button></div>'+
+      '</div>';
+      render();
+    }).catch(function(e){
+      showToast('Failed to generate summary: '+e.message,'error');
+      closeModal();
+    });
+  }).catch(function(e){
+    showToast('Failed to fetch data: '+e.message,'error');
+    closeModal();
+  });
+};
+
+window.openAssignToManager=function(managerId){
+  var m=STATE.users.find(function(u){return u.id===managerId;})||{name:'Manager'};
+  var pool=STATE.distributePoolStats||{total:0};
+  var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
+  var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
+  STATE._assignManagerId=managerId;
+  STATE._assignRatio=null;
+  STATE._assignGenerating=false;
+
+  STATE.modal='<div class="modal modal-w540">'+
+    '<div class="mh">'+
+      '<div><div class="mt">Assign leads \u2014 '+htmlEsc(m.name)+'</div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:3px">'+pool.total+' unassigned leads \u00b7 '+capacity+' email capacity today</div>'+
+      '</div>'+
+      '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button>'+
+    '</div>'+
+    '<div class="mb_">'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">'+
+        '<div onclick="setAssignMode(\'auto\')" id="mode-auto" style="padding:14px;border:2px solid var(--accent);border-radius:var(--r2);cursor:pointer;background:var(--accent-l);text-align:center">'+
+          '<div style="font-size:18px;margin-bottom:4px">\u26a1</div>'+
+          '<div style="font-weight:600;font-size:13px;color:var(--accent)">Auto</div>'+
+          '<div style="font-size:11px;color:var(--text3);margin-top:3px">System picks balanced ratio</div>'+
+        '</div>'+
+        '<div onclick="setAssignMode(\'text\')" id="mode-text" style="padding:14px;border:2px solid var(--border);border-radius:var(--r2);cursor:pointer;text-align:center">'+
+          '<div style="font-size:18px;margin-bottom:4px">\u270f\ufe0f</div>'+
+          '<div style="font-weight:600;font-size:13px">Priority text</div>'+
+          '<div style="font-size:11px;color:var(--text3);margin-top:3px">Tell AI what to prioritise</div>'+
+        '</div>'+
+      '</div>'+
+      '<div id="assign-text-panel" style="display:none;margin-bottom:12px">'+
+        '<label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:6px">Describe your priorities</label>'+
+        '<textarea id="assign-priority-text" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:13px;min-height:80px;resize:vertical;font-family:inherit" placeholder="e.g. Focus on old leads first, prioritise healthcare and legal, send mostly to EST timezone, exclude duplicates..."></textarea>'+
+        '<button onclick="generateAssignRatio()" style="margin-top:8px;background:var(--purple);color:#fff;border:0;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer" id="gen-ratio-btn">\u2728 Generate ratio with AI</button>'+
+      '</div>'+
+      '<div style="margin-top:12px;margin-bottom:4px">'+
+        '<label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:6px">How many leads to assign?</label>'+
+        '<div style="display:flex;align-items:center;gap:10px">'+
+          '<input type="number" id="assign-count" min="1" max="'+pool.total+'" placeholder="e.g. 10" oninput="updateAssignCount(this.value)" style="width:110px;padding:8px 12px;border:1.5px solid var(--border2);border-radius:8px;font-size:14px;font-weight:600;text-align:center;background:var(--card);color:var(--text)"/>'+
+          '<span style="font-size:12px;color:var(--text3)">of '+pool.total+' available</span>'+
+          '<button onclick="useAllLeads()" style="font-size:12px;padding:6px 12px;border:1px solid var(--border2);background:var(--bg);border-radius:7px;cursor:pointer;color:var(--text2)">Use all</button>'+
+        '</div>'+
+      '</div>'+
+      '<div id="assign-ratio-preview" style="display:none"></div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" id="assign-confirm-btn" onclick="confirmAssignToManager()" disabled style="opacity:.5;cursor:not-allowed">Preview assignment</button>'+
+    '</div>'+
+  '</div>';
+  render();
+  // Auto mode selected by default — trigger auto ratio generation
+  setTimeout(function(){generateAutoRatio();},100);
+};
+
+window.setAssignMode=function(mode){
+  var autoEl=document.getElementById('mode-auto');
+  var textEl=document.getElementById('mode-text');
+  var textPanel=document.getElementById('assign-text-panel');
+  if(!autoEl||!textEl)return;
+  if(mode==='auto'){
+    autoEl.style.border='2px solid var(--accent)';autoEl.style.background='var(--accent-l)';
+    textEl.style.border='2px solid var(--border)';textEl.style.background='';
+    if(textPanel)textPanel.style.display='none';
+    generateAutoRatio();
+  } else {
+    textEl.style.border='2px solid var(--accent)';textEl.style.background='var(--accent-l)';
+    autoEl.style.border='2px solid var(--border)';autoEl.style.background='';
+    if(textPanel)textPanel.style.display='block';
+    STATE._assignRatio=null;
+    var btn=document.getElementById('assign-confirm-btn');
+    if(btn){btn.disabled=true;btn.style.opacity='.5';btn.style.cursor='not-allowed';}
+    var prev=document.getElementById('assign-ratio-preview');
+    if(prev)prev.style.display='none';
+  }
+};
+
+function showRatioPreview(ratio){
+  STATE._assignRatio=ratio;
+  var prev=document.getElementById('assign-ratio-preview');
+  var btn=document.getElementById('assign-confirm-btn');
+  if(!prev)return;
+  var bf=ratio.by_freshness||{};
+  var bi=ratio.by_industry||{};
+  var btz=ratio.by_timezone||{};
+  prev.style.display='block';
+  prev.innerHTML='<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r2);padding:12px 14px">'+
+    '<div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px">Distribution preview \u2014 '+ratio.total_to_send+' leads</div>'+
+    '<div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:8px">'+htmlEsc(ratio.summary||'')+'</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:11.5px">'+
+      '<div><div style="color:var(--text3);margin-bottom:3px">Freshness</div>'+Object.keys(bf).map(function(k){return '<div>'+k+': <strong>'+bf[k]+'%</strong></div>';}).join('')+'</div>'+
+      '<div><div style="color:var(--text3);margin-bottom:3px">Industry</div>'+Object.keys(bi).filter(function(k){return bi[k]>0;}).map(function(k){return '<div>'+k+': <strong>'+bi[k]+'%</strong></div>';}).join('')+'</div>'+
+      '<div><div style="color:var(--text3);margin-bottom:3px">Timezone</div>'+Object.keys(btz).map(function(k){return '<div>'+k+': <strong>'+btz[k]+'%</strong></div>';}).join('')+'</div>'+
+    '</div>'+
+  '</div>';
+  if(btn){btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';}
+}
+
+function generateAutoRatio(){
+  var pool=STATE.distributePoolStats||{total:0};
+  var managerId=STATE._assignManagerId;
+  var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
+  var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
+  var ps=Object.assign({},pool,{capacity:capacity});
+  var prev=document.getElementById('assign-ratio-preview');
+  if(prev){prev.style.display='block';prev.innerHTML='<div style="font-size:12px;color:var(--text3);padding:10px">Calculating balanced ratio\u2026</div>';}
+  apiPost('/distribute/generate-ratio',{priority_text:'balanced auto distribution',pool_stats:ps,manager_id:managerId}).then(function(ratio){
+    showRatioPreview(ratio);
+  }).catch(function(e){
+    if(prev){prev.style.display='block';prev.innerHTML='<div style="font-size:12px;color:var(--red);padding:10px">Could not generate ratio: '+htmlEsc(e.message)+'</div>';}
+  });
+}
+
+window.generateAssignRatio=function(){
+  var text=(document.getElementById('assign-priority-text')||{}).value||'';
+  if(!text.trim()){showToast('Enter priority instructions first','warning');return;}
+  var pool=STATE.distributePoolStats||{total:0};
+  var managerId=STATE._assignManagerId;
+  var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
+  var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
+  var ps=Object.assign({},pool,{capacity:capacity});
+  var btn=document.getElementById('gen-ratio-btn');
+  if(btn){btn.textContent='Generating\u2026';btn.disabled=true;}
+  var prev=document.getElementById('assign-ratio-preview');
+  if(prev){prev.style.display='block';prev.innerHTML='<div style="font-size:12px;color:var(--text3);padding:10px">\u2728 AI is generating your ratio\u2026</div>';}
+  apiPost('/distribute/generate-ratio',{priority_text:text,pool_stats:ps,manager_id:managerId}).then(function(ratio){
+    showRatioPreview(ratio);
+    if(btn){btn.textContent='\u2728 Regenerate';btn.disabled=false;}
+  }).catch(function(e){
+    if(prev){prev.style.display='block';prev.innerHTML='<div style="font-size:12px;color:var(--red);padding:10px">AI error: '+htmlEsc(e.message)+'</div>';}
+    if(btn){btn.textContent='\u2728 Generate ratio with AI';btn.disabled=false;}
+  });
+};
+
+window.confirmAssignToManager=function(){
+  var ratio=STATE._assignRatio;
+  var managerId=STATE._assignManagerId;
+  if(!ratio||!managerId)return;
+  var m=STATE.users.find(function(u){return u.id===managerId;})||{name:'Manager'};
+  var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
+  var totalCapacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
+  var now=new Date();
+  var dateStr=now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  var timeStr=now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+
+  // Build email IDs breakdown
+  var perEmail=emailAccounts.length>0?Math.ceil(ratio.total_to_send/emailAccounts.length):0;
+  var emailIDRows=emailAccounts.length?
+    emailAccounts.map(function(a,idx){
+      var count=idx===emailAccounts.length-1
+        ?ratio.total_to_send-perEmail*(emailAccounts.length-1)
+        :perEmail;
+      count=Math.max(0,Math.min(count,a.daily_send_limit||150));
+      return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--card);border-radius:var(--r);margin-bottom:6px;border:1px solid var(--border)">'+
+        '<span style="font-size:10px;padding:2px 7px;border-radius:5px;font-weight:600;background:'+(a.platform==='Microsoft'?'#e0f2fe':'#f0fdf4')+';color:'+(a.platform==='Microsoft'?'#0369a1':'#166534')+'">'+htmlEsc(a.platform||'Email')+'</span>'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(a.display_name||a.email_address)+'</div>'+
+          '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(a.email_address)+'</div>'+
+        '</div>'+
+        '<div style="text-align:right;flex-shrink:0">'+
+          '<div style="font-size:14px;font-weight:700;color:var(--accent)">'+count+'</div>'+
+          '<div style="font-size:10px;color:var(--text3)">emails</div>'+
+        '</div>'+
+      '</div>';
+    }).join(''):
+    '<div style="font-size:12px;color:var(--red);padding:8px">No active email IDs found for this manager.</div>';
+
+  STATE.modal='<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Confirm assignment</div>'+
+    '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div style="padding:14px 16px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:14px;display:flex;align-items:center;gap:14px">'+
+        '<div style="flex:1">'+
+          '<div style="font-size:22px;font-weight:700;color:var(--accent);line-height:1">'+ratio.total_to_send+' leads</div>'+
+          '<div style="font-size:13px;color:var(--text2);margin-top:3px">→ <strong>'+htmlEsc(m.name)+'</strong></div>'+
+          '<div style="font-size:11px;color:var(--text3);margin-top:3px">'+dateStr+' · '+timeStr+'</div>'+
+        '</div>'+
+        '<div style="text-align:center;padding:10px 14px;background:var(--card);border-radius:var(--r2);border:1px solid rgba(37,99,235,.15)">'+
+          '<div style="font-size:18px;font-weight:700;color:var(--accent)">'+emailAccounts.length+'</div>'+
+          '<div style="font-size:10px;color:var(--text3);margin-top:2px">email ID'+(emailAccounts.length!==1?'s':'')+'</div>'+
+          '<div style="font-size:10px;color:var(--text3)">'+totalCapacity+'/day cap</div>'+
+        '</div>'+
+      '</div>'+
+      '<div style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Sending via</div>'+
+      emailIDRows+
+      '<div style="font-size:12px;color:var(--text3);margin-top:10px;padding:8px 10px;background:var(--bg);border-radius:var(--r)">'+
+        htmlEsc(ratio.summary||'AI-generated emails will be sent for each contact.')+
+      '</div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" '+(emailAccounts.length?'':'disabled style="opacity:.5;cursor:not-allowed"')+' onclick="submitAssignToManager()">Confirm &amp; Assign</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+
+window.submitAssignToManager=function(){
+  var ratio=STATE._assignRatio;
+  var managerId=STATE._assignManagerId;
+  if(!ratio||!managerId)return;
+  closeModal();
+  apiPost('/distribute/execute',{manager_id:managerId,ratio:ratio}).then(function(res){
+    var msg=res.total_assigned+' leads assigned to '+STATE.users.find(function(u){return u.id===managerId;}).name;
+    showToast(msg,'success');
+    STATE._assignRatio=null;STATE._assignManagerId=null;
+    return Promise.all([refreshPoolStats(),refreshJobs()]);
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+// ════════════════════════════════════════════════
+// EMAIL ACCOUNTS PAGE — Drop M
+// ════════════════════════════════════════════════
+function renderManagerUsers(){
+  var u=STATE.user;
+  var tab=STATE.managerUsersTab||'bd';
+  var allUsers=STATE.users||[];
+  var assignments=STATE.teamAssignments||[];
+  if(STATE.selectedManagerUser){return renderManagerUserDetail(STATE.selectedManagerUser);}
+  var tabDefs=[{key:'bd',label:'BD Managers'},{key:'ra',label:'Research Analysts'},{key:'bdteam',label:'BD Team'},{key:'rateam',label:'RA Team'}];
+  var tabBar=tabDefs.map(function(t){
+    var isActive=tab===t.key;
+    return '<button onclick="STATE.managerUsersTab=\''+t.key+'\';render()" style="padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:2px solid '+(isActive?'var(--accent)':'var(--border)')+';background:'+(isActive?'var(--accent)':'var(--card)')+';color:'+(isActive?'#fff':'var(--text2)')+';transition:all .15s">'+t.label+'</button>';
+  }).join('');
+  var body='';
+  if(tab==='bd'){
+    var bdUsers=allUsers.filter(function(x){return userHasRole(x,'bd')||userHasRole(x,'bd_lead');});
+    var rows=bdUsers.map(function(usr){
+      var emailCount=(STATE.userEmailsCache[usr.id]||[]).length;
+      var teamCount=assignments.filter(function(a){return a.manager_id===usr.id;}).length;
+      return '<div class="user-list-row" onclick="STATE.selectedManagerUser=\''+usr.id+'\';loadUserEmails(\''+usr.id+'\');render()" style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer">'+av(usr,'36')+'<div style="flex:1"><div style="font-weight:600;font-size:13.5px">'+htmlEsc(usr.name)+'</div><div style="font-size:11.5px;color:var(--text3)">'+htmlEsc(usr.email)+'</div></div><span style="font-size:11px;padding:2px 8px;background:var(--accent-l);color:var(--accent);border-radius:8px">'+emailCount+' email'+(emailCount!==1?'s':'')+'</span>'+(teamCount?'<span style="font-size:11px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:8px">'+teamCount+' member'+(teamCount!==1?'s':'')+'</span>':'')+'<div style="color:var(--text3);font-size:18px">&#8250;</div></div>';
+    }).join('');
+    body='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+(rows||'<div style="padding:30px;text-align:center;color:var(--text3);font-size:13px">No BD Managers yet. Add users from the Admin tab.</div>')+'</div>';
+  } else if(tab==='ra'){
+    var raUsers=allUsers.filter(function(x){return userHasRole(x,'ra')&&!userHasAnyRole(x,'bd','bd_lead','admin');});
+    var rows=raUsers.map(function(usr){
+      var myManagers=assignments.filter(function(a){return a.member_id===usr.id&&a.assignment_type==='ra_to_bd';}).map(function(a){return a.manager&&a.manager.name||'';}).filter(Boolean);
+      return '<div class="user-list-row" onclick="STATE.selectedManagerUser=\''+usr.id+'\';render()" style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer">'+av(usr,'36')+'<div style="flex:1"><div style="font-weight:600;font-size:13.5px">'+htmlEsc(usr.name)+'</div><div style="font-size:11.5px;color:var(--text3)">'+htmlEsc(usr.email)+'</div></div>'+(myManagers.length?'<span style="font-size:11px;padding:2px 8px;background:var(--accent-l);color:var(--accent);border-radius:8px">&#8594; '+htmlEsc(myManagers.join(', '))+'</span>':'<span style="font-size:11px;color:var(--text3)">Unassigned</span>')+'<div style="color:var(--text3);font-size:18px">&#8250;</div></div>';
+    }).join('');
+    body='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+(rows||'<div style="padding:30px;text-align:center;color:var(--text3);font-size:13px">No Research Analysts yet.</div>')+'</div>';
+  } else if(tab==='bdteam'){
+    var bdLeads=allUsers.filter(function(x){return userHasRole(x,'bd_lead');});
+    body=bdLeads.length?bdLeads.map(function(lead){
+      var members=assignments.filter(function(a){return a.manager_id===lead.id&&a.assignment_type==='bd_to_bdlead';});
+      var memberRows=members.length?members.map(function(a){var m=a.member;if(!m)return'';return '<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border2)">'+av(m,'30')+'<div style="flex:1"><div style="font-size:13px;font-weight:500">'+htmlEsc(m.name)+'</div><div style="font-size:11px;color:var(--text3)">'+htmlEsc(m.email)+'</div></div><button onclick="removeAssignment(event,\''+a.id+'\')" style="font-size:11px;color:var(--red);background:transparent;border:0;cursor:pointer">Remove</button></div>';}).join(''):'<div style="padding:12px 16px;font-size:12px;color:var(--text3)">No BD Managers assigned yet.</div>';
+      return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);margin-bottom:14px;overflow:hidden"><div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center;gap:10px">'+av(lead,'32')+'<div style="font-weight:700;font-size:13.5px">'+htmlEsc(lead.name)+'</div></div><button onclick="openAssignToBDLead(\''+lead.id+'\')" style="font-size:12px;padding:5px 12px;background:var(--accent);color:#fff;border:0;border-radius:7px;cursor:pointer">+ Assign BD Manager</button></div>'+memberRows+'</div>';
+    }).join(''):'<div style="padding:30px;text-align:center;color:var(--text3);font-size:13px;background:var(--card);border:1px solid var(--border);border-radius:var(--r2)">No BD Team Leads yet.</div>';
+  } else if(tab==='rateam'){
+    var bdManagers=allUsers.filter(function(x){return userHasRole(x,'bd');});
+    body=bdManagers.length?bdManagers.map(function(mgr){
+      var members=assignments.filter(function(a){return a.manager_id===mgr.id&&a.assignment_type==='ra_to_bd';});
+      var memberRows=members.length?members.map(function(a){var m=a.member;if(!m)return'';return '<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border2)">'+av(m,'30')+'<div style="flex:1"><div style="font-size:13px;font-weight:500">'+htmlEsc(m.name)+'</div><div style="font-size:11px;color:var(--text3)">'+htmlEsc(m.email)+'</div></div><button onclick="removeAssignment(event,\''+a.id+'\')" style="font-size:11px;color:var(--red);background:transparent;border:0;cursor:pointer">Remove</button></div>';}).join(''):'<div style="padding:12px 16px;font-size:12px;color:var(--text3)">No RAs assigned yet.</div>';
+      return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);margin-bottom:14px;overflow:hidden"><div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center;gap:10px">'+av(mgr,'32')+'<div style="font-weight:700;font-size:13.5px">'+htmlEsc(mgr.name)+'</div></div><button onclick="openAssignRAToManager(\''+mgr.id+'\')" style="font-size:12px;padding:5px 12px;background:var(--accent);color:#fff;border:0;border-radius:7px;cursor:pointer">+ Assign RA</button></div>'+memberRows+'</div>';
+    }).join(''):'<div style="padding:30px;text-align:center;color:var(--text3);font-size:13px;background:var(--card);border:1px solid var(--border);border-radius:var(--r2)">No BD Managers yet.</div>';
+  }
+  return '<div class="page"><div class="ph"><div class="flex jb aic"><div><div class="ptitle">Manager Users</div><div class="psub">'+allUsers.length+' users</div></div><button class="btn btn-primary btn-sm" onclick="STATE.page=\'admin\';STATE.adminSelectedUser=null;render()">'+ico('plus',13)+' Manage Users</button></div></div><div style="display:flex;gap:10px;margin-bottom:20px">'+tabBar+'</div>'+body+'</div>';
+}
+
+function renderManagerUserDetail(userId){
+  var usr=STATE.users.find(function(x){return x.id===userId;});
+  if(!usr)return'';
+  var userEmails=STATE.userEmailsCache[userId]||[];
+  var assignments=STATE.teamAssignments||[];
+  var myManagers=assignments.filter(function(a){return a.member_id===userId;});
+  var myMembers=assignments.filter(function(a){return a.manager_id===userId;});
+  var rolesAll=['admin','ra_lead','bd_lead','bd','ra'];
+  var roleLabelsMap={admin:'Admin',ra_lead:'RA Team Lead',bd_lead:'BD Team Lead',bd:'BD Manager',ra:'Research Analyst'};
+  var userRoles=usr.roles||[usr.role];
+  var roleCheckboxes=rolesAll.map(function(r){
+    var checked=userRoles.indexOf(r)>-1;
+    return '<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:6px 0"><input type="checkbox" '+(checked?'checked':'')+' onchange="toggleUserRole(\''+userId+'\',\''+r+'\',this.checked)" style="width:15px;height:15px"/>'+roleLabelsMap[r]+'</label>';
+  }).join('');
+  var emailRows=userEmails.map(function(e){
+    var msConnected=e.ms_connected;
+    return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap"><div style="flex:1;min-width:180px"><div style="font-weight:500;font-size:13px">'+htmlEsc(e.display_name||e.email_address)+'</div><div style="font-size:11px;color:var(--text3)">'+htmlEsc(e.email_address)+'</div></div><span style="font-size:10px;padding:2px 7px;border-radius:6px;font-weight:600;background:'+(e.platform==='Microsoft'?'#e0f2fe':'#f0fdf4')+';color:'+(e.platform==='Microsoft'?'#0369a1':'#166534')+'">'+e.platform+'</span>'+(e.is_primary?'<span style="font-size:10px;padding:2px 7px;background:var(--amber-l);color:var(--amber);border-radius:6px;font-weight:600">Primary</span>':'')+'<span style="font-size:10px;padding:2px 7px;border-radius:6px;font-weight:600;background:'+(e.is_active?'var(--green-l)':'var(--red-l)')+';color:'+(e.is_active?'var(--green)':'var(--red)')+'">'+( e.is_active?'Active':'Inactive')+'</span>'+(e.platform==='Microsoft'&&!msConnected?'<button onclick="connectMicrosoftUserEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:10px;padding:2px 8px;background:#0078d4;color:#fff;border:0;border-radius:6px;cursor:pointer">Connect</button>':(e.platform==='Microsoft'&&msConnected?'<span style="font-size:10px;color:var(--green)">&#10003; Connected</span>':''))+'<button onclick="toggleUserEmailActive(\''+userId+'\',\''+e.id+'\','+(e.is_active?'false':'true')+')" style="font-size:11px;color:'+(e.is_active?'var(--red)':'var(--green)')+';background:transparent;border:0;cursor:pointer">'+(e.is_active?'Deactivate':'Activate')+'</button>'+(e.is_primary?'':'<button onclick="setPrimaryEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:11px;color:var(--text3);background:transparent;border:0;cursor:pointer">Set Primary</button>')+'<button onclick="deleteUserEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:11px;color:var(--red);background:transparent;border:0;cursor:pointer">&#10005;</button></div>';
+  }).join('');
+  return '<div class="page"><div class="ph"><div class="flex aic gap3"><button onclick="STATE.selectedManagerUser=null;render()" style="background:transparent;border:0;color:var(--text3);font-size:22px;cursor:pointer">&#8592;</button>'+av(usr,'40')+'<div><div class="ptitle" style="margin:0">'+htmlEsc(usr.name)+'</div><div class="psub" style="margin:0">'+htmlEsc(usr.email)+'</div></div></div></div><div style="max-width:640px"><div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px"><div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Roles</div>'+roleCheckboxes+'</div><div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;margin-bottom:16px"><div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"><div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Email IDs <span style="font-weight:400">('+userEmails.length+' · max 4 active)</span></div><div style="display:flex;gap:6px"><button onclick="openAddUserEmail(\''+userId+'\',\'Microsoft\')" style="font-size:12px;padding:5px 10px;background:#0078d4;color:#fff;border:0;border-radius:7px;cursor:pointer">+ Microsoft</button><button onclick="openAddUserEmail(\''+userId+'\',\'Gmail\')" style="font-size:12px;padding:5px 10px;background:#16a34a;color:#fff;border:0;border-radius:7px;cursor:pointer">+ Gmail</button></div></div>'+(emailRows||'<div style="padding:20px;text-align:center;font-size:13px;color:var(--text3)">No email IDs added yet.</div>')+'</div><div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px"><div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Team Assignment</div>'+(myManagers.length?'<div style="font-size:13px;margin-bottom:8px">Reports to: '+myManagers.map(function(a){return'<strong>'+(a.manager&&a.manager.name||'')+'</strong>';}).join(', ')+'</div>':'')+(myMembers.length?'<div style="font-size:13px">Members: '+myMembers.map(function(a){return(a.member&&a.member.name)||'';}).filter(Boolean).join(', ')+'</div>':'<div style="font-size:13px;color:var(--text3)">No team members assigned.</div>')+'</div></div></div>';
+}
+
+window.openAddEmailAccount=function(managerId,fromDetail,platform){
+  platform=platform||'Microsoft';
+  var managerUser=managerId?STATE.users.find(function(u){return u.id===managerId;}):null;
+  var isMicrosoft=platform==='Microsoft';
+  var platformBadge=isMicrosoft?
+    '<span style="font-size:11px;padding:2px 8px;background:#e0f2fe;color:#0369a1;border-radius:6px;font-weight:600;margin-left:8px">Microsoft / Outlook</span>':
+    '<span style="font-size:11px;padding:2px 8px;background:#f0fdf4;color:#166534;border-radius:6px;font-weight:600;margin-left:8px">Gmail</span>';
+  STATE.modal='<div class="modal modal-w480">'+'<div class="mh">'+'<div>'+'<div class="mt">Add Email Account'+platformBadge+'</div>'+(managerUser?'<div style="font-size:12px;color:var(--text3);margin-top:3px">Assign to '+htmlEsc(managerUser.name)+'</div>':'')+'</div>'+'<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button>'+'</div>'+'<div class="mb_">'+(isMicrosoft?'<div style="padding:12px 14px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--r2);margin-bottom:16px;font-size:13px;color:#0c4a6e">First enter the email address and display name, then click <strong>Save &amp; Connect Microsoft</strong> to authorise sending via Microsoft OAuth.</div>':'<div style="padding:12px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--r2);margin-bottom:16px;font-size:13px;color:#14532d">Enter the Gmail address and display name. Google OAuth sending will be added in a future update.</div>')+'<div class="fgrp"><label class="flbl">Email address <span style="color:var(--red)">*</span></label><input class="inp" id="ea-email" placeholder="e.g. john@futeglobal.com" autocomplete="off"/></div>'+'<div class="fgrp"><label class="flbl">Display name <span style="color:var(--red)">*</span></label><input class="inp" id="ea-name" placeholder="John Smith"/></div>'+'<div class="fgrp"><label class="flbl">Daily outreach limit</label><div style="display:flex;align-items:center;gap:10px"><input class="inp" type="number" id="ea-limit" value="150" min="1" max="500" style="width:120px"/><span style="font-size:12px;color:var(--text3)">emails per day</span></div></div>'+'</div>'+'<div class="mf">'+'<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+(isMicrosoft?'<button class="btn btn-primary" onclick="submitCreateEmailAndConnectMicrosoft(\''+managerId+'\')" style="background:#0078d4">Save &amp; Connect Microsoft</button>':'<button class="btn btn-primary" onclick="submitCreateAndAssignEmailAccount(\''+managerId+'\')" style="background:#16a34a">Save Gmail Account</button>')+'</div>'+'</div>';
+  render();
+};
+
+window.selectEmailAccountToAssign=function(accountId, managerId){
+  // Show limit picker before assigning
+  var a=STATE.emailAccounts.find(function(x){return x.id===accountId;});
+  if(!a)return;
+  STATE.modal='<div class="modal modal-w400">'+
+    '<div class="mh"><div class="mt">Assign '+htmlEsc(a.display_name)+'</div>'+
+    '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div style="padding:12px 14px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:14px">'+
+        '<div style="font-weight:600;font-size:13px">'+htmlEsc(a.display_name)+'</div>'+
+        '<div style="font-size:12px;color:var(--text3)">'+htmlEsc(a.email_address)+'</div>'+
+      '</div>'+
+      '<div class="fgrp"><label class="flbl">Daily outreach limit</label>'+
+        '<div style="display:flex;align-items:center;gap:10px">'+
+          '<input class="inp" type="number" id="ea-assign-limit" value="'+htmlEsc(String(a.daily_send_limit||150))+'" min="1" max="500" style="width:120px"/>'+
+          '<span style="font-size:12px;color:var(--text3)">emails per day</span>'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="submitAssignExistingEmailAccount(\''+accountId+'\',\''+managerId+'\')">Assign to Manager</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+
+window.submitAssignExistingEmailAccount=function(accountId, managerId){
+  var limit=parseInt((document.getElementById('ea-assign-limit')||{}).value||'150');
+  apiPut('/email-accounts/'+accountId,{assigned_to:managerId,daily_send_limit:limit}).then(function(a){
+    STATE.emailAccounts=STATE.emailAccounts.map(function(x){return x.id===accountId?a:x;});
+    closeModal();showToast('Email ID assigned','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.emailAccountTypeahead=function(val){
+  var sugBox=document.getElementById('ea-suggestions');
+  if(!sugBox)return;
+  if(!val||val.length<2){sugBox.style.display='none';return;}
+  var q=val.toLowerCase();
+  var raUsers=(STATE.users||[]).filter(function(u){return u.role==='ra';});
+  var matches=raUsers.filter(function(u){
+    return (u.email||'').toLowerCase().indexOf(q)>-1||(u.name||'').toLowerCase().indexOf(q)>-1;
+  }).slice(0,6);
+  if(!matches.length){sugBox.style.display='none';return;}
+  var html='';
+  matches.forEach(function(u){
+    html+='<div class="_ea-sug" data-email="'+htmlEsc(u.email)+'" data-name="'+htmlEsc(u.name)+'" style="padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">'+
+      '<div style="flex:1">'+
+        '<div style="font-size:13px;font-weight:500">'+htmlEsc(u.name)+'</div>'+
+        '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(u.email)+'</div>'+
+      '</div>'+
+      '<span style="font-size:11px;padding:2px 6px;background:var(--green-l);color:var(--green);border-radius:6px">RA</span>'+
+    '</div>';
+  });
+  sugBox.innerHTML=html;
+  sugBox.style.display='block';
+  // bind click and hover on each suggestion
+  Array.prototype.forEach.call(sugBox.querySelectorAll('._ea-sug'),function(el){
+    el.addEventListener('mouseenter',function(){this.style.background='var(--accent-l)';});
+    el.addEventListener('mouseleave',function(){this.style.background='';});
+    el.addEventListener('click',function(){
+      pickEmailAccountSuggestion(this.getAttribute('data-email'),this.getAttribute('data-name'),150);
+    });
+  });
+};
+
+window.pickEmailAccountSuggestion=function(email,name,limit){
+  var emailEl=document.getElementById('ea-email');
+  var nameEl=document.getElementById('ea-name');
+  var limitEl=document.getElementById('ea-limit');
+  var sugBox=document.getElementById('ea-suggestions');
+  if(emailEl)emailEl.value=email;
+  if(nameEl)nameEl.value=name;
+  if(limitEl)limitEl.value=limit||150;
+  if(sugBox)sugBox.style.display='none';
+};
+
+window.submitCreateEmailAndConnectMicrosoft=function(managerId){
+  var email=(document.getElementById('ea-email')||{}).value||'';
+  var name=(document.getElementById('ea-name')||{}).value||'';
+  var limit=parseInt((document.getElementById('ea-limit')||{}).value||'150');
+  if(!email||!name){showToast('Email address and display name required','warning');return;}
+  // Sanitise managerId — treat string "null" or empty as no assignment
+  var assignTo=(managerId&&managerId!=='null'&&managerId!=='')?managerId:undefined;
+  // First create the email account record
+  apiPost('/email-accounts',{email_address:email,display_name:name,assigned_to:assignTo,daily_send_limit:limit,platform:'Microsoft'}).then(function(a){
+    STATE.emailAccounts.push(a);
+    closeModal();
+    render();
+    // Then open Microsoft OAuth popup
+    var url=API_URL+'/auth/microsoft/connect?accountId='+a.id+'&token='+STATE.token;
+    var popup=window.open(url,'ms_oauth','width=600,height=700,scrollbars=yes');
+    showToast('Account created — complete Microsoft login in the popup','info');
+    // Listen for popup callback
+    window._msOAuthHandler=function(event){
+      if(event.data&&event.data.type==='ms_oauth_success'){
+        window.removeEventListener('message',window._msOAuthHandler);
+        STATE.emailAccounts=STATE.emailAccounts.map(function(x){
+          return x.id===event.data.accountId?Object.assign({},x,{platform:'Microsoft',ms_connected:true}):x;
+        });
+        showToast('Microsoft account connected: '+event.data.email,'success');
+        render();
+      } else if(event.data&&event.data.type==='ms_oauth_error'){
+        window.removeEventListener('message',window._msOAuthHandler);
+        showToast('Microsoft connection failed: '+event.data.error,'error');
+      }
+    };
+    window.addEventListener('message',window._msOAuthHandler);
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.submitCreateAndAssignEmailAccount=function(managerId){
+  var email=(document.getElementById('ea-email')||{}).value||'';
+  var name=(document.getElementById('ea-name')||{}).value||'';
+  var limit=parseInt((document.getElementById('ea-limit')||{}).value||'150');
+  if(!email||!name){showToast('Email address and display name required','warning');return;}
+  var assignTo=(managerId&&managerId!=='null'&&managerId!=='')?managerId:undefined;
+  apiPost('/email-accounts',{email_address:email,display_name:name,assigned_to:assignTo,daily_send_limit:limit}).then(function(a){
+    STATE.emailAccounts.push(a);
+    closeModal();showToast('Email ID created and assigned','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};;
+
+window.openEditEmailAccount=function(id){
+  var a=STATE.emailAccounts.find(function(x){return x.id===id;});
+  if(!a)return;
+  var managers=STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead'||x.role==='admin';});
+  var mOpts='<option value="">— Unassigned —</option>'+managers.map(function(m){
+    return '<option value="'+m.id+'"'+(a.assigned_to===m.id?' selected':'')+'>'+htmlEsc(m.name)+'</option>';
+  }).join('');
+  STATE.modal='<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Edit Email ID</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div class="fgrp"><label class="flbl">Email address</label><input class="inp" id="ea-email" value="'+htmlEsc(a.email_address)+'"/></div>'+
+      '<div class="fgrp"><label class="flbl">Display name</label><input class="inp" id="ea-name" value="'+htmlEsc(a.display_name)+'"/></div>'+
+      '<div class="fgrp"><label class="flbl">Assign to Manager</label><select class="sel" id="ea-manager">'+mOpts+'</select></div>'+
+      '<div class="fgrp"><label class="flbl">Daily send limit</label><input class="inp" type="number" id="ea-limit" value="'+htmlEsc(String(a.daily_send_limit||150))+'" min="1" max="500"/></div>'+
+    '</div>'+
+    '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="submitEditEmailAccount(\''+id+'\')">Save changes</button></div>'+
+  '</div>';
+  render();
+};
+
+;
+
+window.submitEditEmailAccount=function(id){
+  var email=(document.getElementById('ea-email')||{}).value||'';
+  var name=(document.getElementById('ea-name')||{}).value||'';
+  var manager=(document.getElementById('ea-manager')||{}).value||null;
+  var limit=parseInt((document.getElementById('ea-limit')||{}).value||'150');
+  apiPut('/email-accounts/'+id,{email_address:email,display_name:name,assigned_to:manager||null,daily_send_limit:limit}).then(function(a){
+    STATE.emailAccounts=STATE.emailAccounts.map(function(x){return x.id===id?a:x;});
+    closeModal();showToast('Email ID updated','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.toggleEmailAccount=function(id,active){
+  apiPut('/email-accounts/'+id,{is_active:active}).then(function(a){
+    STATE.emailAccounts=STATE.emailAccounts.map(function(x){return x.id===id?a:x;});
+    showToast(active?'Email ID activated':'Email ID deactivated','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+// ════════════════════════════════════════════════
+// ASSIGN LEADS — RA Team Lead bulk assign UI (Drop E)
+// ════════════════════════════════════════════════
+function renderAssignLeads(){
+  var u=STATE.user;
+  var poolStats=STATE.distributePoolStats||{total:0,by_freshness:{},by_industry:{},by_timezone:{},duplicates:0};
+  var managers=STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead';});
+
+  // Show manager cards
+  var managerCards=managers.map(function(m){
+    var emailAccounts=(STATE.userEmailsCache[m.id]||[]).filter(function(a){return a.is_active;});
+    var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
+    var hasCapacity=emailAccounts.length>0;
+    return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:16px;display:flex;align-items:center;gap:14px;margin-bottom:12px">'+
+      av(m,'40')+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-weight:600;font-size:14px">'+htmlEsc(m.name)+'</div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:3px">'+
+          emailAccounts.length+' email ID'+(emailAccounts.length!==1?'s':'')+
+          ' \u00b7 '+capacity+' emails/day capacity'+
+        '</div>'+
+        (emailAccounts.length?
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">'+
+            emailAccounts.map(function(a){
+              return '<span style="font-size:11px;padding:2px 8px;background:var(--accent-l);color:var(--accent);border-radius:6px">'+htmlEsc(a.display_name)+'</span>';
+            }).join('')+
+          '</div>':
+          '<div style="font-size:12px;color:var(--red);margin-top:4px">No email IDs assigned</div>')+
+      '</div>'+
+      (hasCapacity&&poolStats.total>0?
+        '<button onclick="openAssignToManager(\''+m.id+'\')" style="background:var(--accent);color:#fff;border:0;padding:10px 20px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap">Assign leads</button>':
+        '<span style="font-size:12px;color:var(--text3);padding:8px 12px">'+(!hasCapacity?'No email IDs':'No leads')+'</span>')+
+    '</div>';
+  }).join('');
+
+  // Pool summary bar
+  var poolBar='';
+  if(poolStats.total>0){
+    var bf=poolStats.by_freshness||{};
+    var bi=poolStats.by_industry||{};
+    var btz=poolStats.by_timezone||{};
+    poolBar='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px 16px;margin-bottom:18px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+        '<div style="font-weight:600;font-size:13px">Unassigned lead pool</div>'+
+        '<div style="font-size:22px;font-weight:700;color:var(--accent)">'+poolStats.total+'</div>'+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;font-size:12px">'+
+        '<div>'+
+          '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Freshness</div>'+
+          Object.keys(bf).map(function(k){
+            var col=k==='Old'?'var(--red)':k==='New'?'var(--green)':'var(--accent)';
+            return '<div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:'+col+';font-weight:500">'+k+'</span><span>'+bf[k]+'</span></div>';
+          }).join('')+
+        '</div>'+
+        '<div>'+
+          '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Industry</div>'+
+          Object.keys(bi).slice(0,5).map(function(k){
+            return '<div style="display:flex;justify-content:space-between;padding:2px 0"><span>'+htmlEsc(k)+'</span><span>'+bi[k]+'</span></div>';
+          }).join('')+
+        '</div>'+
+        '<div>'+
+          '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Timezone</div>'+
+          Object.keys(btz).map(function(k){
+            return '<div style="display:flex;justify-content:space-between;padding:2px 0"><span>'+htmlEsc(k)+'</span><span>'+btz[k]+'</span></div>';
+          }).join('')+
+        '</div>'+
+      '</div>'+
+      (poolStats.duplicates?'<div style="margin-top:8px;font-size:12px;color:var(--amber)">\u26a0 '+poolStats.duplicates+' duplicate leads in pool</div>':'')+
+    '</div>';
+  } else {
+    poolBar='<div style="background:var(--green-l);border:1px solid var(--green);border-radius:var(--r2);padding:14px 16px;margin-bottom:18px;font-size:13px;color:var(--green);font-weight:600">\u2713 No unassigned leads — pool is clear for today.</div>';
+  }
+
+  return '<div class="page">'+
+    '<div class="ph"><div class="flex jb aic">'+
+      '<div><div class="ptitle">Assign Leads</div>'+
+        '<div class="psub">'+poolStats.total+' unassigned leads in pool \u00b7 '+managers.length+' managers</div></div>'+
+      '<div style="display:flex;gap:8px">'+
+        '<button onclick="getTodaySummary()" style="background:var(--purple);color:#fff;border:0;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">📋 Today's lead summary</button>'+
+        '<button onclick="refreshPoolStats()" style="background:transparent;border:1px solid var(--border);color:var(--text2);padding:7px 13px;border-radius:8px;font-size:12px;cursor:pointer">\u21bb Refresh pool</button>'+
+      '</div>'+
+    '</div></div>'+
+    poolBar+
+    '<div style="font-weight:600;font-size:13px;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Managers</div>'+
+    managerCards+
+  '</div>';
+}
+
+window.toggleAssignSel=function(id,v){
+  if(!STATE.assignSel)STATE.assignSel={};
+  STATE.assignSel[id]=v;render();
+};
+window.toggleAllAssign=function(v){
+  if(!STATE.assignSel)STATE.assignSel={};
+  var f=STATE.assignFilter||{ra:'',dup:'all'};
+  STATE.jobs.filter(function(j){
+    if(j.stage!=='Unassigned')return false;
+    if(f.ra&&j.created_by!==f.ra)return false;
+    if(f.dup==='dup'&&!j.is_duplicate)return false;
+    if(f.dup==='clean'&&j.is_duplicate)return false;
+    return true;
+  }).forEach(function(j){STATE.assignSel[j.id]=v;});
+  render();
+};
+window.setAssignFilter=function(k,v){
+  if(!STATE.assignFilter)STATE.assignFilter={ra:'',dup:'all'};
+  STATE.assignFilter[k]=v;
+  STATE.assignSel={};render();
+};
+window.openAssignConfirm=function(){
+  var sel=STATE.assignSel||{};
+  var selIds=Object.keys(sel).filter(function(k){return sel[k];});
+  var bdId=STATE.assignTargetBD;
+  if(!selIds.length||!bdId){showToast('Select leads and a BD first','warning');return;}
+  var bd=STATE.users.find(function(u){return u.id===bdId;})||{name:'Unknown'};
+  var now=new Date();
+  var dateStr=now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  var timeStr=now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  STATE.modal='<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Confirm Assignment</div></div>'+
+    '<div class="mb_">'+
+      '<div style="padding:16px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:12px">'+
+        '<div style="font-size:22px;font-weight:700;color:var(--accent);margin-bottom:4px">'+selIds.length+' leads</div>'+
+        '<div style="font-size:14px;color:var(--text2)">\u2192 <strong>'+htmlEsc(bd.name)+'</strong></div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:6px">'+dateStr+' \u00b7 '+timeStr+'</div>'+
+      '</div>'+
+      '<div style="font-size:13px;color:var(--text2)">Once confirmed, these leads will be marked <strong>Assigned</strong> and the email engine will begin sending outreach emails over the next 2\u20133 minutes.</div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="submitBulkAssign()">Confirm & Assign</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+window.submitBulkAssign=function(){
+  var sel=STATE.assignSel||{};
+  var selIds=Object.keys(sel).filter(function(k){return sel[k];});
+  var bdId=STATE.assignTargetBD;
+  if(!selIds.length||!bdId)return;
+  closeModal();
+  apiPost('/jobs/bulk-assign',{job_ids:selIds,assigned_to_bd:bdId}).then(function(res){
+    showToast(res.assigned+' leads assigned to '+res.bd_name,'success');
+    STATE.assignSel={};STATE.assignTargetBD='';
+    // Generate emails then reload both jobs and pending emails
+    return apiPost('/emails/generate',{job_ids:selIds}).then(function(genRes){
+      showToast(genRes.generated+' emails generated for '+res.bd_name,'success');
+      return Promise.all([
+        refreshJobs(),
+        apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];})
+      ]).then(function(){render();});
+    });
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+// ════════════════════════════════════════════════
+// BOOT (standalone) — disabled, API layer below boots instead
+// ════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════
+// API LAYER — Drop B2 (Jobs wired to backend)
+// ════════════════════════════════════════════════
+var IS_FILE=window.location.protocol==='file:';
+var API_URL=(function(){var h=window.location.hostname;if(h===''||h==='localhost'||h.indexOf('127.')===0)return'https://fute-lms-backend.onrender.com';if(h.indexOf('onrender.com')>=0)return'';return'https://fute-lms-backend.onrender.com';})();
+function apiFetch(method,path,body){var headers={'Content-Type':'application/json'};if(STATE.token)headers['Authorization']='Bearer '+STATE.token;return fetch(API_URL+path,{method:method,headers:headers,body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||('HTTP '+r.status));return d;});});}
+function apiGet(p){return apiFetch('GET',p);}
+function apiPost(p,b){return apiFetch('POST',p,b);}
+function apiPut(p,b){return apiFetch('PUT',p,b);}
+function apiPatch(p,b){return apiFetch('PATCH',p,b);}
+function apiDelete(p){return apiFetch('DELETE',p);}
+
+// ── Restore session if present ─────────────────
+STATE.token=localStorage.getItem('fg_token')||null;
+try{var _su=localStorage.getItem('fg_user');if(_su){var _parsed=JSON.parse(_su);STATE.user=normaliseUser(_parsed);}}catch(e){}
+// Wipe demo seed data — will be replaced by API on login
+STATE.jobs=[];STATE.contacts=[];STATE.users=[];STATE.companies=[];STATE.emails=[];STATE.reminders=[];STATE.activities=[];STATE.leads=[];
+
+function normaliseUser(u){
+  var nm=u.name||'';
+  var parts=nm.trim().split(/\s+/);
+  var initials=((parts[0]||'')[0]||'')+((parts[1]||'')[0]||'');
+  var roles=u.roles||(u.role?[u.role]:[]);
+  var primaryRole=roles[0]||u.role||'ra';
+  var roleAvc={admin:'av-admin',bd:'av-bd',ra:'av-ra',ra_lead:'av-admin',bd_lead:'av-bd'};
+  return{id:u.id,name:nm,email:u.email,role:primaryRole,roles:roles,empId:u.employee_id,desig:u.designation,plt:u.platform||'Gmail',ooo:u.ooo_until||null,av:initials.toUpperCase()||'?',avc:roleAvc[primaryRole]||'av-ra',bdm:null};
+}
+function userHasRole(u,role){
+  if(!u)return false;
+  if(Array.isArray(u.roles)&&u.roles.length)return u.roles.indexOf(role)>-1;
+  return u.role===role;
+}
+function userHasAnyRole(u){
+  var roles=Array.prototype.slice.call(arguments,1);
+  return roles.some(function(r){return userHasRole(u,r);});
+}
+function normaliseJob(j){
+  var co=j.company||{};
+  var bd=j.bd_assignee||{};
+  var sa=j.sending_account||{};
+  return{id:j.id,company_id:j.company_id,company_name:co.name||'',company_ind:co.industry||'',company_web:co.website||'',
+    position:j.position,location:j.location||'',source:j.source||'',job_url:j.job_url||'',
+    stage:j.stage||'Unassigned',notes:j.notes||'',created_by:j.created_by,assigned_to:j.assigned_to,
+    assigned_to_bd:j.assigned_to_bd||null,assigned_bd_name:bd.name||'',assigned_at:j.assigned_at||null,
+    is_duplicate:!!j.is_duplicate,duplicate_of:j.duplicate_of||null,
+    salary_range:j.salary_range||'',job_created_date:j.job_created_date||'',job_opened_date:j.job_opened_date||'',
+    timezone:j.timezone||'',freshness:j.freshness||'',industry:j.industry||'',
+    bdm_assigned_name:j.bdm_assigned_name||'',
+    sending_email_id:j.sending_email_id||null,sending_email:sa.email_address||'',sending_display:sa.display_name||'',
+    research:j.research||null,
+    created_date:j.created_date,created_at:j.created_at};
+}
+function flattenContacts(jobs){var out=[];jobs.forEach(function(j){(j.contacts||[]).forEach(function(c){out.push({id:c.id,job_id:c.job_id,first_name:c.first_name,last_name:c.last_name||'',designation:c.designation||'',email:c.email||'',phone:c.phone||'',linkedin:c.linkedin||'',is_primary:!!c.is_primary,email_status:c.email_status||'valid',ooo_until:c.ooo_until||null});});});return out;}
+
+function loadAppData(){
+  STATE.loading=true;render();
+  var calls=[apiGet('/users'),apiGet('/jobs'),apiGet('/companies'),apiGet('/reminders')];
+  var u=STATE.user;
+  var isBD=(u&&(u.role==='bd'||u.role==='bd_lead'||u.role==='admin'||u.role==='ra_lead'));
+  if(isBD)calls.push(apiGet('/emails?status=pending'));
+  if(isBD)calls.push(apiGet('/emails?status=queued'));
+  return Promise.all(calls).then(function(r){
+    STATE.users=r[0].map(normaliseUser);
+    STATE.jobs=r[1].map(normaliseJob);
+    STATE.contacts=flattenContacts(r[1]);
+    STATE.companies=r[2].map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});
+    STATE.reminders=r[3]||[];
+    STATE.emailAccounts=[];
+    // Load pool stats for ra_lead/admin
+    if(STATE.user&&(STATE.user.role==='ra_lead'||STATE.user.role==='admin')){
+      apiGet('/distribute/pool-stats').then(function(d){STATE.distributePoolStats=d;render();}).catch(function(){});
+    }
+    // Load today's summary for BD
+    if(STATE.user&&(STATE.user.role==='bd'||STATE.user.role==='bd_lead')){
+      apiGet('/distribute/today-summary').then(function(d){STATE.todaySummary=d;render();}).catch(function(){});
+    }
+    if(isBD){
+      STATE.pendingEmails=(r[4]||[]);
+      STATE.emails=(r[5]||[]);
+      apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];render();}).catch(function(){STATE.sentEmails=[];});
+    }
+    // Load app settings (global send times)
+    apiGet('/app-settings').then(function(s){
+      STATE.appSettings=s||{};
+      render();
+    }).catch(function(){});
+    // Load current user's own email IDs for compose From selector
+    if(STATE.user){
+      apiGet('/users/'+STATE.user.id+'/emails').then(function(emails){
+        STATE.userEmailsCache=STATE.userEmailsCache||{};
+        STATE.userEmailsCache[STATE.user.id]=emails||[];
+        render();
+      }).catch(function(){});
+    }
+    // Load this user's personal outreach plan
+    if(STATE.user&&userHasAnyRole(STATE.user,'bd','bd_lead','admin')){
+      apiGet('/outreach-plan').then(function(plan){
+        STATE.myOutreachPlan=plan||{};
+        if(plan['tmpl_o1_subject'])STATE.emailSubj=plan['tmpl_o1_subject'];
+        if(plan['tmpl_o1_body'])STATE.emailBody=plan['tmpl_o1_body'];
+        if(plan['tmpl_fu1_subject'])STATE.fu1Subj=plan['tmpl_fu1_subject'];
+        if(plan['tmpl_fu1_body'])STATE.fu1Body=plan['tmpl_fu1_body'];
+        if(plan['tmpl_fu2_subject'])STATE.fu2Subj=plan['tmpl_fu2_subject'];
+        if(plan['tmpl_fu2_body'])STATE.fu2Body=plan['tmpl_fu2_body'];
+        render();
+      }).catch(function(){});
+    }
+    // Load team assignments for admin/bd_lead
+    if(STATE.user&&userHasAnyRole(STATE.user,'admin','bd_lead','ra_lead')){
+      apiGet('/team-assignments').then(function(d){STATE.teamAssignments=d||[];render();}).catch(function(){});
+      // Pre-load email IDs for all users
+      apiGet('/users').then(function(users){
+        (users||[]).forEach(function(u){
+          apiGet('/users/'+u.id+'/emails').then(function(emails){
+            STATE.userEmailsCache=STATE.userEmailsCache||{};
+            STATE.userEmailsCache[u.id]=emails||[];
+          }).catch(function(){});
+        });
+      }).catch(function(){});
+    }
+    STATE.loading=false;render();
+  }).catch(function(err){
+    STATE.loading=false;STATE.user=null;STATE.token=null;
+    localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');
+    showToast('Could not connect: '+err.message,'error');render();
+  });
+}
+function refreshJobs(){return apiGet('/jobs').then(function(j){STATE.jobs=j.map(normaliseJob);STATE.contacts=flattenContacts(j);render();});}
+
+// ── Auth ───────────────────────────────────────
+window.doLogin=function(){
+  if(IS_FILE){showToast('Open via fute-lms-backend.onrender.com','warning');return;}
+  var em=(document.getElementById('login-email')||{}).value||'';
+  var pw=(document.getElementById('login-pass')||{}).value||'';
+  if(!em||!pw){var e=document.getElementById('login-err');if(e){e.textContent='Enter email and password';e.style.display='block';}return;}
+  STATE.loading=true;render();
+  apiPost('/auth/login',{email:em,password:pw}).then(function(d){
+    STATE.token=d.token;STATE.user=normaliseUser(d.user);
+    localStorage.setItem('fg_token',d.token);localStorage.setItem('fg_user',JSON.stringify(STATE.user));
+    STATE.page='dashboard';loadAppData();
+  }).catch(function(err){
+    STATE.loading=false;render();
+    var e=document.getElementById('login-err');if(e){e.textContent=err.message||'Invalid credentials';e.style.display='block';}
+  });
+};
+window.loginAs=function(){showToast('Use email + password to log in','warning');};
+window.doLogout=function(){STATE.user=null;STATE.token=null;localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');STATE.jobs=[];STATE.contacts=[];STATE.page='login';render();};
+
+// ── Jobs (wired) ───────────────────────────────
+window.toggleJobSel=function(id,v){
+  STATE.jobsSel=STATE.jobsSel||{};
+  STATE.jobsSel[id]=v;
+  render();
+};
+
+window.toggleAllJobs=function(v){
+  STATE.jobsSel=STATE.jobsSel||{};
+  var u=STATE.user;
+  var jobs=getMyJobs(u);
+  var f=STATE.jobsFilter;
+  var _tp=Math.max(1,Math.ceil(jobs.length/20));
+  var _pg=Math.min(STATE.leadsPage||0,_tp-1);
+  var pageJobs=jobs.slice(_pg*20,(_pg+1)*20);
+  pageJobs.forEach(function(j){STATE.jobsSel[j.id]=v;});
+  render();
+};
+
+window.applyBulkJobStage=function(){
+  var sel=document.getElementById('bulk-job-stage');
+  if(!sel||!sel.value){showToast('Pick a stage first','warning');return;}
+  var stage=sel.value;
+  var ids=Object.keys(STATE.jobsSel||{}).filter(function(k){return STATE.jobsSel[k];});
+  if(!ids.length){showToast('No leads selected','warning');return;}
+  apiPost('/jobs/bulk-stage',{job_ids:ids,stage:stage}).then(function(res){
+    showToast(res.updated+' leads moved to '+stage,'success');
+    STATE.jobsSel={};
+    // If changed to Unassigned, clear assigned_to_bd on local state
+    STATE.jobs=STATE.jobs.map(function(j){
+      if(ids.indexOf(j.id)>-1){
+        var updated=Object.assign({},j,{stage:stage});
+        if(stage==='Unassigned'){updated.assigned_to_bd=null;updated.assigned_bd_name='';updated.sending_email_id=null;}
+        return updated;
+      }
+      return j;
+    });
+    // Reload pending emails in case stage change affects them
+    return apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];render();});
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+window.changeJobStage=function(jid,st){
+  var j=jobById(jid);if(!j)return;var old=j.stage;j.stage=st;render();
+  apiPut('/jobs/'+jid,{stage:st}).then(function(){showToast('Stage updated','success');}).catch(function(e){j.stage=old;showToast('Failed: '+e.message,'error');render();});
+};
+window.saveJobNotes=function(jid,val){
+  var j=jobById(jid);if(!j||j.notes===val)return;var old=j.notes;j.notes=val;
+  apiPut('/jobs/'+jid,{notes:val}).then(function(){showToast('Notes saved','success');}).catch(function(e){j.notes=old;showToast('Failed: '+e.message,'error');render();});
+};
+window.deleteJob=function(jid){
+  if(!confirm('Delete this job and all its contacts?'))return;
+  apiDelete('/jobs/'+jid).then(function(){STATE.modal=null;STATE.detailJob=null;showToast('Job deleted','success');return refreshJobs();}).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+window.submitAddJob=function(){
+  var co=document.getElementById('aj-co').value;
+  var pos=document.getElementById('aj-pos').value.trim();
+  var fn=document.getElementById('aj-fn').value.trim();
+  if(!co){showToast('Pick a company','error');return;}
+  if(!pos){showToast('Position is required','error');return;}
+  if(!fn){showToast('First contact name is required','error');return;}
+  var payload={company_id:co,position:pos,
+    location:document.getElementById('aj-loc').value.trim(),
+    source:document.getElementById('aj-src').value.trim()||'LinkedIn',
+    job_url:document.getElementById('aj-url').value.trim(),
+    stage:'Active',notes:'',
+    contacts:[{first_name:fn,last_name:document.getElementById('aj-ln').value.trim(),
+      designation:document.getElementById('aj-desig').value.trim(),
+      email:document.getElementById('aj-email').value.trim(),
+      phone:document.getElementById('aj-phone').value.trim(),linkedin:''}]};
+  apiPost('/jobs',payload).then(function(){STATE.modal=null;showToast('Job created','success');return refreshJobs();}).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+window.submitAddContact=function(jid){
+  var fn=document.getElementById('ac-fn').value.trim();
+  if(!fn){showToast('First name is required','error');return;}
+  var existing=jobContacts(jid);
+  apiPost('/contacts',{job_id:jid,first_name:fn,
+    last_name:document.getElementById('ac-ln').value.trim(),
+    designation:document.getElementById('ac-desig').value.trim(),
+    email:document.getElementById('ac-email').value.trim(),
+    phone:document.getElementById('ac-phone').value.trim(),
+    linkedin:document.getElementById('ac-linkedin').value.trim(),
+    is_primary:existing.length===0
+  }).then(function(){showToast('Contact added','success');STATE.modal={type:'jobDetail',id:jid};return refreshJobs();}).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+window.deleteContact=function(cid){
+  if(!confirm('Delete this contact?'))return;
+  apiDelete('/contacts/'+cid).then(function(){showToast('Contact deleted','success');return refreshJobs();}).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+// ── Boot ───────────────────────────────────────
+if(STATE.token&&STATE.user){STATE.page='dashboard';loadAppData();}else{STATE.page='login';render();}
+
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</body>
+</html>
