@@ -812,8 +812,10 @@ app.post('/emails/send-selected', auth, async (req, res) => {
     if (fetchErr) throw fetchErr;
     if (!pendingEmails || !pendingEmails.length) return res.json({ success: true, sent: 0, failed: 0 });
 
-    // Respond immediately — send loop runs in background with delays
-    res.json({ success: true, queued: pendingEmails.length, message: `Sending ${pendingEmails.length} emails with random delays. Check Sent tab for progress.` });
+    const totalCount = pendingEmails.length;
+    const userId = req.user.id;
+    res.json({ success: true, queued: totalCount });
+    await setSendProgress(userId, { active: true, total: totalCount, sent: 0, failed: 0, current: '', failDetails: [], startedAt: new Date().toISOString() });
 
     let sent = 0, failed = 0;
     const failDetails = [], sentContactIds = [], sentJobIds = [];
@@ -827,14 +829,17 @@ app.post('/emails/send-selected', auth, async (req, res) => {
         failed++;
         failDetails.push({ id: email.id, to: email.to_email, from: email.from_email || '—', error: 'No sending email configured for this job' });
         try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
+        await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
         continue;
       }
       if (platform === 'gmail' || platform === 'google') {
         failed++;
         failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || '—', error: 'Gmail sending not connected yet' });
         try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
+        await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
         continue;
       }
+      await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
       try {
         const accessToken = await getMicrosoftToken(userEmailId);
         const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
@@ -850,21 +855,34 @@ app.post('/emails/send-selected', auth, async (req, res) => {
         if (email.contact_id) sentContactIds.push(email.contact_id);
         if (email.job_id) sentJobIds.push(email.job_id);
         sent++;
-        // Random delay before next email
-        if (sent + failed < pendingEmails.length) await randomDelay(1, 120);
+        await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
+        if (sent + failed < totalCount) await randomDelay(1, 120);
       } catch (e) {
         failed++;
         failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: e.message });
         try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
+        await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
       }
     }
 
     const uniqueContactIds = [...new Set(sentContactIds.filter(Boolean))];
     if (uniqueContactIds.length) await supabase.from('contacts').update({ email_sent_at: today() }).in('id', uniqueContactIds);
     const uniqueJobIds = [...new Set(sentJobIds.filter(Boolean))];
-    for (const jid of uniqueJobIds) await logActivity(jid, null, req.user.id, 'emails_sent', `${sent} email(s) sent via Microsoft`, null, null);
+    for (const jid of uniqueJobIds) await logActivity(jid, null, userId, 'emails_sent', `${sent} email(s) sent via Microsoft`, null, null);
+    await setSendProgress(userId, { active: false, done: true, total: totalCount, sent, failed, failDetails, completedAt: new Date().toISOString() });
+    setTimeout(() => clearSendProgress(userId), 60000);
     console.log(`[SendSelected] Completed: ${sent} sent, ${failed} failed`);
   } catch (err) { console.error('[SendSelected] Error:', err.message); }
+});
+
+app.get('/emails/send-progress', auth, async (req, res) => {
+  try {
+    const key = `send_progress_${req.user.id}`;
+    const { data } = await supabase.from('app_settings').select('value').eq('key', key).single();
+    if (!data) return res.json({ active: false });
+    const progress = JSON.parse(data.value);
+    res.json(progress);
+  } catch { res.json({ active: false }); }
 });
 
 app.post('/emails/queue-all', auth, async (req, res) => {
@@ -880,7 +898,9 @@ app.post('/emails/queue-all', auth, async (req, res) => {
 
     // Respond immediately so browser doesn't time out — send loop runs in background
     const totalCount = pendingEmails.length;
-    res.json({ success: true, queued: totalCount, message: `Sending ${totalCount} emails with random delays (up to 120s between each). Check Sent tab for progress.` });
+    const userId = req.user.id;
+    res.json({ success: true, queued: totalCount });
+    await setSendProgress(userId, { active: true, total: totalCount, sent: 0, failed: 0, current: '', failDetails: [], startedAt: new Date().toISOString() });
 
     let sent = 0;
     let failed = 0;
@@ -897,6 +917,7 @@ app.post('/emails/queue-all', auth, async (req, res) => {
         failed++;
         failDetails.push({ id: email.id, to: email.to_email, from: email.from_email || '—', error: 'No sending email configured for this job' });
         try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
+        await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
         continue;
       }
 
@@ -905,8 +926,12 @@ app.post('/emails/queue-all', auth, async (req, res) => {
         failed++;
         failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: 'Gmail sending not connected yet — please connect Google OAuth' });
         try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
+        await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
         continue;
       }
+
+      // Update progress: currently sending this email
+      await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
 
       try {
         const accessToken = await getMicrosoftToken(userEmailId);
@@ -935,23 +960,22 @@ app.post('/emails/queue-all', auth, async (req, res) => {
         if (email.contact_id) sentContactIds.push(email.contact_id);
         if (email.job_id) sentJobIds.push(email.job_id);
         sent++;
-        // Random delay before next email (skip delay after last email)
+        await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
         if (sent + failed < pendingEmails.length) await randomDelay(1, 120);
       } catch (e) {
         failed++;
         failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: e.message });
-        // Mark as failed so it's visible in UI
         try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
+        await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
       }
     }
 
-    // Update contact email_sent_at for successful sends
     const uniqueContactIds = [...new Set(sentContactIds.filter(Boolean))];
     if (uniqueContactIds.length) await supabase.from('contacts').update({ email_sent_at: today() }).in('id', uniqueContactIds);
-
-    // Log activity per job
     const uniqueJobIds = [...new Set(sentJobIds.filter(Boolean))];
-    for (const jid of uniqueJobIds) await logActivity(jid, null, req.user.id, 'emails_sent', `${sent} email(s) sent via Microsoft`, null, null);
+    for (const jid of uniqueJobIds) await logActivity(jid, null, userId, 'emails_sent', `${sent} email(s) sent via Microsoft`, null, null);
+    await setSendProgress(userId, { active: false, done: true, total: totalCount, sent, failed, failDetails, completedAt: new Date().toISOString() });
+    setTimeout(() => clearSendProgress(userId), 60000);
     console.log(`[SendAll] Completed: ${sent} sent, ${failed} failed`);
   } catch (err) { console.error('[SendAll] Error:', err.message); }
 });
@@ -1601,6 +1625,16 @@ app.get('/auth/microsoft/callback', async (req, res) => {
 function randomDelay(minSec = 1, maxSec = 120) {
   const ms = Math.floor(Math.random() * (maxSec - minSec + 1) + minSec) * 1000;
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Send progress tracking — stored in app_settings keyed per user
+async function setSendProgress(userId, data) {
+  const key = `send_progress_${userId}`;
+  await supabase.from('app_settings').upsert({ key, value: JSON.stringify(data) }, { onConflict: 'key' }).catch(() => {});
+}
+async function clearSendProgress(userId) {
+  const key = `send_progress_${userId}`;
+  await supabase.from('app_settings').delete().eq('key', key).catch(() => {});
 }
 
 async function getMicrosoftToken(userEmailId) {
