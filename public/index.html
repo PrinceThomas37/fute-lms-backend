@@ -2591,37 +2591,52 @@ window.submitAddUserEmailMicrosoft=function(userId){
     closeModal();render();
     // Open Microsoft OAuth popup
     var url=API_URL+'/auth/microsoft/connect?userEmailId='+e.id+'&token='+STATE.token;
-    window.open(url,'ms_oauth','width=600,height=700,scrollbars=yes');
-    showToast('Complete Microsoft login in the popup','info');
-    window._msOAuthHandler=function(event){
-      if(event.data&&event.data.type==='ms_oauth_success'){
-        window.removeEventListener('message',window._msOAuthHandler);
+    var newEmailId=e.id;
+    var popupName2='ms_oauth_'+newEmailId.replace(/-/g,'');
+    window.open(url,popupName2,'width=600,height=700,scrollbars=yes');
+    showToast('Sign in with the Microsoft account for this email slot only','info');
+    var handlerKey2='_msHandler_'+newEmailId.replace(/-/g,'');
+    if(window[handlerKey2])window.removeEventListener('message',window[handlerKey2]);
+    window[handlerKey2]=function(event){
+      if(!event.data||event.data.userEmailId!==newEmailId)return;
+      if(event.data.type==='ms_oauth_success'){
+        window.removeEventListener('message',window[handlerKey2]);
+        delete window[handlerKey2];
         loadUserEmails(userId);
         showToast('Microsoft connected: '+event.data.email,'success');
-      } else if(event.data&&event.data.type==='ms_oauth_error'){
-        window.removeEventListener('message',window._msOAuthHandler);
+      } else if(event.data.type==='ms_oauth_error'){
+        window.removeEventListener('message',window[handlerKey2]);
+        delete window[handlerKey2];
         showToast('Connection failed: '+event.data.error,'error');
       }
     };
-    window.addEventListener('message',window._msOAuthHandler);
+    window.addEventListener('message',window[handlerKey2]);
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
 window.connectMicrosoftUserEmail=function(userId,userEmailId){
   var url=API_URL+'/auth/microsoft/connect?userEmailId='+userEmailId+'&token='+STATE.token;
-  window.open(url,'ms_oauth','width=600,height=700,scrollbars=yes');
-  showToast('Complete Microsoft login in the popup','info');
-  window._msOAuthHandler=function(event){
-    if(event.data&&event.data.type==='ms_oauth_success'){
-      window.removeEventListener('message',window._msOAuthHandler);
+  // Use a unique popup name per userEmailId so multiple simultaneous popups don't conflict
+  var popupName='ms_oauth_'+userEmailId.replace(/-/g,'');
+  window.open(url,popupName,'width=600,height=700,scrollbars=yes');
+  showToast('Sign in with the Microsoft account for this email slot only','info');
+  // Remove any previous handler for this exact userEmailId before adding a new one
+  var handlerKey='_msHandler_'+userEmailId.replace(/-/g,'');
+  if(window[handlerKey])window.removeEventListener('message',window[handlerKey]);
+  window[handlerKey]=function(event){
+    if(!event.data||event.data.userEmailId!==userEmailId)return; // ignore messages for other accounts
+    if(event.data.type==='ms_oauth_success'){
+      window.removeEventListener('message',window[handlerKey]);
+      delete window[handlerKey];
       loadUserEmails(userId);
       showToast('Connected: '+event.data.email,'success');
-    } else if(event.data&&event.data.type==='ms_oauth_error'){
-      window.removeEventListener('message',window._msOAuthHandler);
-      showToast('Failed: '+event.data.error,'error');
+    } else if(event.data.type==='ms_oauth_error'){
+      window.removeEventListener('message',window[handlerKey]);
+      delete window[handlerKey];
+      showToast('Connection failed: '+event.data.error,'error');
     }
   };
-  window.addEventListener('message',window._msOAuthHandler);
+  window.addEventListener('message',window[handlerKey]);
 };
 
 window.toggleUserEmailActive=function(userId,emailId,active){
