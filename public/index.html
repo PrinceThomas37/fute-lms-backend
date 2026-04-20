@@ -512,6 +512,7 @@ var STATE = {
   jobsSel: {},
   pendingEmailsSel: {},
   pendingPage: 0,
+  sendProgress: null,
   showAIPanel: false,
   raForm: {
     coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',
@@ -1838,12 +1839,45 @@ function renderEmail(){
     bdSummaryCard=renderTodaySummaryCard(STATE.todaySummary);
   }
 
+  // ── SEND PROGRESS BANNER ──
+  var progressBanner='';
+  var sp=STATE.sendProgress;
+  if(sp&&sp.active){
+    var pct=sp.total>0?Math.round(((sp.sent+sp.failed)/sp.total)*100):0;
+    var nextDelay=sp.total>0&&(sp.sent+sp.failed)<sp.total?'Next in ~1–120s':'';
+    progressBanner='<div style="margin:0 0 12px;padding:14px 18px;background:var(--accent-l);border:1.5px solid var(--accent);border-radius:var(--r2)">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'+
+        '<div style="font-size:13px;font-weight:600;color:var(--accent)">📤 Sending in progress</div>'+
+        '<div style="font-size:12px;color:var(--text2)">'+sp.sent+' sent'+( sp.failed?' · <span style="color:var(--red)">'+sp.failed+' failed</span>':'')+'  of  '+sp.total+'</div>'+
+      '</div>'+
+      '<div style="height:8px;background:var(--border);border-radius:99px;overflow:hidden;margin-bottom:8px">'+
+        '<div style="height:100%;width:'+pct+'%;background:var(--accent);border-radius:99px;transition:width .4s ease"></div>'+
+      '</div>'+
+      '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3)">'+
+        '<span>'+(sp.current?'Sending to '+htmlEsc(sp.current):'Preparing...')+'</span>'+
+        '<span>'+pct+'%'+( nextDelay?' · '+nextDelay:'')+'</span>'+
+      '</div>'+
+    '</div>';
+  } else if(sp&&sp.done){
+    var doneColor=sp.failed?'var(--amber)':'var(--green)';
+    var doneBg=sp.failed?'var(--amber-l)':'var(--green-l)';
+    var doneBorder=sp.failed?'rgba(217,119,6,.3)':'#bbf7d0';
+    progressBanner='<div style="margin:0 0 12px;padding:14px 18px;background:'+doneBg+';border:1.5px solid '+doneBorder+';border-radius:var(--r2);display:flex;align-items:center;justify-content:space-between">'+
+      '<div>'+
+        '<div style="font-size:13px;font-weight:600;color:'+doneColor+'">'+(sp.failed?'⚠ Send complete with errors':'✓ All emails sent successfully')+'</div>'+
+        '<div style="font-size:12px;color:var(--text2);margin-top:3px">'+sp.sent+' sent'+( sp.failed?' · '+sp.failed+' failed':'')+'</div>'+
+      '</div>'+
+      '<button onclick="dismissSendProgress()" style="font-size:12px;color:var(--text3);background:transparent;border:1px solid var(--border2);padding:5px 12px;border-radius:7px;cursor:pointer">Dismiss</button>'+
+    '</div>';
+  }
+
   return '<div class="page">'+
     (oooCards?'<div style="padding:0 24px;padding-top:16px">'+oooCards+'</div>':'')+
     (bdSummaryCard?'<div style="padding:0 24px;padding-top:16px">'+bdSummaryCard+'</div>':'')+
     '<div class="ph"><div class="ptitle">Email</div>'+
       '<div class="psub">'+(isBD?'Manage AI-generated outreach emails':'Email outreach')+' · '+u.name+'</div>'+
     '</div>'+
+    (progressBanner?'<div style="padding:0 24px">'+progressBanner+'</div>':'')+
     '<div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:18px;overflow-x:auto">'+tabBar+'</div>'+
     (STATE.emailTab==='pending'?pendingHtml:'')+
     (STATE.emailTab==='compose'?composeHtml:'')+
@@ -4816,25 +4850,9 @@ window.openSendSelectedConfirm=function(){
 window.submitSendSelected=function(){
   var ids=Object.keys(STATE.pendingEmailsSel||{}).filter(function(k){return STATE.pendingEmailsSel[k];});
   closeModal();
-  showToast('Queuing '+ids.length+' emails with random delays…','info');
   apiPost('/emails/send-selected',{email_ids:ids}).then(function(res){
     STATE.pendingEmailsSel={};
-    STATE.modal='<div class="modal modal-w480">'+
-      '<div class="mh"><div class="mt">Sending in progress</div></div>'+
-      '<div class="mb_">'+
-        '<div style="padding:20px;text-align:center">'+
-          '<div style="font-size:36px;margin-bottom:12px">📤</div>'+
-          '<div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px">'+(res.queued||ids.length)+' emails queued</div>'+
-          '<div style="font-size:13px;color:var(--text2);line-height:1.6">Emails are being sent with a random delay of <strong>1–120 seconds</strong> between each one to protect your domain reputation.</div>'+
-          '<div style="font-size:12px;color:var(--text3);margin-top:12px">Check the <strong>Sent</strong> tab to see emails as they arrive.</div>'+
-        '</div>'+
-      '</div>'+
-      '<div class="mf"><button class="btn btn-primary" onclick="closeModal();refreshPendingAndSent()">Got it</button></div>'+
-    '</div>';
-    return Promise.all([
-      apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];}),
-      apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];})
-    ]).then(function(){render();});
+    startSendProgressPoller(res.queued||ids.length);
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
@@ -4864,81 +4882,44 @@ window.openSendAllConfirm=function(){
 
 window.submitSendAll=function(){
   closeModal();
-  showToast('Sending emails via Microsoft Outlook with random delays…','info');
   apiPost('/emails/queue-all',{}).then(function(res){
-    // Backend responds immediately — emails send in background
-    // Show progress modal and start polling
-    STATE.modal='<div class="modal modal-w480">'+
-      '<div class="mh"><div class="mt">Sending in progress</div></div>'+
-      '<div class="mb_">'+
-        '<div style="padding:20px;text-align:center">'+
-          '<div style="font-size:36px;margin-bottom:12px">📤</div>'+
-          '<div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px)">'+(res.queued||0)+' emails queued</div>'+
-          '<div style="font-size:13px;color:var(--text2);line-height:1.6">Emails are being sent with a random delay of <strong>1–120 seconds</strong> between each one to protect your domain reputation.</div>'+
-          '<div style="font-size:12px;color:var(--text3);margin-top:12px">Check the <strong>Sent</strong> tab to see emails as they arrive.</div>'+
-        '</div>'+
-      '</div>'+
-      '<div class="mf"><button class="btn btn-primary" onclick="closeModal();refreshPendingAndSent()">Got it</button></div>'+
-    '</div>';
-    render();
-    return Promise.all([
-      apiGet('/emails?status=pending'),
-      apiGet('/emails?status=sent')
-    ]).then(function(results){
-      STATE.pendingEmails=results[0]||[];
-      STATE.sentEmails=results[1]||[];
-      // Build results modal
-      var sentCount=res.sent||0;
-      var failedCount=res.failed||0;
-      var failDetails=res.failDetails||[];
-      var failRows=failDetails.map(function(f){
-        return '<tr style="border-bottom:1px solid var(--border)">'+
-          '<td style="padding:8px 10px;font-size:12px;color:var(--text2)">'+htmlEsc(f.to||'')+'</td>'+
-          '<td style="padding:8px 10px;font-size:11px;color:var(--text3)">'+htmlEsc(f.from||'—')+'</td>'+
-          '<td style="padding:8px 10px;font-size:12px;color:var(--red)">'+htmlEsc(f.error||'Unknown error')+'</td>'+
-          '</tr>';
-      }).join('');
-      STATE.modal='<div class="modal modal-w600">'+
-        '<div class="mh">'+
-          '<div class="mt">Send Results</div>'+
-          '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button>'+
-        '</div>'+
-        '<div class="mb_">'+
-          '<div style="display:flex;gap:12px;margin-bottom:16px">'+
-            '<div style="flex:1;padding:14px 16px;background:var(--green-l);border:1px solid #bbf7d0;border-radius:var(--r2);text-align:center">'+
-              '<div style="font-size:28px;font-weight:700;color:var(--green)">'+sentCount+'</div>'+
-              '<div style="font-size:12px;color:var(--green);margin-top:2px">Sent successfully</div>'+
-            '</div>'+
-            '<div style="flex:1;padding:14px 16px;background:'+(failedCount?'var(--red-l)':'var(--bg)')+';border:1px solid '+(failedCount?'#fecaca':'var(--border)')+';border-radius:var(--r2);text-align:center">'+
-              '<div style="font-size:28px;font-weight:700;color:'+(failedCount?'var(--red)':'var(--text3)')+'">'+failedCount+'</div>'+
-              '<div style="font-size:12px;color:'+(failedCount?'var(--red)':'var(--text3)')+';margin-top:2px">Failed</div>'+
-            '</div>'+
-          '</div>'+
-          (failedCount?
-            '<div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:8px">Failed emails</div>'+
-            '<div style="border:1px solid var(--border);border-radius:var(--r);overflow:hidden;max-height:280px;overflow-y:auto">'+
-              '<table style="width:100%;border-collapse:collapse">'+
-                '<thead><tr style="background:var(--bg)">'+
-                  '<th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">To</th>'+
-                  '<th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">From</th>'+
-                  '<th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Reason</th>'+
-                '</tr></thead>'+
-                '<tbody>'+failRows+'</tbody>'+
-              '</table>'+
-            '</div>'
-          :
-            '<div style="padding:14px;background:var(--green-l);border-radius:var(--r2);font-size:13px;color:var(--green);text-align:center">'+
-              '🎉 All emails sent successfully via Microsoft Outlook!'+
-            '</div>'
-          )+
-        '</div>'+
-        '<div class="mf">'+
-          '<button class="btn btn-primary" onclick="closeModal()">Done</button>'+
-        '</div>'+
-      '</div>';
-      render();
-    });
+    startSendProgressPoller(res.queued||0);
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+// ── SEND PROGRESS POLLER ─────────────────────────────────────
+var _sendPollTimer=null;
+window.startSendProgressPoller=function(total){
+  // Close any existing modal, show the progress panel
+  STATE.modal=null;
+  STATE.sendProgress={active:true,total:total,sent:0,failed:0,current:'',failDetails:[]};
+  // Clear any existing poller
+  if(_sendPollTimer)clearInterval(_sendPollTimer);
+  render();
+  // Poll every 3 seconds
+  _sendPollTimer=setInterval(function(){
+    apiGet('/emails/send-progress').then(function(p){
+      STATE.sendProgress=p;
+      render();
+      if(!p.active){
+        // Done — stop polling, reload data
+        clearInterval(_sendPollTimer);_sendPollTimer=null;
+        Promise.all([
+          apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];}),
+          apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];})
+        ]).then(function(){
+          STATE.sendProgress=null;
+          render();
+        });
+      }
+    }).catch(function(){});
+  },3000);
+};
+
+window.dismissSendProgress=function(){
+  if(_sendPollTimer){clearInterval(_sendPollTimer);_sendPollTimer=null;}
+  STATE.sendProgress=null;
+  refreshPendingAndSent();
 };
 
 window.refreshPendingAndSent=function(){
@@ -5837,6 +5818,18 @@ function loadAppData(){
       }).catch(function(){});
     }
     STATE.loading=false;render();
+    // Resume progress poller if a send was in progress when page was reloaded
+    if(STATE.user&&!_sendPollTimer){
+      apiGet('/emails/send-progress').then(function(p){
+        if(p&&p.active){
+          STATE.sendProgress=p;
+          render();
+          startSendProgressPoller(p.total);
+        } else if(p&&p.done){
+          STATE.sendProgress=p;render();
+        }
+      }).catch(function(){});
+    }
   }).catch(function(err){
     STATE.loading=false;STATE.user=null;STATE.token=null;
     localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');
