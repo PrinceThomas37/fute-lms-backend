@@ -1597,7 +1597,7 @@ app.get('/auth/microsoft/callback', async (req, res) => {
     const { userEmailId, userId } = JSON.parse(Buffer.from(decodeURIComponent(state), 'base64').toString());
     const tokenRes = await fetch(`https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/token`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: MS_CLIENT, client_secret: MS_SECRET, code, redirect_uri: MS_REDIRECT, grant_type: 'authorization_code', scope: MS_SCOPES }) });
     const tokens = await tokenRes.json();
-    if (tokens.error) return res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'${tokens.error_description}'},'*');window.close();</script>`);
+    if (tokens.error) return res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',userEmailId:'${userEmailId}',error:'${tokens.error_description}'},'*');window.close();</scr`+`ipt>`);
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
     const profileRes = await fetch('https://graph.microsoft.com/v1.0/me', { headers: { Authorization: `Bearer ${tokens.access_token}` } });
     const profile = await profileRes.json();
@@ -1610,14 +1610,24 @@ app.get('/auth/microsoft/callback', async (req, res) => {
     );
     if (insertErr) {
       console.error('microsoft_tokens insert error:', insertErr);
-      return res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'DB save failed: ${insertErr.message}'},'*');window.close();</scr`+`ipt>`);
+      return res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',userEmailId:'${userEmailId}',error:'DB save failed: ${insertErr.message}'},'*');window.close();</scr`+`ipt>`);
     }
 
+    // Validate the logged-in Microsoft account matches the email address on record
+    const { data: userEmailRow } = await supabase.from('user_emails').select('email_address').eq('id', userEmailId).single();
+    const expectedEmail = (userEmailRow?.email_address || '').toLowerCase().trim();
+    const actualEmail = emailAddress.toLowerCase().trim();
+    if (expectedEmail && actualEmail && expectedEmail !== actualEmail) {
+      // Delete the token we just inserted — wrong account
+      await supabase.from('microsoft_tokens').delete().eq('user_email_id', userEmailId);
+      const errMsg = `Wrong account: you logged in as ${emailAddress} but this slot is for ${userEmailRow.email_address}. Please sign out of Microsoft and try again with the correct account.`;
+      return res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:${JSON.stringify(errMsg)}},'*');window.close();</scr`+`ipt>`);
+    }
     await supabase.from('user_emails').update({ platform: 'Microsoft' }).eq('id', userEmailId);
     res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_success',userEmailId:'${userEmailId}',email:'${emailAddress}'},'*');window.close();</scr`+`ipt>`);
   } catch (err) {
     console.error('Microsoft OAuth callback error:', err);
-    res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'${err.message}'},'*');window.close();</scr`+`ipt>`);
+    res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',userEmailId:'${userEmailId||''}',error:'${err.message}'},'*');window.close();</scr`+`ipt>`);
   }
 });
 
