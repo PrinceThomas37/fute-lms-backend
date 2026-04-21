@@ -1859,15 +1859,20 @@ function renderEmail(){
       '</div>'+
     '</div>';
   } else if(sp&&sp.done){
-    var doneColor=sp.failed?'var(--amber)':'var(--green)';
-    var doneBg=sp.failed?'var(--amber-l)':'var(--green-l)';
-    var doneBorder=sp.failed?'rgba(217,119,6,.3)':'#bbf7d0';
-    progressBanner='<div style="margin:0 0 12px;padding:14px 18px;background:'+doneBg+';border:1.5px solid '+doneBorder+';border-radius:var(--r2);display:flex;align-items:center;justify-content:space-between">'+
-      '<div>'+
-        '<div style="font-size:13px;font-weight:600;color:'+doneColor+'">'+(sp.failed?'⚠ Send complete with errors':'✓ All emails sent successfully')+'</div>'+
-        '<div style="font-size:12px;color:var(--text2);margin-top:3px">'+sp.sent+' sent'+( sp.failed?' · '+sp.failed+' failed':'')+'</div>'+
+    var allFailed=sp.failed>0&&sp.sent===0;
+    var doneColor=allFailed?'var(--red)':sp.failed?'var(--amber)':'var(--green)';
+    var doneBg=allFailed?'var(--red-l)':sp.failed?'var(--amber-l)':'var(--green-l)';
+    var doneBorder=allFailed?'rgba(239,68,68,.3)':sp.failed?'rgba(217,119,6,.3)':'#bbf7d0';
+    var firstErr=sp.failDetails&&sp.failDetails.length?sp.failDetails[0].error:'';
+    progressBanner='<div style="margin:0 0 12px;padding:14px 18px;background:'+doneBg+';border:1.5px solid '+doneBorder+';border-radius:var(--r2)">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:'+(firstErr?'8px':'0')+'">'+
+        '<div>'+
+          '<div style="font-size:13px;font-weight:600;color:'+doneColor+'">'+(allFailed?'✗ Send failed — no emails sent':sp.failed?'⚠ Send complete with errors':'✓ All emails sent successfully')+'</div>'+
+          '<div style="font-size:12px;color:var(--text2);margin-top:3px">'+sp.sent+' sent'+(sp.failed?' · <span style="color:var(--red)">'+sp.failed+' failed</span>':'')+'</div>'+
+        '</div>'+
+        '<button onclick="dismissSendProgress()" style="font-size:12px;color:var(--text3);background:transparent;border:1px solid var(--border2);padding:5px 12px;border-radius:7px;cursor:pointer">Dismiss</button>'+
       '</div>'+
-      '<button onclick="dismissSendProgress()" style="font-size:12px;color:var(--text3);background:transparent;border:1px solid var(--border2);padding:5px 12px;border-radius:7px;cursor:pointer">Dismiss</button>'+
+      (firstErr?'<div style="font-size:11px;color:'+doneColor+';background:'+doneBg+';border:1px solid '+doneBorder+';border-radius:6px;padding:6px 10px;margin-top:4px">Error: '+htmlEsc(firstErr)+'</div>':'')+
     '</div>';
   }
 
@@ -4914,16 +4919,18 @@ window.startSendProgressPoller=function(total){
   // Poll every 3 seconds
   _sendPollTimer=setInterval(function(){
     apiGet('/emails/send-progress').then(function(p){
+      // If backend has no record yet (before first write), keep showing local active state
+      if(!p||(!p.active&&!p.done)){return;}
       STATE.sendProgress=p;
       render();
-      if(!p.active){
-        // Done — stop polling, reload data
+      if(!p.active&&p.done){
+        // Done — stop polling, reload data but KEEP done banner visible until user dismisses
         clearInterval(_sendPollTimer);_sendPollTimer=null;
         Promise.all([
           apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];}),
           apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];})
         ]).then(function(){
-          STATE.sendProgress=null;
+          // Do NOT clear STATE.sendProgress here — user must dismiss it manually
           render();
         });
       }
