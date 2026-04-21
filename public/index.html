@@ -1181,7 +1181,7 @@ function renderJobs(){
         '<label style="font-size:12px;color:var(--text2);font-weight:500">Change stage to:</label>'+
         '<select id="bulk-job-stage" style="padding:6px 10px;border:1.5px solid var(--border2);border-radius:7px;font-size:13px;background:var(--card);color:var(--text);cursor:pointer">'+
           '<option value="">— Pick stage —</option>'+
-          ['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'].map(function(s){return'<option value="'+s+'">'+s+'</option>';}).join('')+
+          (userHasAnyRole(u,'admin','ra_lead')?['Unassigned','Assigned','Connected','Rejected','Future','In Discussion']:['Connected','Rejected','Future','In Discussion']).map(function(s){return'<option value="'+s+'">'+s+'</option>';}).join('')+
         '</select>'+
         '<button onclick="applyBulkJobStage()" style="background:var(--accent);color:#fff;border:0;padding:7px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">Apply</button>'+
         '<button onclick="STATE.jobsSel={};render()" style="background:transparent;color:var(--text2);border:1px solid var(--border2);padding:7px 12px;border-radius:7px;font-size:12px;cursor:pointer">Clear</button>'+
@@ -4366,7 +4366,7 @@ window.openExportLeads=function(){
       '<div class="fgrp"><label class="flbl">Stage filter</label>'+
         '<select class="sel" id="exp-stage">'+
           '<option value="">All stages</option>'+
-          ['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'].map(function(s){return'<option value="'+s+'">'+s+'</option>';}).join('')+
+          (userHasAnyRole(u,'admin','ra_lead')?['Unassigned','Assigned','Connected','Rejected','Future','In Discussion']:['Connected','Rejected','Future','In Discussion']).map(function(s){return'<option value="'+s+'">'+s+'</option>';}).join('')+
         '</select>'+
       '</div>'+
     '</div>'+
