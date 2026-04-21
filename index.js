@@ -713,7 +713,7 @@ app.post('/emails/generate', auth, async (req, res) => {
     // Pre-fetch primary sending email for each BD (used as fallback if job.sending_email_id is null)
     const allBdIds = [...new Set([req.user.id, ...bdIds])];
     const { data: bdEmailRows } = allBdIds.length
-      ? await supabase.from('user_emails').select('id,user_id,email_address,display_name,is_primary').eq('is_active', true).in('user_id', allBdIds).order('is_primary', { ascending: false })
+      ? await supabase.from('user_emails').select('id,user_id,email_address,display_name,is_primary').in('user_id', allBdIds).order('is_primary', { ascending: false })
       : { data: [] };
     const bdPrimaryEmailMap = {};
     (bdEmailRows || []).forEach(e => {
@@ -784,10 +784,8 @@ app.post('/emails/generate', auth, async (req, res) => {
           const resolvedSendingEmail = jobSendingEmail || bdPrimaryEmail;
           const sendingEmailAddress = resolvedSendingEmail?.email_address || '';
           const sendingDisplayName = resolvedSendingEmail?.display_name || bd.name || '';
-          // If job has no sending_email_id, update it now so future sends use the right account
-          if (!job.sending_email_id && bdPrimaryEmail) {
-            supabase.from('jobs').update({ sending_email_id: bdPrimaryEmail.id }).eq('id', job.id).then(() => {}).catch(() => {});
-          }
+          // Note: if job has no sending_email_id, we use bdPrimaryEmail as fallback for generation only
+          // We do NOT silently overwrite sending_email_id — that must only be set during distribution
           emailsToInsert.push({ contact_id: contact.id, job_id: job.id, to_email: contact.email, subject, body, platform: 'Outlook', sent_by: bd.id, from_email: sendingEmailAddress, status: 'pending' });
           generated.push({ contact_id: contact.id, email: contact.email });
         } catch(e) { failed.push({ contact_id: contact.id, email: contact.email, error: e.message }); }
@@ -1144,10 +1142,16 @@ app.post('/distribute/execute', auth, async (req, res) => {
     const { manager_id, ratio } = req.body;
     if (!manager_id || !ratio) return res.status(400).json({ error: 'manager_id and ratio required' });
 
-    // Get manager's active user_emails
-    const { data: userEmails } = await supabase.from('user_emails')
-      .select('id,email_address,display_name,daily_send_limit').eq('user_id', manager_id).eq('is_active', true);
-    if (!userEmails?.length) return res.status(400).json({ error: 'Manager has no active email IDs' });
+    // Get manager's email accounts that have a connected Microsoft token (ready to send)
+    const { data: allUserEmails } = await supabase.from('user_emails')
+      .select('id,email_address,display_name,daily_send_limit').eq('user_id', manager_id);
+    if (!allUserEmails?.length) return res.status(400).json({ error: 'Manager has no email IDs configured' });
+    // Only use accounts with a valid OAuth token
+    const { data: connectedTokens } = await supabase.from('microsoft_tokens')
+      .select('user_email_id').in('user_email_id', allUserEmails.map(e => e.id));
+    const connectedIds = new Set((connectedTokens || []).map(t => t.user_email_id));
+    const userEmails = allUserEmails.filter(e => connectedIds.has(e.id));
+    if (!userEmails?.length) return res.status(400).json({ error: 'Manager has no connected Microsoft email accounts — please connect via Manage Users' });
 
     const todayDate = today();
     const { data: sendLogs } = await supabase.from('email_send_log').select('user_email_id,emails_sent').eq('send_date', todayDate);
