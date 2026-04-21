@@ -742,7 +742,7 @@ function renderApp(){
     ...(userHasRole(u,'ra')&&!userHasAnyRole(u,'admin','bd','bd_lead','ra_lead')?[{id:"insights",lbl:"Insights",ic:"dashboard"}]:[{id:"reminders",lbl:"Reminders",ic:"star",badge:STATE.reminders.filter(function(r){return r.user_id===u.id&&r.status==="pending"}).length||null}]),
     {id:"profile",lbl:"My Profile",ic:"profile"}
   ];
-  if(userHasAnyRole(u,'admin','ra_lead','bd_lead'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
+  if(userHasAnyRole(u,'admin','ra_lead'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
   if(userHasAnyRole(u,'admin','bd_lead'))navItems.splice(5,0,{id:"managerusers",lbl:"Manager Users",ic:"email"});
   if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
 
@@ -5768,6 +5768,16 @@ function flattenContacts(jobs){var out=[];jobs.forEach(function(j){(j.contacts||
 
 function loadAppData(){
   STATE.loading=true;render();
+  // Refresh current user's roles from DB on every load — so role changes take effect immediately without re-login
+  if(STATE.user){
+    apiGet('/users/me').then(function(me){
+      if(me&&me.id){
+        var freshRoles=me.roles||(me.role?[me.role]:[]);
+        STATE.user=Object.assign({},STATE.user,{role:freshRoles[0]||STATE.user.role,roles:freshRoles,name:me.name,designation:me.designation});
+        render();
+      }
+    }).catch(function(){});
+  }
   var calls=[apiGet('/users'),apiGet('/jobs'),apiGet('/companies'),apiGet('/reminders')];
   var u=STATE.user;
   var isBD=(u&&(u.role==='bd'||u.role==='bd_lead'||u.role==='admin'||u.role==='ra_lead'));
