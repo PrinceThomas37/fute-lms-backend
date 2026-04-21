@@ -1621,7 +1621,7 @@ app.get('/auth/microsoft/callback', async (req, res) => {
       console.error('microsoft_tokens insert error:', insertErr);
       return res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',userEmailId:'${userEmailId}',error:'DB save failed: ${insertErr.message}'},'*');window.close();</scr`+`ipt>`);
     }
-    await supabase.from('user_emails').update({ platform: 'Microsoft' }).eq('id', userEmailId);
+    await supabase.from('user_emails').update({ platform: 'Microsoft', is_active: true }).eq('id', userEmailId);
     res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_success',userEmailId:'${userEmailId}',email:'${emailAddress}'},'*');window.close();</scr`+`ipt>`);
   } catch (err) {
     console.error('Microsoft OAuth callback error:', err);
@@ -1716,6 +1716,7 @@ app.delete('/auth/microsoft/:userEmailId', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin', 'bd_lead')) return res.status(403).json({ error: 'Admin only' });
     await supabase.from('microsoft_tokens').delete().eq('user_email_id', req.params.userEmailId);
+    await supabase.from('user_emails').update({ is_active: false }).eq('id', req.params.userEmailId);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
