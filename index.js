@@ -1603,7 +1603,16 @@ app.get('/auth/microsoft/callback', async (req, res) => {
     const profile = await profileRes.json();
     const emailAddress = profile.mail || profile.userPrincipalName || '';
 
-    // Delete existing token row for this user_email_id, then insert fresh
+    // ── VALIDATE FIRST before touching the DB ──────────────────
+    const { data: userEmailRow } = await supabase.from('user_emails').select('email_address').eq('id', userEmailId).single();
+    const expectedEmail = (userEmailRow?.email_address || '').toLowerCase().trim();
+    const actualEmail = emailAddress.toLowerCase().trim();
+    if (expectedEmail && actualEmail && expectedEmail !== actualEmail) {
+      const errMsg = `Wrong account: you logged in as ${emailAddress} but this slot is for ${userEmailRow.email_address}. Please sign out of Microsoft and try again with the correct account.`;
+      return res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',userEmailId:'${userEmailId}',error:${JSON.stringify(errMsg)}},'*');window.close();</scr`+`ipt>`);
+    }
+
+    // Validation passed — now safe to delete old token and save new one
     await supabase.from('microsoft_tokens').delete().eq('user_email_id', userEmailId);
     const { error: insertErr } = await supabase.from('microsoft_tokens').insert(
       { user_email_id: userEmailId, user_id: userId, email_address: emailAddress, access_token: tokens.access_token, refresh_token: tokens.refresh_token, expires_at: expiresAt, updated_at: new Date() }
@@ -1611,17 +1620,6 @@ app.get('/auth/microsoft/callback', async (req, res) => {
     if (insertErr) {
       console.error('microsoft_tokens insert error:', insertErr);
       return res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',userEmailId:'${userEmailId}',error:'DB save failed: ${insertErr.message}'},'*');window.close();</scr`+`ipt>`);
-    }
-
-    // Validate the logged-in Microsoft account matches the email address on record
-    const { data: userEmailRow } = await supabase.from('user_emails').select('email_address').eq('id', userEmailId).single();
-    const expectedEmail = (userEmailRow?.email_address || '').toLowerCase().trim();
-    const actualEmail = emailAddress.toLowerCase().trim();
-    if (expectedEmail && actualEmail && expectedEmail !== actualEmail) {
-      // Delete the token we just inserted — wrong account
-      await supabase.from('microsoft_tokens').delete().eq('user_email_id', userEmailId);
-      const errMsg = `Wrong account: you logged in as ${emailAddress} but this slot is for ${userEmailRow.email_address}. Please sign out of Microsoft and try again with the correct account.`;
-      return res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:${JSON.stringify(errMsg)}},'*');window.close();</scr`+`ipt>`);
     }
     await supabase.from('user_emails').update({ platform: 'Microsoft' }).eq('id', userEmailId);
     res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_success',userEmailId:'${userEmailId}',email:'${emailAddress}'},'*');window.close();</scr`+`ipt>`);
