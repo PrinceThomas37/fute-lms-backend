@@ -1284,6 +1284,11 @@ app.post('/jobs/bulk-stage', auth, async (req, res) => {
     if (!Array.isArray(job_ids) || !job_ids.length) return res.status(400).json({ error: 'job_ids required' });
     const validStages = ['Unassigned', 'Assigned', 'Connected', 'Rejected', 'Future', 'In Discussion'];
     if (!validStages.includes(stage)) return res.status(400).json({ error: 'Invalid stage' });
+    // BD users can only move leads to post-assignment stages — not back to Unassigned or Assigned
+    const bdOnlyStages = ['Connected', 'Rejected', 'Future', 'In Discussion'];
+    if (hasRole(req, 'bd', 'bd_lead') && !hasRole(req, 'admin', 'ra_lead') && !bdOnlyStages.includes(stage)) {
+      return res.status(403).json({ error: 'BD users cannot set stage to ' + stage });
+    }
 
     const updates = { stage, updated_at: new Date() };
     // If resetting to Unassigned, clear assignment fields so it re-enters the pool
