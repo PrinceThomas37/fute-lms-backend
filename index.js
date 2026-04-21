@@ -818,10 +818,12 @@ app.post('/emails/send-selected', auth, async (req, res) => {
     let sent = 0, failed = 0;
     const failDetails = [], sentContactIds = [], sentJobIds = [];
 
+    console.log(`[SendAll] Starting loop for ${totalCount} emails, userId=${userId}`);
     for (const email of pendingEmails) {
       const userEmailId = email.job?.sending_email_id;
       const sendingEmail = email.job?.sending_email;
       const platform = (sendingEmail?.platform || 'Microsoft').toLowerCase();
+      console.log(`[SendAll] Processing email to ${email.to_email}, userEmailId=${userEmailId}, platform=${platform}`);
 
       if (!userEmailId) {
         failed++;
@@ -839,7 +841,9 @@ app.post('/emails/send-selected', auth, async (req, res) => {
       }
       await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
       try {
+        console.log(`[SendAll] Getting token for userEmailId=${userEmailId}`);
         const accessToken = await getMicrosoftToken(userEmailId);
+        console.log(`[SendAll] Token obtained, sending to ${email.to_email}`);
         const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -906,10 +910,12 @@ app.post('/emails/queue-all', auth, async (req, res) => {
     const sentContactIds = [];
     const sentJobIds = [];
 
+    console.log(`[SendAll] Starting loop for ${totalCount} emails, userId=${userId}`);
     for (const email of pendingEmails) {
       const userEmailId = email.job?.sending_email_id;
       const sendingEmail = email.job?.sending_email;
       const platform = (sendingEmail?.platform || 'Microsoft').toLowerCase();
+      console.log(`[SendAll] Processing email to ${email.to_email}, userEmailId=${userEmailId}, platform=${platform}`);
 
       if (!userEmailId) {
         failed++;
@@ -932,7 +938,9 @@ app.post('/emails/queue-all', auth, async (req, res) => {
       await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
 
       try {
+        console.log(`[SendAll] Getting token for userEmailId=${userEmailId}`);
         const accessToken = await getMicrosoftToken(userEmailId);
+        console.log(`[SendAll] Token obtained, sending to ${email.to_email}`);
         const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -974,7 +982,7 @@ app.post('/emails/queue-all', auth, async (req, res) => {
     for (const jid of uniqueJobIds) await logActivity(jid, null, userId, 'emails_sent', `${sent} email(s) sent via Microsoft`, null, null);
     await setSendProgress(userId, { active: false, done: true, total: totalCount, sent, failed, failDetails, completedAt: new Date().toISOString() });
     setTimeout(() => clearSendProgress(userId), 60000);
-    console.log(`[SendAll] Completed: ${sent} sent, ${failed} failed`);
+    console.log(`[SendAll] Completed: ${sent} sent, ${failed} failed`); console.log(`[SendAll] FailDetails:`, JSON.stringify(failDetails.slice(0,3)));
   } catch (err) { console.error('[SendAll] Error:', err.message); }
 });
 
