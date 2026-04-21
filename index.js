@@ -1185,24 +1185,33 @@ app.post('/distribute/execute', auth, async (req, res) => {
     const assignedLeads = [];
     const now = new Date();
 
-    // Shuffle accounts so starting point is random each run
-    for (let i = accounts.length - 1; i > 0; i--) {
+    // Build a flat assignment queue — fill each account's slot count proportionally,
+    // then shuffle the whole queue so jobs are interleaved randomly
+    const totalToAssign = selected.length;
+    const totalCap = accounts.reduce((s, a) => s + a.remaining, 0);
+    const assignmentQueue = [];
+    for (const account of accounts) {
+      // How many of the totalToAssign does this account get, proportional to its remaining capacity
+      const share = Math.round((account.remaining / totalCap) * totalToAssign);
+      for (let i = 0; i < share; i++) assignmentQueue.push(account.id);
+    }
+    // If rounding left us short or over, pad/trim to exactly totalToAssign
+    while (assignmentQueue.length < totalToAssign) assignmentQueue.push(accounts[assignmentQueue.length % accounts.length].id);
+    while (assignmentQueue.length > totalToAssign) assignmentQueue.pop();
+    // Fisher-Yates shuffle so assignment order is random, not blocks
+    for (let i = assignmentQueue.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      [accounts[i], accounts[j]] = [accounts[j], accounts[i]];
+      [assignmentQueue[i], assignmentQueue[j]] = [assignmentQueue[j], assignmentQueue[i]];
     }
 
-    for (const job of selected) {
-      // Pick randomly weighted by remaining capacity
-      const totalRemaining = accounts.reduce((s, a) => s + a.remaining, 0);
-      let rand = Math.random() * totalRemaining;
-      let chosen = accounts[accounts.length - 1];
-      for (const account of accounts) {
-        rand -= account.remaining;
-        if (rand <= 0) { chosen = account; break; }
-      }
-      chosen.remaining--;
-      await supabase.from('jobs').update({ assigned_to_bd: manager_id, sending_email_id: chosen.id, stage: 'Assigned', assigned_at: now, updated_at: now }).eq('id', job.id);
-      assignedLeads.push({ job_id: job.id, user_email_id: chosen.id });
+    console.log(`[Distribute] Accounts in pool: ${accounts.map(a => a.email_address).join(', ')}`);
+    console.log(`[Distribute] Assignment queue breakdown:`, assignmentQueue.reduce((m, id) => { m[id] = (m[id]||0)+1; return m; }, {}));
+
+    for (let i = 0; i < selected.length; i++) {
+      const job = selected[i];
+      const emailId = assignmentQueue[i];
+      await supabase.from('jobs').update({ assigned_to_bd: manager_id, sending_email_id: emailId, stage: 'Assigned', assigned_at: now, updated_at: now }).eq('id', job.id);
+      assignedLeads.push({ job_id: job.id, user_email_id: emailId });
     }
 
     const countPerAccount = {};
