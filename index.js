@@ -1179,16 +1179,26 @@ app.post('/distribute/execute', auth, async (req, res) => {
     if (!selected.length) return res.status(400).json({ error: 'No leads matched distribution criteria' });
 
     const assignedLeads = [];
-    let acIdx = 0;
     const now = new Date();
+
+    // Shuffle accounts so starting point is random each run
+    for (let i = accounts.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [accounts[i], accounts[j]] = [accounts[j], accounts[i]];
+    }
+
     for (const job of selected) {
-      let tries = 0;
-      while (accounts[acIdx % accounts.length].remaining <= 0 && tries < accounts.length) { acIdx++; tries++; }
-      const account = accounts[acIdx % accounts.length];
-      account.remaining--;
-      acIdx++;
-      await supabase.from('jobs').update({ assigned_to_bd: manager_id, sending_email_id: account.id, stage: 'Assigned', assigned_at: now, updated_at: now }).eq('id', job.id);
-      assignedLeads.push({ job_id: job.id, user_email_id: account.id });
+      // Pick randomly weighted by remaining capacity
+      const totalRemaining = accounts.reduce((s, a) => s + a.remaining, 0);
+      let rand = Math.random() * totalRemaining;
+      let chosen = accounts[accounts.length - 1];
+      for (const account of accounts) {
+        rand -= account.remaining;
+        if (rand <= 0) { chosen = account; break; }
+      }
+      chosen.remaining--;
+      await supabase.from('jobs').update({ assigned_to_bd: manager_id, sending_email_id: chosen.id, stage: 'Assigned', assigned_at: now, updated_at: now }).eq('id', job.id);
+      assignedLeads.push({ job_id: job.id, user_email_id: chosen.id });
     }
 
     const countPerAccount = {};
