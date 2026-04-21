@@ -1674,11 +1674,11 @@ function randomDelay(minSec = 1, maxSec = 120) {
 // Send progress tracking — stored in app_settings keyed per user
 async function setSendProgress(userId, data) {
   const key = `send_progress_${userId}`;
-  await supabase.from('app_settings').upsert({ key, value: JSON.stringify(data) }, { onConflict: 'key' }).catch(() => {});
+  try { await supabase.from('app_settings').upsert({ key, value: JSON.stringify(data) }, { onConflict: 'key' }); } catch(_) {}
 }
 async function clearSendProgress(userId) {
   const key = `send_progress_${userId}`;
-  await supabase.from('app_settings').delete().eq('key', key).catch(() => {});
+  try { await supabase.from('app_settings').delete().eq('key', key); } catch(_) {}
 }
 
 async function getMicrosoftToken(userEmailId) {
