@@ -514,6 +514,7 @@ var STATE = {
   pendingPage: 0,
   sendProgress: null,
   companiesSearch: '',
+  sentDateFilter: 'today',
   showAIPanel: false,
   raForm: {
     coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',
@@ -748,6 +749,7 @@ function renderApp(){
   if(userHasAnyRole(u,'admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
   if(userHasAnyRole(u,'ra_lead'))navItems.splice(2,0,{id:"companies",lbl:"Companies",ic:"leads"});
   if(userHasAnyRole(u,'ra_lead'))navItems.splice(3,0,{id:"team",lbl:"Team",ic:"admin"});
+  if(userHasAnyRole(u,'bd','bd_lead'))navItems.splice(2,0,{id:"jobs_bd",lbl:"Jobs",ic:"leads"});
 
   var nav=navItems.map(function(n){
     var active=STATE.page===n.id?" active":"";
@@ -757,7 +759,7 @@ function renderApp(){
 
   var switchers=""; // removed — use team list to switch views
 
-  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",profile:"My Profile",reminders:"Reminders",companies:"Companies",team:"Team"};
+  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",profile:"My Profile",reminders:"Reminders",companies:"Companies",team:"Team",jobs_bd:"Jobs"};
   var viewingName=STATE.viewingUser&&STATE.viewingUser.id!==u.id?" · Viewing: "+STATE.viewingUser.name:"";
 
   return '<div id="sidebar">'+
@@ -803,6 +805,7 @@ function renderPage(){
   if(STATE.page==="admin")return renderAdmin();
   if(STATE.page==="companies")return renderCompanies();
   if(STATE.page==="team")return renderTeamView();
+  if(STATE.page==="jobs_bd")return renderJobsBD();
   if(STATE.page==="profile")return renderProfile();
   return "<div class='page'>Page not found</div>";
 }
@@ -1163,7 +1166,9 @@ function renderJobs(){
       '</div>':'')  +
   '</div>';
 
+  var outreachNotif=(!isRA&&userHasAnyRole(u,'bd','bd_lead'))?renderOutreachNotification():'';
   return '<div style="padding:24px">'+
+    (outreachNotif?outreachNotif:'')+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;gap:12px;flex-wrap:wrap">'+
       '<div style="display:flex;gap:10px;align-items:center;flex:1;min-width:280px;flex-wrap:wrap">'+
         '<input id="jobs-search" placeholder="Search jobs, companies, contacts..." value="'+escAttr(f.search)+'" style="flex:1;max-width:340px;padding:9px 13px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);font-size:13px"/>'+
@@ -1549,21 +1554,46 @@ function renderEmail(){
   // ── SENT TAB ──
   var sentHtml='';
   if(STATE.emailTab==='sent'){
-    var sentRows=sentEmails.map(function(e){
+    // Date filter
+    var sf=STATE.sentDateFilter||'today';
+    var todayStr=new Date().toISOString().split('T')[0];
+    var yesterdayStr=new Date(Date.now()-86400000).toISOString().split('T')[0];
+    var filteredSent=sentEmails.filter(function(e){
+      var d=(e.sent_at||'').split('T')[0];
+      if(sf==='today')return d===todayStr;
+      if(sf==='yesterday')return d===yesterdayStr;
+      if(sf==='custom'){
+        var from=STATE.sentDateFrom||'';var to=STATE.sentDateTo||'';
+        return (!from||d>=from)&&(!to||d<=to);
+      }
+      return true;
+    });
+    var filterBar='<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">'+
+      '<span style="font-size:12px;font-weight:600;color:var(--text3)">Show:</span>'+
+      ['today','yesterday','all','custom'].map(function(f){
+        var lbl={today:'Today',yesterday:'Yesterday',all:'All time',custom:'Custom range'}[f];
+        var active=sf===f;
+        return '<button onclick="STATE.sentDateFilter=\''+f+'\';render()" style="font-size:12px;padding:5px 12px;border-radius:7px;cursor:pointer;font-weight:600;border:1.5px solid '+(active?'var(--accent)':'var(--border)')+';background:'+(active?'var(--accent-l)':'var(--card)')+';color:'+(active?'var(--accent)':'var(--text2)')+'">'+lbl+'</button>';
+      }).join('')+
+      (sf==='custom'?'<input type="date" value="'+(STATE.sentDateFrom||'')+'" onchange="STATE.sentDateFrom=this.value;render()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:var(--card);color:var(--text)"/>'+
+        '<span style="font-size:12px;color:var(--text3)">to</span>'+
+        '<input type="date" value="'+(STATE.sentDateTo||'')+'" onchange="STATE.sentDateTo=this.value;render()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:var(--card);color:var(--text)"/>':'')+
+      '<span style="font-size:12px;color:var(--text3);margin-left:4px">'+filteredSent.length+' email'+(filteredSent.length!==1?'s':'')+'</span>'+
+    '</div>';
+    var sentRows=filteredSent.map(function(e){
       var jname=(e.job&&e.job.position?e.job.position:'')+(e.job&&e.job.company?(' · '+e.job.company.name):'');
-      return '<tr style="border-bottom:1px solid var(--border2)">'+
+      return '<tr onclick="openSentEmailPreview(\''+e.id+'\')" style="border-bottom:1px solid var(--border2);cursor:pointer" onmouseover="this.style.background=\'var(--bg)\'" onmouseout="this.style.background=\'\'">'+
         '<td style="padding:10px 12px;font-size:13px">'+htmlEsc(e.to_email||'')+'</td>'+
         '<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+htmlEsc(jname)+'</td>'+
         '<td style="padding:10px 12px;font-size:12px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subject||'')+'</td>'+
-        '<td style="padding:10px 12px"><span style="font-size:11px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:8px;font-weight:600">'+htmlEsc(e.status||'sent')+'</span></td>'+
         '<td style="padding:10px 12px;font-size:11px;color:var(--text3)">'+htmlEsc(e.sent_at||'')+'</td>'+
       '</tr>';
     }).join('');
-    if(!sentRows)sentRows='<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">No sent emails yet.</td></tr>';
-    sentHtml='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
+    if(!sentRows)sentRows='<tr><td colspan="4" style="padding:40px;text-align:center;color:var(--text3)">No sent emails'+(sf==='today'?' today':(sf==='yesterday'?' yesterday':''))+'. '+(sf!=='all'?'<span onclick="STATE.sentDateFilter=\'all\';render()" style="color:var(--accent);cursor:pointer">View all time</span>':'')+'</td></tr>';
+    sentHtml=filterBar+'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
       '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
         '<thead style="background:var(--bg);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
-          '<tr><th style="padding:10px 12px;text-align:left">To</th><th style="padding:10px 12px;text-align:left">Job</th><th style="padding:10px 12px;text-align:left">Subject</th><th style="padding:10px 12px;text-align:left">Status</th><th style="padding:10px 12px;text-align:left">Date</th></tr>'+
+          '<tr><th style="padding:10px 12px;text-align:left">To</th><th style="padding:10px 12px;text-align:left">Job</th><th style="padding:10px 12px;text-align:left">Subject</th><th style="padding:10px 12px;text-align:left">Sent</th></tr>'+
         '</thead>'+
         '<tbody>'+sentRows+'</tbody>'+
       '</table>'+
@@ -4937,6 +4967,77 @@ window.submitSendAll=function(){
     startSendProgressPoller(res.queued||0);
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
+
+// ── SENT EMAIL PREVIEW ──────────────────────────────────────
+window.openSentEmailPreview=function(emailId){
+  var e=(STATE.sentEmails||[]).find(function(x){return x.id===emailId;});
+  if(!e)return;
+  var jname=(e.job&&e.job.position?e.job.position:'')+(e.job&&e.job.company?(' · '+e.job.company.name):'');
+  STATE.modal='<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Email Preview</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div style="margin-bottom:12px">'+
+        '<div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">To</div>'+
+        '<div style="font-size:13px">'+htmlEsc(e.to_email||'')+'</div>'+
+      '</div>'+
+      (jname?'<div style="margin-bottom:12px"><div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">Job</div><div style="font-size:13px">'+htmlEsc(jname)+'</div></div>':'')+
+      '<div style="margin-bottom:12px">'+
+        '<div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">Subject</div>'+
+        '<div style="font-size:13px;font-weight:500">'+htmlEsc(e.subject||'')+'</div>'+
+      '</div>'+
+      '<div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Body</div>'+
+      '<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r2);padding:14px;font-size:13px;line-height:1.7;white-space:pre-wrap;max-height:300px;overflow-y:auto">'+htmlEsc(e.body||'')+'</div>'+
+      '<div style="margin-top:10px;font-size:11px;color:var(--text3)">Sent: '+htmlEsc(e.sent_at||'')+'</div>'+
+    '</div>'+
+    '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Close</button></div>'+
+  '</div>';
+  render();
+};
+
+// ── BD JOBS TAB (UNDER CONSTRUCTION) ────────────────────────
+function renderJobsBD(){
+  return '<div class="page">'+
+    '<div class="ph"><div class="ptitle">Jobs</div><div class="psub">Pipeline management</div></div>'+
+    '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:320px;text-align:center">'+
+      '<div style="font-size:48px;margin-bottom:16px">🚧</div>'+
+      '<div style="font-size:20px;font-weight:700;color:var(--text);margin-bottom:8px">Under Construction</div>'+
+      '<div style="font-size:14px;color:var(--text3);max-width:320px;line-height:1.6">This section is being built. Check back soon for full pipeline and jobs management features.</div>'+
+    '</div>'+
+  '</div>';
+}
+
+// ── BD AUTO-SEND NOTIFICATION ────────────────────────────────
+function renderOutreachNotification(){
+  var sp=STATE.sendProgress;
+  if(!sp)return'';
+  // Show on Leads page for BD when auto-send completed
+  if(sp.done&&sp.autoSend){
+    var allFailed=sp.failed>0&&sp.sent===0;
+    var color=allFailed?'var(--red)':sp.failed?'var(--amber)':'var(--green)';
+    var bg=allFailed?'var(--red-l)':sp.failed?'var(--amber-l)':'var(--green-l)';
+    var border=allFailed?'rgba(239,68,68,.3)':sp.failed?'rgba(217,119,6,.3)':'#bbf7d0';
+    return '<div style="margin-bottom:16px;padding:16px 20px;background:'+bg+';border:1.5px solid '+border+';border-radius:var(--r2);display:flex;align-items:center;justify-content:space-between">'+
+      '<div>'+
+        '<div style="font-size:14px;font-weight:700;color:'+color+'">'+(allFailed?'✗ Outreach failed — no emails sent':sp.failed?'⚠ Outreach completed with some errors':'✓ Lead outreach completed!')+'</div>'+
+        '<div style="font-size:13px;color:var(--text2);margin-top:3px">'+sp.sent+' emails sent'+(sp.failed?' · '+sp.failed+' failed':'')+' · completed '+(sp.completedAt?new Date(sp.completedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):'')+'</div>'+
+      '</div>'+
+      '<button onclick="dismissSendProgress()" style="font-size:12px;padding:7px 16px;background:var(--card);border:1px solid var(--border2);border-radius:7px;cursor:pointer;font-weight:600;color:var(--text2)">OK</button>'+
+    '</div>';
+  }
+  if(sp.active&&sp.autoSend){
+    var pct=sp.total>0?Math.round(((sp.sent+sp.failed)/sp.total)*100):0;
+    return '<div style="margin-bottom:16px;padding:14px 18px;background:var(--accent-l);border:1.5px solid var(--accent);border-radius:var(--r2)">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'+
+        '<div style="font-size:13px;font-weight:600;color:var(--accent)">📤 Sending outreach emails automatically...</div>'+
+        '<div style="font-size:12px;color:var(--text2)">'+sp.sent+' of '+sp.total+' sent</div>'+
+      '</div>'+
+      '<div style="height:6px;background:var(--border);border-radius:99px;overflow:hidden">'+
+        '<div style="height:100%;width:'+pct+'%;background:var(--accent);border-radius:99px;transition:width .4s ease"></div>'+
+      '</div>'+
+    '</div>';
+  }
+  return'';
+}
 
 // ── SEND PROGRESS POLLER ─────────────────────────────────────
 var _sendPollTimer=null;
