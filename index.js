@@ -1152,9 +1152,24 @@ async function autoSendForManager(managerId, host, authHeader) {
       .select('id, to_email, subject, body, contact_id, job_id, from_email, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
       .eq('sent_by', managerId)
       .eq('status', 'pending');
-    if (error || !pendingEmails?.length) {
-      console.log(`[AutoSend] No pending emails for manager ${managerId}`);
+    if (error) {
+      console.log(`[AutoSend] DB error for manager ${managerId}:`, error.message);
       return;
+    }
+    if (!pendingEmails?.length) {
+      // Emails may not be written yet — wait 3s and retry once
+      console.log(`[AutoSend] No pending emails yet for manager ${managerId}, retrying in 3s...`);
+      await new Promise(r => setTimeout(r, 3000));
+      const { data: retryEmails } = await supabase
+        .from('emails')
+        .select('id, to_email, subject, body, contact_id, job_id, from_email, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
+        .eq('sent_by', managerId)
+        .eq('status', 'pending');
+      if (!retryEmails?.length) {
+        console.log(`[AutoSend] Still no pending emails for manager ${managerId} after retry — aborting`);
+        return;
+      }
+      pendingEmails.push(...retryEmails);
     }
     const totalCount = pendingEmails.length;
     console.log(`[AutoSend] Starting auto-send of ${totalCount} emails for manager ${managerId}`);
