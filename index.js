@@ -746,8 +746,7 @@ Subject: [subject line]
           const text = aiData.content?.[0]?.text || '';
           const subjectMatch = text.match(/Subject:\s*(.+)/i);
           subject = subjectMatch ? subjectMatch[1].trim() : `Staffing Partnership — ${job.company?.name}`;
-          body = text.replace(/^Subject:.+
-*/im, '').trim();
+          body = text.replace(/^Subject:.+\n*/im, '').trim();
         } else {
           subject = fillTmpl(savedSubj || 'Staffing Partnership — {{company}}', vars);
           body = fillTmpl(savedBody || `Hi {{fn}},
