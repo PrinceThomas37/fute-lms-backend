@@ -5952,8 +5952,8 @@ function apiPatch(p,b){return apiFetch('PATCH',p,b);}
 function apiDelete(p){return apiFetch('DELETE',p);}
 
 // ── Restore session if present ─────────────────
-STATE.token=localStorage.getItem('fg_token')||null;
-try{var _su=localStorage.getItem('fg_user');if(_su){var _parsed=JSON.parse(_su);STATE.user=normaliseUser(_parsed);}}catch(e){}
+STATE.token=sessionStorage.getItem('fg_token')||null;
+try{var _su=sessionStorage.getItem('fg_user');if(_su){var _parsed=JSON.parse(_su);STATE.user=normaliseUser(_parsed);}}catch(e){}
 // Wipe demo seed data — will be replaced by API on login
 STATE.jobs=[];STATE.contacts=[];STATE.users=[];STATE.companies=[];STATE.emails=[];STATE.reminders=[];STATE.activities=[];STATE.leads=[];
 
@@ -6084,7 +6084,7 @@ function loadAppData(){
     }
   }).catch(function(err){
     STATE.loading=false;STATE.user=null;STATE.token=null;
-    localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');
+    sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');
     showToast('Could not connect: '+err.message,'error');render();
   });
 }
@@ -6099,7 +6099,7 @@ window.doLogin=function(){
   STATE.loading=true;render();
   apiPost('/auth/login',{email:em,password:pw}).then(function(d){
     STATE.token=d.token;STATE.user=normaliseUser(d.user);
-    localStorage.setItem('fg_token',d.token);localStorage.setItem('fg_user',JSON.stringify(STATE.user));
+    sessionStorage.setItem('fg_token',d.token);sessionStorage.setItem('fg_user',JSON.stringify(STATE.user));
     STATE.page='dashboard';loadAppData();
   }).catch(function(err){
     STATE.loading=false;render();
@@ -6107,7 +6107,7 @@ window.doLogin=function(){
   });
 };
 window.loginAs=function(){showToast('Use email + password to log in','warning');};
-window.doLogout=function(){STATE.user=null;STATE.token=null;localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');STATE.jobs=[];STATE.contacts=[];STATE.page='login';render();};
+window.doLogout=function(){STATE.user=null;STATE.token=null;sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');STATE.jobs=[];STATE.contacts=[];STATE.page='login';render();};
 
 // ── Jobs (wired) ───────────────────────────────
 window.toggleJobSel=function(id,v){
