@@ -515,6 +515,7 @@ var STATE = {
   sendProgress: null,
   companiesSearch: '',
   sentDateFilter: 'today',
+  lastAssignResult: null,
   showAIPanel: false,
   raForm: {
     coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',
@@ -553,6 +554,76 @@ function showToast(msg,type){
 }
 
 var clockTimer=null;
+
+// ── BACKGROUND DATA POLLER ────────────────────────────────
+// Silently polls every 30s to keep all tabs in sync without refresh
+var _bgPollTimer=null;
+var _bgPollLastJobCount=0;
+var _bgPollLastPendingCount=0;
+
+function startBgPoller(){
+  if(_bgPollTimer)clearInterval(_bgPollTimer);
+  _bgPollTimer=setInterval(function(){
+    if(!STATE.user||!STATE.token)return;
+    var u=STATE.user;
+    var isBD=userHasAnyRole(u,'bd','bd_lead');
+    var isRALead=userHasAnyRole(u,'ra_lead','admin');
+
+    // All roles: poll for job changes
+    apiGet('/jobs').then(function(jobs){
+      var newJobs=jobs.map(normaliseJob);
+      var newCount=newJobs.length;
+      var prevCount=_bgPollLastJobCount;
+
+      // BD: check if new leads were assigned since last poll
+      if(isBD){
+        var prevAssigned=STATE.jobs.filter(function(j){return j.assigned_to_bd===u.id;}).length;
+        var newAssigned=newJobs.filter(function(j){return j.assigned_to_bd===u.id;}).length;
+        if(newAssigned>prevAssigned){
+          var diff=newAssigned-prevAssigned;
+          showToast(diff+' new lead'+(diff>1?'s':'')+' assigned to you','info');
+          // Also refresh pending emails for BD
+          apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];});
+          apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];});
+        }
+      }
+
+      // RA Lead: check if pool changed (new leads submitted by RAs)
+      if(isRALead){
+        var prevUnassigned=(STATE.jobs||[]).filter(function(j){return j.stage==='Unassigned';}).length;
+        var newUnassigned=newJobs.filter(function(j){return j.stage==='Unassigned';}).length;
+        if(newUnassigned!==prevUnassigned){
+          // Silently refresh pool stats too
+          apiGet('/distribute/pool-stats').then(function(d){STATE.distributePoolStats=d;}).catch(function(){});
+        }
+      }
+
+      STATE.jobs=newJobs;
+      STATE.contacts=flattenContacts(jobs);
+      _bgPollLastJobCount=newCount;
+
+      // Re-render only if on leads or assign page (avoid interrupting other pages)
+      if(STATE.page==='leads'||STATE.page==='assign'){render();}
+    }).catch(function(){});
+
+    // BD: also poll send progress if auto-send might be running
+    if(isBD&&!_sendPollTimer){
+      apiGet('/emails/send-progress').then(function(p){
+        if(p&&(p.active||p.done)){
+          var wasNull=!STATE.sendProgress;
+          STATE.sendProgress=p;
+          if(p.active&&!_sendPollTimer){startSendProgressPoller(p.total);}
+          else if(wasNull&&p.done){render();}
+        }
+      }).catch(function(){});
+    }
+  }, 30000); // every 30 seconds
+}
+
+function stopBgPoller(){
+  if(_bgPollTimer){clearInterval(_bgPollTimer);_bgPollTimer=null;}
+}
+
 function startClock(){
   if(clockTimer)clearInterval(clockTimer);
   clockTimer=setInterval(function(){
@@ -5439,10 +5510,12 @@ window.submitAssignToManager=function(){
   var managerId=STATE._assignManagerId;
   if(!ratio||!managerId)return;
   closeModal();
+  var managerName=(STATE.users.find(function(u){return u.id===managerId;})||{}).name||'BD Manager';
   apiPost('/distribute/execute',{manager_id:managerId,ratio:ratio}).then(function(res){
-    var msg=res.total_assigned+' leads assigned to '+STATE.users.find(function(u){return u.id===managerId;}).name;
-    showToast(msg,'success');
     STATE._assignRatio=null;STATE._assignManagerId=null;
+    // Show persistent notification on assign page
+    STATE.lastAssignResult={total:res.total_assigned,manager:managerName,at:new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})};
+    showToast(res.total_assigned+' leads assigned to '+managerName+' · emails sending automatically','success');
     return Promise.all([refreshPoolStats(),refreshJobs()]);
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
@@ -5853,6 +5926,18 @@ function renderAssignLeads(){
     poolBar='<div style="background:var(--green-l);border:1px solid var(--green);border-radius:var(--r2);padding:14px 16px;margin-bottom:18px;font-size:13px;color:var(--green);font-weight:600">\u2713 No unassigned leads — pool is clear for today.</div>';
   }
 
+  var assignNotif='';
+  if(STATE.lastAssignResult){
+    var ar=STATE.lastAssignResult;
+    assignNotif='<div style="margin-bottom:16px;padding:14px 18px;background:var(--green-l);border:1.5px solid #bbf7d0;border-radius:var(--r2);display:flex;align-items:center;justify-content:space-between">'+
+      '<div>'+
+        '<div style="font-size:14px;font-weight:700;color:var(--green)">✓ '+ar.total+' lead'+(ar.total!==1?'s':'')+' assigned to '+htmlEsc(ar.manager)+'</div>'+
+        '<div style="font-size:12px;color:var(--text2);margin-top:2px">Emails generating and sending automatically · '+htmlEsc(ar.at)+'</div>'+
+      '</div>'+
+      '<button onclick="STATE.lastAssignResult=null;render()" style="font-size:12px;padding:5px 12px;background:var(--card);border:1px solid var(--border2);border-radius:7px;cursor:pointer;color:var(--text2)">Dismiss</button>'+
+    '</div>';
+  }
+
   return '<div class="page">'+
     '<div class="ph"><div class="flex jb aic">'+
       '<div><div class="ptitle">Assign Leads</div>'+
@@ -5862,6 +5947,7 @@ function renderAssignLeads(){
         '<button onclick="refreshPoolStats()" style="background:transparent;border:1px solid var(--border);color:var(--text2);padding:7px 13px;border-radius:8px;font-size:12px;cursor:pointer">\u21bb Refresh pool</button>'+
       '</div>'+
     '</div></div>'+
+    assignNotif+
     poolBar+
     '<div style="font-weight:600;font-size:13px;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Managers</div>'+
     managerCards+
@@ -6100,14 +6186,14 @@ window.doLogin=function(){
   apiPost('/auth/login',{email:em,password:pw}).then(function(d){
     STATE.token=d.token;STATE.user=normaliseUser(d.user);
     sessionStorage.setItem('fg_token',d.token);sessionStorage.setItem('fg_user',JSON.stringify(STATE.user));
-    STATE.page='dashboard';loadAppData();
+    STATE.page='dashboard';loadAppData().then(function(){startBgPoller();});
   }).catch(function(err){
     STATE.loading=false;render();
     var e=document.getElementById('login-err');if(e){e.textContent=err.message||'Invalid credentials';e.style.display='block';}
   });
 };
 window.loginAs=function(){showToast('Use email + password to log in','warning');};
-window.doLogout=function(){STATE.user=null;STATE.token=null;sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');STATE.jobs=[];STATE.contacts=[];STATE.page='login';render();};
+window.doLogout=function(){stopBgPoller();STATE.user=null;STATE.token=null;sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');STATE.jobs=[];STATE.contacts=[];STATE.page='login';render();};
 
 // ── Jobs (wired) ───────────────────────────────
 window.toggleJobSel=function(id,v){
@@ -6200,7 +6286,7 @@ window.deleteContact=function(cid){
 };
 
 // ── Boot ───────────────────────────────────────
-if(STATE.token&&STATE.user){STATE.page='dashboard';loadAppData();}else{STATE.page='login';render();}
+if(STATE.token&&STATE.user){STATE.page='dashboard';loadAppData().then(function(){startBgPoller();});}else{STATE.page='login';render();}
 
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
