@@ -513,6 +513,7 @@ var STATE = {
   pendingEmailsSel: {},
   pendingPage: 0,
   sendProgress: null,
+  companiesSearch: '',
   showAIPanel: false,
   raForm: {
     coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',
@@ -742,9 +743,11 @@ function renderApp(){
     ...(userHasRole(u,'ra')&&!userHasAnyRole(u,'admin','bd','bd_lead','ra_lead')?[{id:"insights",lbl:"Insights",ic:"dashboard"}]:[{id:"reminders",lbl:"Reminders",ic:"star",badge:STATE.reminders.filter(function(r){return r.user_id===u.id&&r.status==="pending"}).length||null}]),
     {id:"profile",lbl:"My Profile",ic:"profile"}
   ];
-  if(userHasAnyRole(u,'admin','ra_lead'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
+  if(userHasAnyRole(u,'admin'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
   if(userHasAnyRole(u,'admin','bd_lead'))navItems.splice(5,0,{id:"managerusers",lbl:"Manager Users",ic:"email"});
-  if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
+  if(userHasAnyRole(u,'admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
+  if(userHasAnyRole(u,'ra_lead'))navItems.splice(2,0,{id:"companies",lbl:"Companies",ic:"leads"});
+  if(userHasAnyRole(u,'ra_lead'))navItems.splice(3,0,{id:"team",lbl:"Team",ic:"admin"});
 
   var nav=navItems.map(function(n){
     var active=STATE.page===n.id?" active":"";
@@ -754,7 +757,7 @@ function renderApp(){
 
   var switchers=""; // removed — use team list to switch views
 
-  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",profile:"My Profile",reminders:"Reminders"};
+  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",profile:"My Profile",reminders:"Reminders",companies:"Companies",team:"Team"};
   var viewingName=STATE.viewingUser&&STATE.viewingUser.id!==u.id?" · Viewing: "+STATE.viewingUser.name:"";
 
   return '<div id="sidebar">'+
@@ -798,6 +801,8 @@ function renderPage(){
   if(STATE.page==="email")return renderEmail();
   if(STATE.page==="reminders")return renderReminders();
   if(STATE.page==="admin")return renderAdmin();
+  if(STATE.page==="companies")return renderCompanies();
+  if(STATE.page==="team")return renderTeamView();
   if(STATE.page==="profile")return renderProfile();
   return "<div class='page'>Page not found</div>";
 }
@@ -1169,8 +1174,9 @@ function renderJobs(){
       '</div>'+
       '<div style="display:flex;gap:8px;align-items:center">'+
         (u.role==='ra_lead'||u.role==='admin'?'<button onclick="openExportLeads()" style="background:var(--card);color:var(--text);border:1.5px solid var(--border);padding:9px 15px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px">'+ico("dl",13)+' Export</button>':'')+
-        '<button onclick="triggerImport()" style="background:var(--card);color:var(--text);border:1.5px solid var(--border);padding:9px 15px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px">'+ico("upload",13)+' Import Excel</button>'+
-        (u.role!=='ra'?'<button onclick="openAddJob()" style="background:var(--accent);color:#fff;border:0;padding:10px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px">+ Add Job</button>':'')+
+        (u.role==='admin'?'<button onclick="triggerImport()" style="background:var(--card);color:var(--text);border:1.5px solid var(--border);padding:9px 15px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px">'+ico("upload",13)+' Import Excel</button>':'')+
+        (u.role==='ra_lead'?'<button onclick="goPage(\'assign\')" style="background:var(--accent);color:#fff;border:0;padding:10px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px">'+ico("leads",13)+' Assign Leads</button>':'')+
+        (u.role!=='ra'&&u.role!=='ra_lead'?'<button onclick="openAddJob()" style="background:var(--accent);color:#fff;border:0;padding:10px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px">+ Add Job</button>':'')+
         '<input type="file" id="xl-import" accept=".xlsx,.xls" style="display:none" onchange="importXL(this)"/>'+
       '</div>'+
     '</div>'+
@@ -2232,6 +2238,30 @@ function renderSetReminderModal(leadId, manualEmail){
 // ── PROFILE ──────────────────────────────────
 function renderProfile(){
   var u=STATE.user;
+
+  // Build team section for BD managers
+  var teamSection='';
+  if(userHasAnyRole(u,'bd','bd_lead')){
+    var assignments=STATE.teamAssignments||[];
+    var myMembers=assignments.filter(function(a){return a.manager_id===u.id;});
+    var memberRows=myMembers.map(function(a){
+      var member=a.member||(STATE.users||[]).find(function(x){return x.id===a.member_id;})||{};
+      return '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">'+
+        '<div style="width:32px;height:32px;border-radius:50%;background:var(--accent-l);color:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px">'+
+          (member.name?member.name.charAt(0).toUpperCase():'?')+
+        '</div>'+
+        '<div style="flex:1"><div style="font-weight:500;font-size:13px">'+htmlEsc(member.name||'Unknown')+'</div>'+
+          '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(member.email||'')+'</div></div>'+
+        '<span style="font-size:11px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:6px;font-weight:600">RA</span>'+
+      '</div>';
+    }).join('');
+    teamSection='<div class="card cp" style="margin-top:0">'+
+      '<div class="fw6 mb3">My Team</div>'+
+      (memberRows||'<div style="font-size:13px;color:var(--text3);padding:8px 0">No team members assigned yet.</div>')+
+      '<div style="margin-top:10px;font-size:11px;color:var(--text3)">Team assignments are managed by Admin.</div>'+
+    '</div>';
+  }
+
   var pltOpts=["Gmail","Outlook"].map(function(p){
     var sel=u.plt===p;
     return '<div onclick="setProfilePlt(\''+p+'\')" style="display:flex;align-items:center;gap:11px;padding:12px 13px;border:2px solid '+(sel?"var(--accent)":"var(--border)")+';border-radius:var(--r2);cursor:pointer;margin-bottom:8px;background:'+(sel?"var(--accent-l)":"var(--card)")+';transition:all .12s">'+
@@ -2271,6 +2301,7 @@ function renderProfile(){
           pltOpts+
           '<div style="margin-top:13px;padding:9px 11px;background:var(--bg);border-radius:var(--r);font-size:12px;color:var(--text3)">In production: clicking Connect will open OAuth authorization to send emails from your account.</div>'+
         '</div>'+
+        teamSection+
       '</div>'+
     '</div>'+
   '</div>';
@@ -5563,6 +5594,94 @@ window.toggleEmailAccount=function(id,active){
 // ════════════════════════════════════════════════
 // ASSIGN LEADS — RA Team Lead bulk assign UI (Drop E)
 // ════════════════════════════════════════════════
+function renderCompanies(){
+  var u=STATE.user;
+  var companies=STATE.companies||[];
+  var q=(STATE.companiesSearch||'').toLowerCase().trim();
+  var filtered=q?companies.filter(function(c){
+    var jobs=(STATE.jobs||[]).filter(function(j){return j.company_id===c.id;});
+    var contacts=(STATE.contacts||[]).filter(function(ct){return jobs.some(function(j){return j.id===ct.job_id;});});
+    return c.name.toLowerCase().includes(q)||
+      (c.web||'').toLowerCase().includes(q)||
+      (c.ind||'').toLowerCase().includes(q)||
+      (c.loc||'').toLowerCase().includes(q)||
+      contacts.some(function(ct){return (ct.email||'').toLowerCase().includes(q)||(ct.first_name+' '+ct.last_name).toLowerCase().includes(q)||(ct.phone||'').toLowerCase().includes(q);});
+  }):companies;
+
+  var rows=filtered.map(function(c){
+    var companyJobs=(STATE.jobs||[]).filter(function(j){return j.company_id===c.id;});
+    var contacts=(STATE.contacts||[]).filter(function(ct){return companyJobs.some(function(j){return j.id===ct.job_id;});});
+    var primaryContact=contacts[0]||{};
+    return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer" onclick="STATE.companiesSearch=\'\';render()">'+
+      '<td style="padding:12px"><div style="font-weight:600;color:var(--text)">'+htmlEsc(c.name)+'</div><div style="font-size:11px;color:var(--text3)">'+htmlEsc(c.ind||'—')+'</div></td>'+
+      '<td style="padding:12px;font-size:13px;color:var(--text2)">'+htmlEsc(c.loc||'—')+'</td>'+
+      '<td style="padding:12px"><div style="font-size:13px">'+htmlEsc((primaryContact.first_name||'')+(primaryContact.last_name?' '+primaryContact.last_name:'') ||'—')+'</div><div style="font-size:11px;color:var(--text3)">'+htmlEsc(primaryContact.email||'')+'</div></td>'+
+      '<td style="padding:12px;font-size:12px;color:var(--text3)">'+htmlEsc(primaryContact.phone||'—')+'</td>'+
+      '<td style="padding:12px;text-align:center"><span style="background:var(--accent-l);color:var(--accent);padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600">'+companyJobs.length+'</span></td>'+
+      '<td style="padding:12px"><a href="'+htmlEsc(c.web||'#')+'" target="_blank" style="font-size:12px;color:var(--accent);text-decoration:none">'+htmlEsc(c.web||'—')+'</a></td>'+
+    '</tr>';
+  }).join('');
+  if(!rows)rows='<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No companies found'+(q?' matching "'+htmlEsc(q)+'"':'')+'.</td></tr>';
+
+  return '<div class="page">'+
+    '<div class="ph"><div class="flex jb aic"><div><div class="ptitle">Companies</div><div class="psub">'+companies.length+' companies · search across all data points</div></div></div></div>'+
+    '<div style="margin-bottom:16px">'+
+      '<input id="companies-search" class="inp" placeholder="Search by company name, email, contact name, phone, website..." value="'+htmlEsc(STATE.companiesSearch||'')+'" oninput="STATE.companiesSearch=this.value;render()" style="max-width:520px;font-size:14px;padding:11px 14px"/>'+
+    '</div>'+
+    '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden">'+
+      '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
+        '<thead style="background:var(--bg3);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
+          '<tr><th style="padding:12px;text-align:left">Company</th><th style="padding:12px;text-align:left">Location</th><th style="padding:12px;text-align:left">Primary Contact</th><th style="padding:12px;text-align:left">Phone</th><th style="padding:12px;text-align:center">Jobs</th><th style="padding:12px;text-align:left">Website</th></tr>'+
+        '</thead>'+
+        '<tbody>'+rows+'</tbody>'+
+      '</table>'+
+    '</div>'+
+  '</div>';
+}
+
+function renderTeamView(){
+  var u=STATE.user;
+  var bdUsers=(STATE.users||[]).filter(function(x){return userHasRole(x,'bd')||userHasRole(x,'bd_lead');});
+  var assignments=STATE.teamAssignments||[];
+
+  var bdCards=bdUsers.map(function(bd){
+    var myEmails=(STATE.userEmailsCache&&STATE.userEmailsCache[bd.id])||[];
+    var myMembers=assignments.filter(function(a){return a.manager_id===bd.id;});
+    var emailBadges=myEmails.map(function(e){
+      var connected=e.ms_connected;
+      return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 8px;border-radius:6px;font-weight:600;background:'+(connected?'var(--green-l)':'var(--red-l)')+';color:'+(connected?'var(--green)':'var(--red)')+'">'+
+        (connected?'✓ ':'✗ ')+htmlEsc(e.display_name||e.email_address)+
+      '</span>';
+    }).join(' ');
+    var memberNames=myMembers.map(function(a){
+      var m=a.member||(STATE.users||[]).find(function(x){return x.id===a.member_id;})||{};
+      return htmlEsc(m.name||'?');
+    }).join(', ');
+    return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:16px;margin-bottom:12px">'+
+      '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">'+
+        '<div style="width:40px;height:40px;border-radius:50%;background:var(--accent-l);color:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px">'+bd.name.charAt(0).toUpperCase()+'</div>'+
+        '<div><div style="font-weight:600;font-size:14px">'+htmlEsc(bd.name)+'</div><div style="font-size:11px;color:var(--text3)">'+htmlEsc(bd.email)+'</div></div>'+
+      '</div>'+
+      '<div style="margin-bottom:8px"><div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Email Accounts</div>'+
+        (emailBadges||'<span style="font-size:12px;color:var(--text3)">No accounts configured</span>')+
+      '</div>'+
+      (myMembers.length?'<div style="margin-top:8px"><div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">RA Team</div><div style="font-size:13px;color:var(--text2)">'+memberNames+'</div></div>':'')+
+    '</div>';
+  }).join('');
+
+  // Load email caches for all BD managers if not loaded
+  bdUsers.forEach(function(bd){
+    if(!STATE.userEmailsCache||!STATE.userEmailsCache[bd.id]){
+      loadUserEmails(bd.id);
+    }
+  });
+
+  return '<div class="page">'+
+    '<div class="ph"><div class="ptitle">Team</div><div class="psub">BD Managers and their assigned email accounts</div></div>'+
+    (bdCards||'<div style="padding:40px;text-align:center;color:var(--text3)">No BD Managers found.</div>')+
+  '</div>';
+}
+
 function renderAssignLeads(){
   var u=STATE.user;
   var poolStats=STATE.distributePoolStats||{total:0,by_freshness:{},by_industry:{},by_timezone:{},duplicates:0};
