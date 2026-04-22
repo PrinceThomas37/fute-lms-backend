@@ -698,6 +698,84 @@ app.post('/emails', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Standalone generation function — called directly by autoSendForManager (no HTTP)
+async function generateEmailsForJobs(job_ids, callerUserId) {
+  const { data: jobs, error: jErr } = await supabase.from('jobs').select('id, position, assigned_to_bd, sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name), company:companies(name,industry,location), contacts(*)').in('id', job_ids);
+  if (jErr) throw jErr;
+  const bdIds = [...new Set(jobs.map(j => j.assigned_to_bd).filter(Boolean))];
+  const { data: bdUsers } = bdIds.length ? await supabase.from('users').select('id,name,email').in('id', bdIds) : { data: [] };
+  const bdMap = {};
+  (bdUsers || []).forEach(u => { bdMap[u.id] = u; });
+  const allBdIds = [...new Set([callerUserId, ...bdIds])];
+  const { data: bdEmailRows } = allBdIds.length
+    ? await supabase.from('user_emails').select('id,user_id,email_address,display_name,is_primary').in('user_id', allBdIds).order('is_primary', { ascending: false })
+    : { data: [] };
+  const bdPrimaryEmailMap = {};
+  (bdEmailRows || []).forEach(e => { if (!bdPrimaryEmailMap[e.user_id]) bdPrimaryEmailMap[e.user_id] = e; });
+  const tmplKeys = allBdIds.flatMap(id => [`u_${id}_tmpl_o1_subject`, `u_${id}_tmpl_o1_body`]);
+  const { data: tmplRows } = await supabase.from('app_settings').select('key,value').in('key', tmplKeys);
+  const tmplSettings = {};
+  (tmplRows || []).forEach(r => { tmplSettings[r.key] = r.value; });
+  function fillTmpl(tmpl, vars) { return (tmpl || '').replace(/{{(\w+)}}/g, (m, k) => vars[k] !== undefined ? vars[k] : m); }
+  const emailsToInsert = [];
+  for (const job of jobs) {
+    const bd = bdMap[job.assigned_to_bd] || { id: callerUserId, name: '', email: '' };
+    const contacts = (job.contacts || []).filter(c => c.email);
+    const savedSubj = tmplSettings[`u_${bd.id}_tmpl_o1_subject`] || '';
+    const savedBody = tmplSettings[`u_${bd.id}_tmpl_o1_body`] || '';
+    for (const contact of contacts) {
+      try {
+        let subject, body;
+        const senderDisplayName = job.sending_email?.display_name || bdPrimaryEmailMap[bd.id]?.display_name || bd.name || '';
+        const vars = { fn: contact.first_name || '', ln: contact.last_name || '', company: job.company?.name || '', pos: job.position || '', ind: job.company?.industry || '', loc: job.company?.location || '', desig: contact.designation || 'Hiring Manager', sender: senderDisplayName };
+        if (savedSubj && savedBody) {
+          subject = fillTmpl(savedSubj, vars); body = fillTmpl(savedBody, vars);
+        } else if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== 'your_anthropic_api_key_here') {
+          const prompt = `Write a hyper-personalized cold outreach email from ${senderDisplayName} at Fute Global LLC (a staffing/recruitment firm) to ${contact.first_name} ${contact.last_name || ''}, ${contact.designation || 'Hiring Manager'} at ${job.company?.name || ''} (${job.company?.industry || ''}, ${job.company?.location || ''}).
+
+They are hiring for: ${job.position}
+
+Instructions: 3 short paragraphs, warm but professional tone, no fluff, end with a clear call to action.
+
+Format strictly as:
+Subject: [subject line]
+
+[email body]`;
+          const aiResp = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 500, messages: [{ role: 'user', content: prompt }] }) });
+          const aiData = await aiResp.json();
+          const text = aiData.content?.[0]?.text || '';
+          const subjectMatch = text.match(/Subject:\s*(.+)/i);
+          subject = subjectMatch ? subjectMatch[1].trim() : `Staffing Partnership — ${job.company?.name}`;
+          body = text.replace(/^Subject:.+
+*/im, '').trim();
+        } else {
+          subject = fillTmpl(savedSubj || 'Staffing Partnership — {{company}}', vars);
+          body = fillTmpl(savedBody || `Hi {{fn}},
+
+I came across {{company}} and noticed you're hiring for {{pos}}. At Fute Global, we specialize in placing top-tier talent for roles exactly like this.
+
+Would you be open to a quick 15-minute call this week?
+
+Best regards,
+{{sender}}
+Fute Global LLC`, vars);
+        }
+        const jobSendingEmail = job.sending_email;
+        const bdPrimaryEmail = bdPrimaryEmailMap[bd.id];
+        const resolvedSendingEmail = jobSendingEmail || bdPrimaryEmail;
+        const sendingEmailAddress = resolvedSendingEmail?.email_address || '';
+        emailsToInsert.push({ contact_id: contact.id, job_id: job.id, to_email: contact.email, subject, body, platform: 'Outlook', sent_by: bd.id, from_email: sendingEmailAddress, status: 'pending' });
+      } catch(e) { console.error('[GenerateEmails] contact error:', e.message); }
+    }
+  }
+  if (emailsToInsert.length) {
+    const { error: insErr } = await supabase.from('emails').insert(emailsToInsert);
+    if (insErr) throw insErr;
+  }
+  console.log(`[GenerateEmails] Inserted ${emailsToInsert.length} emails for jobs: ${job_ids.join(',')}`);
+  return emailsToInsert.length;
+}
+
 app.post('/emails/generate', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin', 'ra_lead', 'bd', 'bd_lead')) return res.status(403).json({ error: 'Not allowed' });
@@ -1341,21 +1419,17 @@ app.post('/distribute/execute', auth, async (req, res) => {
     }
     if (followUpRows.length) await supabase.from('follow_ups').insert(followUpRows);
 
-    // Generate emails then auto-send them — no BD action needed
-    const host = `${req.protocol}://${req.get('host')}`;
-    const authHeader = req.headers.authorization;
-    // Get BD manager's token for auto-send (we need to act as the BD manager)
-    // First generate, then trigger queue-all as that manager
-    fetch(`${host}/emails/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
-      body: JSON.stringify({ job_ids: jobIds })
-    }).then(async (genRes) => {
-      const genData = await genRes.json().catch(() => ({}));
-      console.log(`[AutoSend] Generated ${genData.generated || 0} emails for manager ${manager_id}`);
-      // Trigger auto-send for this specific BD manager using their user context
-      await autoSendForManager(manager_id, host, authHeader);
-    }).catch(e => console.error('Email generation/send error:', e.message));
+    // Generate emails then auto-send — run fully in background, no HTTP self-call
+    setImmediate(async () => {
+      try {
+        console.log(`[AutoSend] Starting background generate+send for manager ${manager_id}, ${jobIds.length} jobs`);
+        const generated = await generateEmailsForJobs(jobIds, manager_id);
+        console.log(`[AutoSend] Generated ${generated} emails, now sending...`);
+        await autoSendForManager(manager_id);
+      } catch(e) {
+        console.error('[AutoSend] Background error:', e.message);
+      }
+    });
 
     res.json({ success: true, total_assigned: selected.length, manager_id, by_freshness: used.freshness, by_industry: used.industry, by_timezone: used.timezone, email_accounts_used: Object.keys(countPerAccount).length, ratio_summary: ratio.summary || '', assigned_at: now.toISOString(), auto_send: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
