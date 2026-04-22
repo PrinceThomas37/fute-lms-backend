@@ -1144,6 +1144,82 @@ app.post('/distribute/generate-ratio', auth, async (req, res) => {
   } catch (err) { res.json(buildAutoRatio(req.body.pool_stats, req.body.pool_stats?.capacity || 150)); }
 });
 
+// Auto-send all pending emails for a specific BD manager (called after assignment)
+async function autoSendForManager(managerId, host, authHeader) {
+  try {
+    const { data: pendingEmails, error } = await supabase
+      .from('emails')
+      .select('id, to_email, subject, body, contact_id, job_id, from_email, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
+      .eq('sent_by', managerId)
+      .eq('status', 'pending');
+    if (error || !pendingEmails?.length) {
+      console.log(`[AutoSend] No pending emails for manager ${managerId}`);
+      return;
+    }
+    const totalCount = pendingEmails.length;
+    console.log(`[AutoSend] Starting auto-send of ${totalCount} emails for manager ${managerId}`);
+    await setSendProgress(managerId, { active: true, total: totalCount, sent: 0, failed: 0, current: '', failDetails: [], startedAt: new Date().toISOString(), autoSend: true });
+
+    let sent = 0, failed = 0;
+    const failDetails = [], sentContactIds = [], sentJobIds = [];
+
+    for (const email of pendingEmails) {
+      const userEmailId = email.job?.sending_email_id;
+      const sendingEmail = email.job?.sending_email;
+      const platform = (sendingEmail?.platform || 'Microsoft').toLowerCase();
+
+      if (!userEmailId) {
+        failed++;
+        failDetails.push({ id: email.id, to: email.to_email, from: email.from_email || '—', error: 'No sending email configured' });
+        try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
+        await setSendProgress(managerId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString(), autoSend: true });
+        continue;
+      }
+      if (platform === 'gmail' || platform === 'google') {
+        failed++;
+        failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || '—', error: 'Gmail not yet supported' });
+        try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
+        await setSendProgress(managerId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString(), autoSend: true });
+        continue;
+      }
+      await setSendProgress(managerId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString(), autoSend: true });
+      try {
+        console.log(`[AutoSend] Getting token for userEmailId=${userEmailId}`);
+        const accessToken = await getMicrosoftToken(userEmailId);
+        const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: { subject: email.subject, body: { contentType: 'Text', content: email.body }, toRecipients: [{ emailAddress: { address: email.to_email } }] }, saveToSentItems: true })
+        });
+        if (!sendRes.ok) { const e = await sendRes.json().catch(() => ({})); throw new Error(e?.error?.message || `HTTP ${sendRes.status}`); }
+        await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email.id);
+        const todayDate = today();
+        const { data: logRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', userEmailId).eq('send_date', todayDate).single();
+        await supabase.from('email_send_log').upsert({ user_email_id: userEmailId, send_date: todayDate, emails_sent: (logRow?.emails_sent || 0) + 1 }, { onConflict: 'user_email_id,send_date' });
+        if (email.contact_id) sentContactIds.push(email.contact_id);
+        if (email.job_id) sentJobIds.push(email.job_id);
+        sent++;
+        await setSendProgress(managerId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString(), autoSend: true });
+        if (sent + failed < totalCount) await randomDelay(1, 120);
+      } catch (e) {
+        failed++;
+        failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: e.message });
+        try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
+        await setSendProgress(managerId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString(), autoSend: true });
+      }
+    }
+    const uniqueContactIds = [...new Set(sentContactIds.filter(Boolean))];
+    if (uniqueContactIds.length) await supabase.from('contacts').update({ email_sent_at: today() }).in('id', uniqueContactIds);
+    const uniqueJobIds = [...new Set(sentJobIds.filter(Boolean))];
+    for (const jid of uniqueJobIds) await logActivity(jid, null, managerId, 'emails_sent', `${sent} email(s) auto-sent via Microsoft`, null, null);
+    await setSendProgress(managerId, { active: false, done: true, total: totalCount, sent, failed, failDetails, completedAt: new Date().toISOString(), autoSend: true });
+    setTimeout(() => clearSendProgress(managerId), 300000); // keep for 5 mins so BD sees it on login
+    console.log(`[AutoSend] Completed for manager ${managerId}: ${sent} sent, ${failed} failed`);
+  } catch (err) {
+    console.error(`[AutoSend] Error for manager ${managerId}:`, err.message);
+  }
+}
+
 app.post('/distribute/execute', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'RA Lead only' });
@@ -1250,9 +1326,23 @@ app.post('/distribute/execute', auth, async (req, res) => {
     }
     if (followUpRows.length) await supabase.from('follow_ups').insert(followUpRows);
 
-    fetch(`${req.protocol}://${req.get('host')}/emails/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': req.headers.authorization }, body: JSON.stringify({ job_ids: jobIds }) }).catch(e => console.error('Email generation error:', e.message));
+    // Generate emails then auto-send them — no BD action needed
+    const host = `${req.protocol}://${req.get('host')}`;
+    const authHeader = req.headers.authorization;
+    // Get BD manager's token for auto-send (we need to act as the BD manager)
+    // First generate, then trigger queue-all as that manager
+    fetch(`${host}/emails/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
+      body: JSON.stringify({ job_ids: jobIds })
+    }).then(async (genRes) => {
+      const genData = await genRes.json().catch(() => ({}));
+      console.log(`[AutoSend] Generated ${genData.generated || 0} emails for manager ${manager_id}`);
+      // Trigger auto-send for this specific BD manager using their user context
+      await autoSendForManager(manager_id, host, authHeader);
+    }).catch(e => console.error('Email generation/send error:', e.message));
 
-    res.json({ success: true, total_assigned: selected.length, manager_id, by_freshness: used.freshness, by_industry: used.industry, by_timezone: used.timezone, email_accounts_used: Object.keys(countPerAccount).length, ratio_summary: ratio.summary || '', assigned_at: now.toISOString() });
+    res.json({ success: true, total_assigned: selected.length, manager_id, by_freshness: used.freshness, by_industry: used.industry, by_timezone: used.timezone, email_accounts_used: Object.keys(countPerAccount).length, ratio_summary: ratio.summary || '', assigned_at: now.toISOString(), auto_send: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
