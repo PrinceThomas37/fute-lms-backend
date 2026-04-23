@@ -4493,7 +4493,7 @@ function renderInsights(){
     var weekAgoStr=daysAgoIST(7);
     var monthAgoStr=daysAgoIST(30);
 
-    var raUsers=STATE.users.filter(function(x){return x.role==='ra';});
+    var raUsers=STATE.users.filter(function(x){return userHasRole(x,'ra');});
     var allJobs=STATE.jobs;
 
     // Per-RA stats
@@ -4504,18 +4504,33 @@ function renderInsights(){
       var monthJ=myJobs.filter(function(j){var d=jDate(j);return d>=monthAgoStr&&d<=todayStr;});
       var assignedJ=myJobs.filter(function(j){return j.stage!=='Unassigned';});
       var convertedJ=myJobs.filter(function(j){return j.stage==='Connected'||j.stage==='In Discussion';});
-      var openedJ=myJobs.filter(function(j){return !!j.job_opened_date;});
       var dupJ=myJobs.filter(function(j){return j.is_duplicate;});
+      // POC Relevance: contacts where BD gave feedback (email reached someone or was marked)
+      // vs total contacts in assigned leads. Excludes unread/no-response (we don't know those yet).
+      var assignedIds=assignedJ.map(function(j){return j.id;});
+      var assignedContacts=STATE.contacts.filter(function(c){return assignedIds.indexOf(c.job_id)>-1;});
+      // "Got feedback" = OOO (explicit), valid in a connected/in-discussion job, or invalid/deactivated
+      var feedbackContacts=assignedContacts.filter(function(c){
+        var job=allJobs.find(function(j){return j.id===c.job_id;});
+        var hasResponse=c.email_status==='out_of_office'||c.email_status==='invalid'||c.email_status==='deactivated';
+        var isEngaged=job&&(job.stage==='Connected'||job.stage==='In Discussion');
+        return hasResponse||isEngaged;
+      });
+      // Of those with feedback, how many are valid (email actually reached the right person)
+      var validFeedback=feedbackContacts.filter(function(c){
+        return c.email_status!=='invalid'&&c.email_status!=='deactivated';
+      });
+      var pocScore=feedbackContacts.length>=3?Math.round(validFeedback.length/feedbackContacts.length*100):null;
       var target=parseInt(STATE.appSettings['ra_daily_target_'+ra.id]||0);
       return{ra:ra,total:myJobs.length,today:todayJ.length,week:weekJ.length,month:monthJ.length,
-        assigned:assignedJ.length,converted:convertedJ.length,opened:openedJ.length,dups:dupJ.length,target:target,
+        assigned:assignedJ.length,converted:convertedJ.length,dups:dupJ.length,
+        pocScore:pocScore,target:target,
         assignRate:myJobs.length?Math.round(assignedJ.length/myJobs.length*100):0,
-        convRate:myJobs.length?Math.round(convertedJ.length/myJobs.length*100):0,
-        openRate:myJobs.length?Math.round(openedJ.length/myJobs.length*100):0};
-    }).sort(function(a,b){return b.month-a.month;});
+        convRate:myJobs.length?Math.round(convertedJ.length/myJobs.length*100):0};
+    }).sort(function(a,b){return b.convRate-a.convRate;});
 
-    // Monthly leader
-    var leader=raStats.length&&raStats[0].month>0?raStats[0]:null;
+    // Monthly leader = highest conversion rate (min 1 lead to qualify)
+    var leader=raStats.find(function(r){return r.total>0&&r.convRate>0;})||( raStats.find(function(r){return r.total>0;})||null);
 
     // Total team stats
     var teamToday=raStats.reduce(function(s,r){return s+r.today;},0);
@@ -4619,7 +4634,9 @@ function renderInsights(){
           '<span style="font-size:12px;padding:2px 8px;border-radius:8px;font-weight:600;background:'+(rs.convRate>=20?'var(--green-l)':'var(--bg)')+';color:'+(rs.convRate>=20?'var(--green)':'var(--text3)')+'">'+rs.convRate+'%</span>'+
         '</td>'+
         '<td style="padding:11px 14px;text-align:center">'+
-          '<span style="font-size:12px;color:'+(rs.openRate>=50?'var(--green)':'var(--text3)')+'">'+rs.openRate+'%</span>'+
+          (rs.pocScore!==null?
+            '<span style="font-size:12px;padding:2px 8px;border-radius:8px;font-weight:600;background:'+(rs.pocScore>=80?'var(--green-l)':rs.pocScore>=60?'var(--amber-l)':'var(--red-l)')+';color:'+(rs.pocScore>=80?'var(--green)':rs.pocScore>=60?'var(--amber)':'var(--red)')+'">'+rs.pocScore+'%</span>':
+            '<span style="font-size:12px;color:var(--text3)">—</span>')+
         '</td>'+
         '<td style="padding:11px 14px;text-align:center">'+
           '<span style="font-size:12px;color:'+(rs.dups>0?'var(--amber)':'var(--text3)')+'">'+rs.dups+'</span>'+
@@ -4649,11 +4666,11 @@ function renderInsights(){
           '<div style="flex:1">'+
             '<div style="font-size:10.5px;opacity:.8;text-transform:uppercase;letter-spacing:.07em;font-weight:600">Monthly Leader</div>'+
             '<div style="font-size:18px;font-weight:700;font-family:var(--display)">'+htmlEsc(leader.ra.name)+'</div>'+
-            '<div style="font-size:12px;opacity:.82">'+leader.month+' leads this month · '+leader.convRate+'% conversion</div>'+
+            '<div style="font-size:12px;opacity:.82">'+leader.convRate+'% conversion · '+leader.month+' leads this month</div>'+
           '</div>'+
           '<div style="text-align:right">'+
-            '<div style="font-size:36px;font-weight:700;font-family:var(--display);line-height:1">'+leader.month+'</div>'+
-            '<div style="font-size:11px;opacity:.78">leads</div>'+
+            '<div style="font-size:36px;font-weight:700;font-family:var(--display);line-height:1">'+leader.convRate+'%</div>'+
+            '<div style="font-size:11px;opacity:.78">conversion</div>'+
           '</div>'+
         '</div>':'')+
 
@@ -4680,16 +4697,16 @@ function renderInsights(){
             '<th style="padding:9px 14px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Today</th>'+
             '<th style="padding:9px 14px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Week</th>'+
             '<th style="padding:9px 14px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Month</th>'+
-            '<th style="padding:9px 14px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Assign %</th>'+
+            '<th style="padding:9px 14px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Assigned %</th>'+
             '<th style="padding:9px 14px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Conv %</th>'+
-            '<th style="padding:9px 14px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Opened %</th>'+
+            '<th style="padding:9px 14px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">POC Relevance</th>'+
             '<th style="padding:9px 14px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Dups</th>'+
             '<th style="width:24px"></th>'+
           '</tr></thead>'+
           '<tbody>'+(lbRows||'<tr><td colspan="9" style="padding:32px;text-align:center;color:var(--text3)">No RAs found.</td></tr>')+'</tbody>'+
         '</table>'+
         '<div style="padding:8px 16px;background:var(--bg);border-top:1px solid var(--border);font-size:11.5px;color:var(--text3)">'+
-          'Assign % — leads that got assigned to a BD &nbsp;·&nbsp; Conv % — leads that reached Connected or In Discussion &nbsp;·&nbsp; Opened % — leads with job_opened_date set'+
+          'Assigned % — leads picked up by a BD manager &nbsp;·&nbsp; Conv % — leads reaching Connected or In Discussion &nbsp;·&nbsp; POC Relevance — of contacts where BD got a response (OOO / connected / bounced), what % reached a real person. Shown after 3+ feedback signals.'+
         '</div>'+
       '</div>'+
 
