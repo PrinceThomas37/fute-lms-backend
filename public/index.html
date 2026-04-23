@@ -3889,10 +3889,20 @@ function renderRALeadForm(){
   var coBanner='';
   if(f.coInfo){
     var ci=f.coInfo;
-    coBanner='<div style="margin-top:6px;padding:8px 12px;background:var(--accent-l);border-radius:var(--r);font-size:12px;color:var(--text2)">'+
-      '\u2139\ufe0f <strong>'+htmlEsc(ci.name)+'</strong> already exists'+
-      (ci.job_count?' \u00b7 '+ci.job_count+' open job'+(ci.job_count!==1?'s':'')+' in system':'')+
-      (ci.bd_name?' \u00b7 Manager: <strong>'+htmlEsc(ci.bd_name)+'</strong>':'')+
+    var filled=[];
+    if(ci.website)filled.push('Website');
+    if(ci.industry)filled.push('Industry');
+    if(ci.location)filled.push('Location');
+    coBanner='<div style="margin-top:8px;padding:10px 14px;background:var(--accent-l);border:1px solid rgba(30,122,60,.2);border-radius:var(--r2);font-size:12.5px;color:var(--text2);display:flex;align-items:flex-start;gap:10px">'+
+      '<svg style="flex-shrink:0;margin-top:1px" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 15.01 9 12.01"/></svg>'+
+      '<div style="flex:1">'+
+        '<div style="font-weight:600;color:var(--accent);margin-bottom:2px">'+htmlEsc(ci.name)+' found in system</div>'+
+        '<div style="color:var(--text3);font-size:11.5px">Auto-filled: '+(filled.length?filled.join(', '):'company details')+
+        (ci.job_count?' &nbsp;·&nbsp; '+ci.job_count+' existing job'+(ci.job_count!==1?'s':'')+' on record':'')+
+        (ci.bd_name?' &nbsp;·&nbsp; Manager: '+htmlEsc(ci.bd_name):'')+
+        '</div>'+
+      '</div>'+
+      '<button onclick="raFormSet(\'coInfo\',null);raFormSet(\'coId\',null)" style="background:none;border:none;color:var(--text3);font-size:11px;cursor:pointer;padding:0;white-space:nowrap;flex-shrink:0">✕ Clear</button>'+
     '</div>';
   }
 
@@ -3957,20 +3967,30 @@ function renderRALeadForm(){
         '<div style="position:relative">'+
           '<input class="inp" id="ra-co-name" placeholder="Company name *" value="'+htmlEsc(f.coName||'')+'" autocomplete="off" oninput="raFormCoSearch(this.value)" onblur="raFormCoBlur()"/>'+
           (STATE.raFormCoSuggestions&&STATE.raFormCoSuggestions.length?
-            '<div style="position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);z-index:100;max-height:200px;overflow-y:auto;margin-top:2px" id="co-suggestions">'+
+            '<div style="position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);z-index:100;max-height:260px;overflow-y:auto;margin-top:4px" id="co-suggestions">'+
+              '<div style="padding:6px 12px 5px;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border)">Companies in system</div>'+
               STATE.raFormCoSuggestions.map(function(co,i){
-                return '<div class="_co-sug" data-idx="'+i+'" style="padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border)">'+
-                  '<div style="font-weight:500;font-size:13px">'+htmlEsc(co.name)+'</div>'+
-                  '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(co.industry||'')+(co.location?' \u00b7 '+htmlEsc(co.location):'')+( co.job_count?' \u00b7 '+co.job_count+' jobs':'')+( co.bd_name?' \u00b7 '+htmlEsc(co.bd_name):'')+'</div>'+
+                var tags='';
+                if(co.industry)tags+='<span style="font-size:10.5px;background:var(--accent-l);color:var(--accent);padding:1px 7px;border-radius:10px;font-weight:500">'+htmlEsc(co.industry)+'</span>';
+                if(co.location)tags+='<span style="font-size:10.5px;color:var(--text3);margin-left:6px">📍 '+htmlEsc(co.location)+'</span>';
+                if(co.job_count)tags+='<span style="font-size:10.5px;color:var(--text3);margin-left:6px">'+co.job_count+' job'+(co.job_count!==1?'s':'')+' on record</span>';
+                if(co.bd_name)tags+='<span style="font-size:10.5px;color:var(--text3);margin-left:6px">· '+htmlEsc(co.bd_name)+'</span>';
+                return '<div class="_co-sug" data-idx="'+i+'" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);transition:background .1s">'+
+                  '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">'+
+                    '<div style="font-weight:600;font-size:13.5px;color:var(--text)">'+htmlEsc(co.name)+'</div>'+
+                    '<div style="font-size:11px;color:var(--accent);font-weight:500;white-space:nowrap;margin-left:10px">Select →</div>'+
+                  '</div>'+
+                  '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">'+tags+'</div>'+
+                  (co.website?'<div style="font-size:11px;color:var(--text3);margin-top:3px">'+htmlEsc(co.website)+'</div>':'')+
                 '</div>';
               }).join('')+
             '</div>':'')+
         '</div>'+
-        coBanner+
       '</div>'+
       '<input class="inp" placeholder="Website" value="'+htmlEsc(f.website||'')+'" oninput="raFormSet(\'website\',this.value)"/>'+
       '<select class="sel" onchange="raFormSet(\'industry\',this.value)">'+indOpts+'</select>'+
     '</div>'+
+    (coBanner?coBanner+' ':'')+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
       '<div>'+
         '<div style="position:relative">'+
@@ -4095,25 +4115,31 @@ window.raFormCoSearch=function(val){
   apiGet('/companies/search?q='+encodeURIComponent(val)).then(function(results){
     STATE.raFormCoSuggestions=results;
     render();
-    // Bind click handlers after render
+    // Use mousedown (not click) so it fires before onblur dismisses the list
     setTimeout(function(){
       var items=document.querySelectorAll('._co-sug');
       Array.prototype.forEach.call(items,function(el){
         el.addEventListener('mouseenter',function(){this.style.background='var(--accent-l)';});
         el.addEventListener('mouseleave',function(){this.style.background='';});
-        el.addEventListener('click',function(){
+        el.addEventListener('mousedown',function(e){
+          e.preventDefault(); // stop blur from firing first
           var idx=parseInt(this.getAttribute('data-idx'));
           var co=STATE.raFormCoSuggestions[idx];
           if(!co)return;
           STATE.raForm.coName=co.name;
           STATE.raForm.coId=co.id;
           STATE.raForm.coInfo=co;
-          STATE.raForm.industry=co.industry||STATE.raForm.industry;
-          STATE.raForm.location=co.location||STATE.raForm.location;
-          STATE.raForm.website=co.website||STATE.raForm.website;
+          if(co.industry)STATE.raForm.industry=co.industry;
+          if(co.location)STATE.raForm.location=co.location;
+          if(co.website)STATE.raForm.website=co.website;
           STATE.raFormCoSuggestions=[];
           if(co.location)raFormDetectTimezone(co.location);
           render();
+          // Directly update visible inputs in case render() misses them
+          var nameEl=document.getElementById('ra-co-name');
+          var locEl=document.getElementById('ra-location');
+          if(nameEl)nameEl.value=co.name;
+          if(locEl&&co.location)locEl.value=co.location;
         });
       });
     },50);
@@ -4121,7 +4147,7 @@ window.raFormCoSearch=function(val){
 };
 
 window.raFormCoBlur=function(){
-  setTimeout(function(){STATE.raFormCoSuggestions=[];render();},200);
+  setTimeout(function(){STATE.raFormCoSuggestions=[];render();},300);
 };
 
 window.raFormCheckEmail=function(idx,email){
