@@ -1105,7 +1105,7 @@ function renderJobs(){
     var primary=cs[0]||{};
     var stageColor={Unassigned:"#94a3b8",Assigned:"#3b82f6",Connected:"#8b5cf6",Rejected:"#ef4444",Future:"#f59e0b",Qualified:"#10b981"}[j.stage]||"#64748b";
     return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer" onclick="openJob(\''+j.id+'\')">'+
-      '<td style="padding:12px"><div style="font-weight:600;color:var(--text)">'+escHtml(j.company_name)+(j.is_duplicate?'<span style="margin-left:6px;background:#fef9c3;color:#b45309;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">DUP</span>':'')+(j.freshness==='Old'?'<span style="margin-left:6px;background:#fef2f2;color:#dc2626;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">OLD</span>':'')+(j.freshness==='New'?'<span style="margin-left:6px;background:#f0fdf4;color:#16a34a;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">NEW</span>':'')+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.company_ind)+'</div></td>'+
+      '<td style="padding:12px"><div style="font-weight:600;color:var(--text)">'+escHtml(j.company_name)+(j.is_duplicate?'<span style="margin-left:6px;background:#fef9c3;color:#b45309;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">DUP</span>':'')+(function(){var _d=j.created_at?new Date(new Date(j.created_at).getTime()+5.5*3600000).toISOString().slice(0,10):(j.created_date||'');var _t=todayIST();var _y=new Date(new Date().getTime()+5.5*3600000);_y.setDate(_y.getDate()-1);var _ys=_y.toISOString().slice(0,10);if(_d===_t)return'<span style="margin-left:6px;background:#f0fdf4;color:#16a34a;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">NEW</span>';if(_d===_ys)return'<span style="margin-left:6px;background:#f1f5f9;color:#94a3b8;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:500">YESTERDAY</span>';return'';})()+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.company_ind||j.industry||'')+'</div></td>'+
       '<td style="padding:12px"><div style="font-weight:500">'+escHtml(j.position)+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.location||"—")+'</div></td>'+
       '<td style="padding:12px"><div>'+escHtml((primary.first_name||"")+" "+(primary.last_name||""))+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(primary.email||"—")+'</div></td>'+
       '<td style="padding:12px;text-align:center"><span style="background:rgba(99,102,241,.1);color:var(--accent);padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600">'+cs.length+'</span></td>'+
@@ -4510,7 +4510,7 @@ window.submitExportLeads=function(){
   apiGet(url).then(function(data){
     if(!data||!data.length){showToast('No leads found for selected range','warning');return;}
     // Build XLSX using the XLSX library
-    var rows=[['Date','Company','Website','Industry','Location','Timezone','Freshness','Job Title','Job Created Date','Job Opened Date','Salary Range','Source','BDM Assigned','Stage','First Name','Last Name','Designation','Email','Phone','LinkedIn']];
+    var rows=[['Date','Company','Website','Industry','Location','Timezone','Job Title','Job Created Date','Job Opened Date','Salary Range','Source','BDM Assigned','Stage','First Name','Last Name','Designation','Email','Phone','LinkedIn']];
     data.forEach(function(j){
       var co=j.company||{};
       var contacts=j.contacts||[];
@@ -4523,7 +4523,7 @@ window.submitExportLeads=function(){
           ci===0?htmlEsc(j.industry||co.industry||''):'',
           ci===0?htmlEsc(j.location||co.location||''):'',
           ci===0?htmlEsc(j.timezone||''):'',
-          ci===0?htmlEsc(j.freshness||''):'',
+          ci===0?'':
           ci===0?htmlEsc(j.position||''):'',
           ci===0?htmlEsc(j.job_created_date||''):'',
           ci===0?htmlEsc(j.job_opened_date||''):'',
@@ -4875,9 +4875,6 @@ function renderInsights(){
         '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Timezone</div>'+categoryRows(d.by_timezone)+
       '</div>'+
       '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px">'+
-        '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Freshness</div>'+categoryRows(d.by_freshness)+
-      '</div>'+
-      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px">'+
         '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Stage</div>'+categoryRows(d.by_stage)+
       '</div>'+
     '</div>'+
@@ -5164,7 +5161,6 @@ function normalizeIndustryMap(obj){
   return out;
 }
 function renderTodaySummaryCard(ts){
-  var bf=ts.by_freshness||{};
   var bi=normalizeIndustryMap(ts.by_industry||{});
   var btz=ts.by_timezone||{};
   function rows(obj){
@@ -5178,8 +5174,7 @@ function renderTodaySummaryCard(ts){
       '<div style="font-weight:700;font-size:14px;color:var(--accent)">Today\'s assignment summary</div>'+
       '<div style="font-size:24px;font-weight:700;color:var(--accent)">'+ts.total+' leads</div>'+
     '</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:12px">'+
-      '<div><div style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Freshness</div>'+rows(bf)+'</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:12px">'+
       '<div><div style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Industry</div>'+rows(bi)+'</div>'+
       '<div><div style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Timezone</div>'+rows(btz)+'</div>'+
     '</div>'+
@@ -5269,15 +5264,13 @@ function showRatioPreview(ratio){
   var prev=document.getElementById('assign-ratio-preview');
   var btn=document.getElementById('assign-confirm-btn');
   if(!prev)return;
-  var bf=ratio.by_freshness||{};
   var bi=ratio.by_industry||{};
   var btz=ratio.by_timezone||{};
   prev.style.display='block';
   prev.innerHTML='<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r2);padding:12px 14px">'+
     '<div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px">Distribution preview \u2014 '+ratio.total_to_send+' leads</div>'+
     '<div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:8px">'+htmlEsc(ratio.summary||'')+'</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:11.5px">'+
-      '<div><div style="color:var(--text3);margin-bottom:3px">Freshness</div>'+Object.keys(bf).map(function(k){return '<div>'+k+': <strong>'+bf[k]+'%</strong></div>';}).join('')+'</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11.5px">'+
       '<div><div style="color:var(--text3);margin-bottom:3px">Industry</div>'+Object.keys(bi).filter(function(k){return bi[k]>0;}).map(function(k){return '<div>'+k+': <strong>'+bi[k]+'%</strong></div>';}).join('')+'</div>'+
       '<div><div style="color:var(--text3);margin-bottom:3px">Timezone</div>'+Object.keys(btz).map(function(k){return '<div>'+k+': <strong>'+btz[k]+'%</strong></div>';}).join('')+'</div>'+
     '</div>'+
@@ -5680,7 +5673,6 @@ function renderAssignLeads(){
   // Pool summary bar
   var poolBar='';
   if(poolStats.total>0){
-    var bf=poolStats.by_freshness||{};
     var bi=poolStats.by_industry||{};
     var btz=poolStats.by_timezone||{};
     poolBar='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px 16px;margin-bottom:18px">'+
@@ -5688,14 +5680,7 @@ function renderAssignLeads(){
         '<div style="font-weight:600;font-size:13px">Unassigned lead pool</div>'+
         '<div style="font-size:22px;font-weight:700;color:var(--accent)">'+poolStats.total+'</div>'+
       '</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;font-size:12px">'+
-        '<div>'+
-          '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Freshness</div>'+
-          Object.keys(bf).map(function(k){
-            var col=k==='Old'?'var(--red)':k==='New'?'var(--green)':'var(--accent)';
-            return '<div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:'+col+';font-weight:500">'+k+'</span><span>'+bf[k]+'</span></div>';
-          }).join('')+
-        '</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px">'+
         '<div>'+
           '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Industry</div>'+
           Object.keys(bi).slice(0,5).map(function(k){
