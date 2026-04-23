@@ -734,10 +734,10 @@ function renderApp(){
     ...(userHasRole(u,'ra')&&!userHasAnyRole(u,'admin','bd','bd_lead','ra_lead')?[{id:"insights",lbl:"Insights",ic:"dashboard"}]:userHasRole(u,'ra_lead')&&!userHasAnyRole(u,'admin','bd','bd_lead')?[]:[{id:"reminders",lbl:"Reminders",ic:"star",badge:STATE.reminders.filter(function(r){return r.user_id===u.id&&r.status==="pending"}).length||null}]),
     {id:"profile",lbl:"My Profile",ic:"profile"}
   ];
+  if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
   if(userHasAnyRole(u,'admin','bd_lead'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
   if(userHasRole(u,'ra_lead')&&!userHasAnyRole(u,'admin','bd_lead'))navItems.splice(4,0,{id:"team",lbl:"Team",ic:"admin"});
   if(userHasAnyRole(u,'admin','bd_lead'))navItems.splice(5,0,{id:"managerusers",lbl:"Manager Users",ic:"email"});
-  if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
 
   var nav=navItems.map(function(n){
     var active=STATE.page===n.id?" active":"";
