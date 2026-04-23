@@ -3952,7 +3952,7 @@ function renderRALeadForm(){
 
     // ── Company ──
     '<div style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Company</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'+
       '<div>'+
         '<div style="position:relative">'+
           '<input class="inp" id="ra-co-name" placeholder="Company name *" value="'+htmlEsc(f.coName||'')+'" autocomplete="off" oninput="raFormCoSearch(this.value)" onblur="raFormCoBlur()"/>'+
@@ -3969,9 +3969,9 @@ function renderRALeadForm(){
         coBanner+
       '</div>'+
       '<input class="inp" placeholder="Website" value="'+htmlEsc(f.website||'')+'" oninput="raFormSet(\'website\',this.value)"/>'+
+      '<select class="sel" onchange="raFormSet(\'industry\',this.value)">'+indOpts+'</select>'+
     '</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
-      '<select class="sel" onchange="raFormSet(\'industry\',this.value)">'+indOpts+'</select>'+
       '<div>'+
         '<div style="position:relative">'+
           '<input class="inp" id="ra-zip" placeholder="Zip code (e.g. 10001)" value="'+htmlEsc(f.zipCode||'')+'" autocomplete="off" oninput="raFormZipSearch(this.value)" onblur="raFormZipBlur()"/>'+
