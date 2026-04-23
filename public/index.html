@@ -734,7 +734,8 @@ function renderApp(){
     ...(userHasRole(u,'ra')&&!userHasAnyRole(u,'admin','bd','bd_lead','ra_lead')?[{id:"insights",lbl:"Insights",ic:"dashboard"}]:userHasRole(u,'ra_lead')&&!userHasAnyRole(u,'admin','bd','bd_lead')?[]:[{id:"reminders",lbl:"Reminders",ic:"star",badge:STATE.reminders.filter(function(r){return r.user_id===u.id&&r.status==="pending"}).length||null}]),
     {id:"profile",lbl:"My Profile",ic:"profile"}
   ];
-  if(userHasAnyRole(u,'admin','ra_lead','bd_lead'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
+  if(userHasAnyRole(u,'admin','bd_lead'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
+  if(userHasRole(u,'ra_lead')&&!userHasAnyRole(u,'admin','bd_lead'))navItems.splice(4,0,{id:"team",lbl:"Team",ic:"admin"});
   if(userHasAnyRole(u,'admin','bd_lead'))navItems.splice(5,0,{id:"managerusers",lbl:"Manager Users",ic:"email"});
   if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
 
@@ -746,7 +747,7 @@ function renderApp(){
 
   var switchers=""; // removed — use team list to switch views
 
-  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",profile:"My Profile",reminders:"Reminders"};
+  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",profile:"My Profile",reminders:"Reminders",team:"Team"};
   var viewingName=STATE.viewingUser&&STATE.viewingUser.id!==u.id?" · Viewing: "+STATE.viewingUser.name:"";
 
   return '<div id="sidebar">'+
@@ -790,6 +791,7 @@ function renderPage(){
   if(STATE.page==="email")return renderEmail();
   if(STATE.page==="reminders")return renderReminders();
   if(STATE.page==="admin")return renderAdmin();
+  if(STATE.page==="team")return renderTeam();
   if(STATE.page==="profile")return renderProfile();
   return "<div class='page'>Page not found</div>";
 }
@@ -1814,6 +1816,47 @@ function renderEmail(){
 }
 
 // ── ADMIN ──────────────────────────────────────
+function renderTeam(){
+  var bdManagers=STATE.users.filter(function(u){return u.role==='bd'||u.role==='bd_lead'||u.role==='admin';});
+  var cards=bdManagers.map(function(mgr){
+    var emails=(STATE.userEmailsCache&&STATE.userEmailsCache[mgr.id])||[];
+    var emailRows=emails.length?emails.map(function(e){
+      var hasToken=e.is_connected||e.has_token;
+      return '<div style="display:flex;align-items:center;gap:10px;padding:9px 16px;border-bottom:1px solid var(--border)">'+
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0;color:var(--text3)"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>'+
+        '<div style="flex:1;font-size:13px;color:var(--text)">'+htmlEsc(e.email_address||e.email||'')+'</div>'+
+        (e.display_name?'<div style="font-size:11px;color:var(--text3)">'+htmlEsc(e.display_name)+'</div>':'')+
+        '<span style="font-size:10.5px;padding:2px 8px;border-radius:8px;font-weight:600;background:'+(hasToken?'var(--green-l)':'var(--bg)')+';color:'+(hasToken?'var(--green)':'var(--text3)')+'">'+
+          (hasToken?'Connected':'Not connected')+
+        '</span>'+
+      '</div>';
+    }).join(''):'<div style="padding:12px 16px;font-size:12.5px;color:var(--text3)">No email IDs configured.</div>';
+
+    return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);margin-bottom:14px;overflow:hidden">'+
+      '<div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border)">'+
+        av(mgr,'40')+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-weight:600;font-size:14px;color:var(--text)">'+htmlEsc(mgr.name)+'</div>'+
+          '<div style="font-size:11.5px;color:var(--text3);margin-top:1px">'+htmlEsc(mgr.email)+(mgr.empId?' · <span style="font-family:var(--mono)">'+htmlEsc(mgr.empId)+'</span>':'')+'</div>'+
+        '</div>'+
+        '<span style="font-size:11px;padding:3px 10px;background:var(--accent-l);color:var(--accent);border-radius:8px;font-weight:600">'+htmlEsc(roleLabel(mgr.role))+'</span>'+
+      '</div>'+
+      (emails.length?'<div style="padding:6px 0 0;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;padding:8px 16px 4px">Outreach Email IDs</div>':'')+
+      emailRows+
+    '</div>';
+  }).join('');
+
+  if(!cards)cards='<div style="text-align:center;padding:40px;color:var(--text3)">No BD managers found.</div>';
+
+  return '<div class="page">'+
+    '<div class="ph">'+
+      '<div class="ptitle">Team</div>'+
+      '<div class="psub">BD Managers and their outreach email accounts</div>'+
+    '</div>'+
+    cards+
+  '</div>';
+}
+
 function renderAdmin(){
   var u=STATE.user;
   var selectedUserId=STATE.adminSelectedUser||null;
