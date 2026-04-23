@@ -1043,8 +1043,8 @@ function renderJobs(){
   }
   if(f.stages&&f.stages.length)jobs=jobs.filter(function(j){return f.stages.indexOf(j.stage)>-1;});
   if(f.industries&&f.industries.length)jobs=jobs.filter(function(j){return f.industries.indexOf(j.industry||j.company_ind||"")>-1;});
-  if(f.dateRange&&f.dateRange!=="all"&&f.dateRange!=="custom"){var _now=new Date();var _today=todayIST();var _cut=null;if(f.dateRange==="today")_cut=_today;else if(f.dateRange==="yesterday"){var _yy=new Date(_now);_yy.setDate(_yy.getDate()-1);_cut=_yy.toISOString().slice(0,10);}else if(f.dateRange==="week"){var _ww=new Date(_now);_ww.setDate(_ww.getDate()-7);_cut=_ww.toISOString().slice(0,10);}if(_cut){if(f.dateRange==="today"||f.dateRange==="yesterday")jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)===_cut;});else jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)>=_cut;});}}
-  if(f.dateRange==="custom"){if(f.dateFrom)jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)>=f.dateFrom;});if(f.dateTo)jobs=jobs.filter(function(j){return (j.created_at||"").slice(0,10)<=f.dateTo;});}
+  if(f.dateRange&&f.dateRange!=="all"&&f.dateRange!=="custom"){var _now=new Date();var _today=todayIST();var _cut=null;if(f.dateRange==="today")_cut=_today;else if(f.dateRange==="yesterday"){var _yy=new Date(_now.getTime()+5.5*3600000);_yy.setDate(_yy.getDate()-1);_cut=_yy.toISOString().slice(0,10);}else if(f.dateRange==="week"){var _ww=new Date(_now.getTime()+5.5*3600000);_ww.setDate(_ww.getDate()-7);_cut=_ww.toISOString().slice(0,10);}if(_cut){if(f.dateRange==="today"||f.dateRange==="yesterday")jobs=jobs.filter(function(j){return (j.created_date||j.created_at||"").slice(0,10)===_cut;});else jobs=jobs.filter(function(j){return (j.created_date||j.created_at||"").slice(0,10)>=_cut;});}}
+  if(f.dateRange==="custom"){if(f.dateFrom)jobs=jobs.filter(function(j){return (j.created_date||j.created_at||"").slice(0,10)>=f.dateFrom;});if(f.dateTo)jobs=jobs.filter(function(j){return (j.created_date||j.created_at||"").slice(0,10)<=f.dateTo;});}
 
   var stages=["Unassigned","Assigned","Connected","Rejected","Future","Qualified"];
   var stageOpts=stages.map(function(st){return '<option value="'+st+'"'+(f.stage===st?" selected":"")+'>'+st+'</option>';}).join("");
@@ -1052,7 +1052,12 @@ function renderJobs(){
   var canChangeStageInline=userHasAnyRole(u,'admin','bd','bd_lead');
   var _tp=Math.max(1,Math.ceil(jobs.length/20));
   var _pg=Math.min(STATE.leadsPage||0,_tp-1);
-  var rows=jobs.slice(_pg*20,(_pg+1)*20).map(function(j){
+  var _today=todayIST();
+  var _pagedJobs=jobs.slice(_pg*20,(_pg+1)*20);
+  var _todayJobs=_pagedJobs.filter(function(j){return (j.created_date||j.created_at||'').slice(0,10)===_today;});
+  var _olderJobs=_pagedJobs.filter(function(j){return (j.created_date||j.created_at||'').slice(0,10)!==_today;});
+
+  function renderJobRow(j){
     var cs=jobContacts(j.id);
     var primary=cs[0]||{};
     var stageColor={Unassigned:"#94a3b8",Assigned:"#3b82f6",Connected:"#8b5cf6",Rejected:"#ef4444",Future:"#f59e0b",Qualified:"#10b981"}[j.stage]||"#64748b";
@@ -1064,7 +1069,19 @@ function renderJobs(){
       (canChangeStageInline?'<td style="padding:12px"><select onchange="changeJobStage(\''+j.id+'\',this.value);event.stopPropagation()" onclick="event.stopPropagation()" style="font-size:11px;padding:4px 8px;border:1.5px solid '+stageColor+';border-radius:8px;background:'+stageColor+'1a;color:'+stageColor+';font-weight:600;cursor:pointer">'+['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'].map(function(s){return'<option value="'+s+'"'+(j.stage===s?' selected':'')+'>'+s+'</option>';}).join('')+'</select></td>':'<td style="padding:12px"><span style="background:'+stageColor+'1a;color:'+stageColor+';padding:4px 10px;border-radius:10px;font-size:11px;font-weight:600">'+j.stage+'</span></td>')+
       '<td style="padding:12px;font-size:12px;color:var(--text2)">'+(j.assigned_bd_name?'<div style="font-weight:500">'+escHtml(j.assigned_bd_name)+'</div><div style="font-size:10px;color:var(--text3)">'+( j.assigned_at?(new Date(j.assigned_at)).toLocaleDateString("en-GB",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"")+'</div>':'<span style="color:var(--text3)">—</span>')+'</td>'+'<td style="padding:12px;font-size:11px;color:var(--text3)">'+escHtml(j.created_date||"")+'</td>'+
     '</tr>';
-  }).join("");
+  }
+
+  var _sepRow='<tr><td colspan="7" style="padding:0"><div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);border-bottom:1px solid var(--border)"><span style="font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;white-space:nowrap">Earlier</span><div style="flex:1;height:1px;background:var(--border)"></div></span></div></td></tr>';
+
+  var rows='';
+  if(_todayJobs.length){
+    rows+='<tr><td colspan="7" style="padding:0"><div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg);border-bottom:1px solid var(--border)"><span style="font-size:10.5px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.07em;white-space:nowrap">Today</span><div style="flex:1;height:1px;background:var(--border)"></div></div></td></tr>';
+    rows+=_todayJobs.map(renderJobRow).join('');
+  }
+  if(_olderJobs.length){
+    if(_todayJobs.length)rows+=_sepRow;
+    rows+=_olderJobs.map(renderJobRow).join('');
+  }
 
   if(!rows)rows='<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">No leads found yet.</td></tr>';
 
@@ -1073,7 +1090,10 @@ function renderJobs(){
 
   // Build RA-specific rows with 24hr edit button
   var now24=new Date();
-  var raRows=jobs.map(function(j){
+  var _raTodayJobs=jobs.filter(function(j){return (j.created_date||j.created_at||'').slice(0,10)===_today;});
+  var _raOlderJobs=jobs.filter(function(j){return (j.created_date||j.created_at||'').slice(0,10)!==_today;});
+
+  function renderRARow(j){
     var cs=jobContacts(j.id);
     var primary=cs[0]||{};
     var stageColor={Unassigned:'#94a3b8',Assigned:'#3b82f6',Connected:'#8b5cf6',Rejected:'#ef4444',Future:'#f59e0b','In Discussion':'#f59e0b',Qualified:'#10b981'}[j.stage]||'#64748b';
@@ -1091,7 +1111,19 @@ function renderJobs(){
       '<td style="padding:12px;font-size:11px;color:var(--text3)">'+escHtml(j.created_date||'')+'</td>'+
       '<td style="padding:12px" onclick="event.stopPropagation()">'+editBtn+'</td>'+
     '</tr>';
-  }).join('');
+  }
+
+  var _raSepRow='<tr><td colspan="7" style="padding:0"><div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);border-bottom:1px solid var(--border)"><span style="font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;white-space:nowrap">Earlier</span><div style="flex:1;height:1px;background:var(--border)"></div></div></td></tr>';
+
+  var raRows='';
+  if(_raTodayJobs.length){
+    raRows+='<tr><td colspan="7" style="padding:0"><div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg);border-bottom:1px solid var(--border)"><span style="font-size:10.5px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.07em;white-space:nowrap">Today</span><div style="flex:1;height:1px;background:var(--border)"></div></div></td></tr>';
+    raRows+=_raTodayJobs.map(renderRARow).join('');
+  }
+  if(_raOlderJobs.length){
+    if(_raTodayJobs.length)raRows+=_raSepRow;
+    raRows+=_raOlderJobs.map(renderRARow).join('');
+  }
   if(!raRows)raRows='<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No leads submitted yet. Use the form above to add your first lead.</td></tr>';
 
 
