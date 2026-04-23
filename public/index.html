@@ -924,6 +924,33 @@ function renderDashboard(){
       '</div>'+
     '</div>'+
 
+    // ── Daily Target widget (RA only, not when viewing other) ──
+    (userHasRole(u,'ra')&&!isViewingOther?(function(){
+      var _todayStr=todayIST();
+      function _jd(j){if(j.created_date)return j.created_date;if(j.created_at)return new Date(new Date(j.created_at).getTime()+5.5*3600000).toISOString().slice(0,10);return'';}
+      var _tLeads=STATE.jobs.filter(function(j){return j.created_by===u.id&&_jd(j)===_todayStr;}).length;
+      var _target=parseInt(STATE.appSettings['ra_daily_target_'+u.id]||0);
+      if(!_target)return'';
+      var _pct=Math.min(100,Math.round(_tLeads/_target*100));
+      var _bc=_pct>=100?'var(--green)':_pct>=60?'var(--accent)':'var(--amber)';
+      var _msg=_pct>=100?'Target reached! Great work today.':_tLeads===0?'Not started yet — add your first lead.':''+_tLeads+' of '+_target+' done. Keep going!';
+      return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r3);padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;gap:20px">'+
+        '<div style="flex:1">'+
+          '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'+
+            '<div style="font-weight:600;font-size:13.5px">Daily Target</div>'+
+            '<div style="font-family:var(--display);font-size:20px;font-weight:700;color:'+_bc+'">'+_tLeads+' <span style="font-size:13px;color:var(--text3);font-weight:400">/ '+_target+' leads</span></div>'+
+          '</div>'+
+          '<div style="background:var(--border);border-radius:99px;height:8px;overflow:hidden;margin-bottom:7px">'+
+            '<div style="height:100%;border-radius:99px;background:'+_bc+';width:'+_pct+'%;transition:width .5s ease"></div>'+
+          '</div>'+
+          '<div style="display:flex;align-items:center;justify-content:space-between">'+
+            '<span style="font-size:12px;color:var(--text2)">'+_msg+'</span>'+
+            '<span style="font-size:12px;font-weight:700;color:'+_bc+'">'+_pct+'%</span>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+    })():'')+
+
     '<div class="flex gap2 mb4 flex-wrap">'+pickers+'</div>'+
 
     (team.length?
@@ -2206,6 +2233,47 @@ function renderSetReminderModal(leadId, manualEmail){
 // ── PROFILE ──────────────────────────────────
 function renderProfile(){
   var u=STATE.user;
+  var isRA=userHasRole(u,'ra');
+
+  // Daily target widget for RA users
+  var targetWidget='';
+  if(isRA){
+    var todayStr=todayIST();
+    function jDateP(j){if(j.created_date)return j.created_date;if(j.created_at)return new Date(new Date(j.created_at).getTime()+5.5*3600000).toISOString().slice(0,10);return'';}
+    var todayLeads=STATE.jobs.filter(function(j){return j.created_by===u.id&&jDateP(j)===todayStr;}).length;
+    var target=parseInt(STATE.appSettings['ra_daily_target_'+u.id]||0);
+    var pct=target>0?Math.min(100,Math.round(todayLeads/target*100)):0;
+    var barColor=pct>=100?'var(--green)':pct>=60?'var(--accent)':'var(--amber)';
+    var statusMsg=target===0?'No target set yet.':pct>=100?'Target reached! Great work today.':todayLeads===0?'Not started yet — add your first lead.':''+todayLeads+' of '+target+' leads added today.';
+
+    targetWidget='<div class="card cp mb4">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'+
+        '<div>'+
+          '<div class="fw6" style="font-size:14px">Today\'s Target</div>'+
+          '<div class="f12 text3 mt1">'+todayStr+'</div>'+
+        '</div>'+
+        (target>0?
+          '<div style="text-align:right">'+
+            '<div style="font-family:var(--display);font-size:28px;font-weight:700;color:'+barColor+';line-height:1">'+todayLeads+' <span style="font-size:16px;color:var(--text3);font-weight:400">/ '+target+'</span></div>'+
+            '<div class="f12 text3 mt1">leads today</div>'+
+          '</div>':
+          '<span class="bdg bdg-gray">No target set</span>'
+        )+
+      '</div>'+
+      (target>0?
+        '<div>'+
+          '<div style="background:var(--border);border-radius:99px;height:10px;overflow:hidden;margin-bottom:8px">'+
+            '<div style="height:100%;border-radius:99px;background:'+barColor+';width:'+pct+'%;transition:width .5s ease"></div>'+
+          '</div>'+
+          '<div style="display:flex;align-items:center;justify-content:space-between">'+
+            '<span style="font-size:12px;color:var(--text2)">'+statusMsg+'</span>'+
+            '<span style="font-size:12px;font-weight:600;color:'+barColor+'">'+pct+'%</span>'+
+          '</div>'+
+        '</div>':
+        '<div style="font-size:12.5px;color:var(--text3)">Your RA Lead will set a daily target for you. Check back soon.</div>'
+      )+
+    '</div>';
+  }
   var pltOpts=["Gmail","Outlook"].map(function(p){
     var sel=u.plt===p;
     return '<div onclick="setProfilePlt(\''+p+'\')" style="display:flex;align-items:center;gap:11px;padding:12px 13px;border:2px solid '+(sel?"var(--accent)":"var(--border)")+';border-radius:var(--r2);cursor:pointer;margin-bottom:8px;background:'+(sel?"var(--accent-l)":"var(--card)")+';transition:all .12s">'+
@@ -2217,6 +2285,7 @@ function renderProfile(){
 
   return '<div class="page">'+
     '<div class="ph"><div class="ptitle">My Profile</div><div class="psub">Manage your account details</div></div>'+
+    targetWidget+
     '<div class="g2">'+
       '<div>'+
         '<div class="card cp mb4">'+
