@@ -4113,46 +4113,69 @@ window.raFormCoSearch=function(val){
   STATE.raForm.coName=val;
   STATE.raForm.coId=null;
   STATE.raForm.coInfo=null;
-  if(!val||val.length<3){STATE.raFormCoSuggestions=[];render();return;}
+  // Remove old suggestions
+  var old=document.getElementById('co-suggestions');
+  if(old)old.remove();
+  if(!val||val.length<3){STATE.raFormCoSuggestions=[];return;}
   apiGet('/companies/search?q='+encodeURIComponent(val)).then(function(results){
-    STATE.raFormCoSuggestions=results;
-    render();
-    // Re-focus input after render — paste causes blur which clears suggestions
+    STATE.raFormCoSuggestions=results||[];
     var inp=document.getElementById('ra-co-name');
-    if(inp){inp.focus();inp.setSelectionRange(inp.value.length,inp.value.length);}
-    // Use mousedown (not click) so it fires before onblur dismisses the list
-    setTimeout(function(){
-      var items=document.querySelectorAll('._co-sug');
-      Array.prototype.forEach.call(items,function(el){
-        el.addEventListener('mouseenter',function(){this.style.background='var(--accent-l)';});
-        el.addEventListener('mouseleave',function(){this.style.background='';});
-        el.addEventListener('mousedown',function(e){
-          e.preventDefault(); // stop blur from firing first
-          var idx=parseInt(this.getAttribute('data-idx'));
-          var co=STATE.raFormCoSuggestions[idx];
-          if(!co)return;
-          STATE.raForm.coName=co.name;
-          STATE.raForm.coId=co.id;
-          STATE.raForm.coInfo=co;
-          if(co.industry)STATE.raForm.industry=co.industry;
-          if(co.location)STATE.raForm.location=co.location;
-          if(co.website)STATE.raForm.website=co.website;
-          STATE.raFormCoSuggestions=[];
-          if(co.location)raFormDetectTimezone(co.location);
-          render();
-          // Directly update visible inputs in case render() misses them
-          var nameEl=document.getElementById('ra-co-name');
-          var locEl=document.getElementById('ra-location');
-          if(nameEl)nameEl.value=co.name;
-          if(locEl&&co.location)locEl.value=co.location;
-        });
+    if(!inp||!results||!results.length)return;
+    // Build dropdown HTML
+    var div=document.createElement('div');
+    div.id='co-suggestions';
+    div.style.cssText='position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);z-index:200;max-height:260px;overflow-y:auto;margin-top:4px';
+    var inner='<div style="padding:6px 12px 5px;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border)">Companies in system</div>';
+    results.forEach(function(co,i){
+      var tags='';
+      if(co.industry)tags+='<span style="font-size:10.5px;background:var(--accent-l);color:var(--accent);padding:1px 7px;border-radius:10px;font-weight:500">'+htmlEsc(co.industry)+'</span>';
+      if(co.location)tags+='<span style="font-size:10.5px;color:var(--text3);margin-left:6px">📍 '+htmlEsc(co.location)+'</span>';
+      if(co.job_count)tags+='<span style="font-size:10.5px;color:var(--text3);margin-left:6px">'+co.job_count+' job'+(co.job_count!==1?'s':'')+' on record</span>';
+      if(co.bd_name)tags+='<span style="font-size:10.5px;color:var(--text3);margin-left:6px">· '+htmlEsc(co.bd_name)+'</span>';
+      inner+='<div class="_co-sug" data-idx="'+i+'" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border)">'+
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">'+
+          '<div style="font-weight:600;font-size:13.5px;color:var(--text)">'+htmlEsc(co.name)+'</div>'+
+          '<div style="font-size:11px;color:var(--accent);font-weight:500;white-space:nowrap;margin-left:10px">Select →</div>'+
+        '</div>'+
+        '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">'+tags+'</div>'+
+        (co.website?'<div style="font-size:11px;color:var(--text3);margin-top:3px">'+htmlEsc(co.website)+'</div>':'')+
+      '</div>';
+    });
+    div.innerHTML=inner;
+    inp.parentNode.appendChild(div);
+    // Bind hover + mousedown directly — no render() needed
+    Array.prototype.forEach.call(div.querySelectorAll('._co-sug'),function(el){
+      el.addEventListener('mouseenter',function(){this.style.background='var(--accent-l)';});
+      el.addEventListener('mouseleave',function(){this.style.background='';});
+      el.addEventListener('mousedown',function(e){
+        e.preventDefault();
+        var idx=parseInt(this.getAttribute('data-idx'));
+        var co=STATE.raFormCoSuggestions[idx];
+        if(!co)return;
+        STATE.raForm.coName=co.name;
+        STATE.raForm.coId=co.id;
+        STATE.raForm.coInfo=co;
+        if(co.industry)STATE.raForm.industry=co.industry;
+        if(co.location)STATE.raForm.location=co.location;
+        if(co.website)STATE.raForm.website=co.website;
+        STATE.raFormCoSuggestions=[];
+        var d=document.getElementById('co-suggestions');
+        if(d)d.remove();
+        if(co.location)raFormDetectTimezone(co.location);
+        render(); // full render only on deliberate selection — user is done typing
       });
-    },50);
+    });
   }).catch(function(){STATE.raFormCoSuggestions=[];});
 };
 
 window.raFormCoBlur=function(){
-  setTimeout(function(){STATE.raFormCoSuggestions=[];render();},300);
+  // Only clear if mouse is not hovering suggestions
+  setTimeout(function(){
+    var d=document.getElementById('co-suggestions');
+    if(d&&d.matches(':hover'))return;
+    STATE.raFormCoSuggestions=[];
+    if(d)d.remove();
+  },200);
 };
 
 window.raFormCheckEmail=function(idx,email){
