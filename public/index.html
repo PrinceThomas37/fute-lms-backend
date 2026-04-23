@@ -736,10 +736,11 @@ function renderApp(){
     {id:"profile",lbl:"My Profile",ic:"profile"}
   ];
   if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
-  if(userHasAnyRole(u,'admin','bd_lead'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
-  if(userHasRole(u,'ra_lead')&&!userHasAnyRole(u,'admin','bd_lead'))navItems.splice(4,0,{id:"team",lbl:"Team",ic:"admin"});
-  if(userHasRole(u,'ra_lead')&&!userHasAnyRole(u,'admin','bd_lead'))navItems.splice(5,0,{id:"insights",lbl:"Insights",ic:"dashboard"});
-  if(userHasAnyRole(u,'admin','bd_lead'))navItems.splice(5,0,{id:"managerusers",lbl:"Manager Users",ic:"email"});
+  if(userHasRole(u,'admin'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
+  if(userHasRole(u,'admin'))navItems.splice(5,0,{id:"managerusers",lbl:"Manager Users",ic:"email"});
+  if(userHasRole(u,'ra_lead')&&!userHasAnyRole(u,'admin'))navItems.splice(4,0,{id:"team",lbl:"Team",ic:"admin"});
+  if(userHasRole(u,'ra_lead')&&!userHasAnyRole(u,'admin'))navItems.splice(5,0,{id:"insights",lbl:"Insights",ic:"dashboard"});
+  if(userHasRole(u,'bd_lead')&&!userHasAnyRole(u,'admin'))navItems.splice(4,0,{id:"team",lbl:"Team",ic:"admin"});
 
   var nav=navItems.map(function(n){
     var active=STATE.page===n.id?" active":"";
@@ -1858,7 +1859,43 @@ function renderEmail(){
 
 // ── ADMIN ──────────────────────────────────────
 function renderTeam(){
-  var bdManagers=STATE.users.filter(function(u){return u.role==='bd'||u.role==='bd_lead'||u.role==='admin';});
+  var u=STATE.user;
+  var isBDLead=userHasRole(u,'bd_lead')&&!userHasRole(u,'admin');
+
+  if(isBDLead){
+    var assignments=STATE.teamAssignments||[];
+    var myRAIds=assignments.filter(function(a){return a.bd_id===u.id;}).map(function(a){return a.ra_id;});
+    var myRAs=STATE.users.filter(function(x){return myRAIds.indexOf(x.id)>-1;});
+    var todayStr=todayIST();
+    function jd(j){if(j.created_at)return new Date(new Date(j.created_at).getTime()+5.5*3600000).toISOString().slice(0,10);return j.created_date||'';}
+    var bdCards=myRAs.map(function(ra){
+      var raJobs=STATE.jobs.filter(function(j){return j.created_by===ra.id;});
+      var todayLeads=raJobs.filter(function(j){return jd(j)===todayStr;}).length;
+      return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:16px;display:flex;align-items:center;gap:14px;margin-bottom:12px">'+
+        av(ra,'40')+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-weight:600;font-size:14px">'+htmlEsc(ra.name)+'</div>'+
+          '<div style="font-size:11.5px;color:var(--text3);margin-top:2px">'+htmlEsc(ra.email)+'</div>'+
+          '<div style="font-size:11px;color:var(--text3);font-family:var(--mono);margin-top:1px">'+htmlEsc(ra.empId||'')+'</div>'+
+        '</div>'+
+        '<div style="text-align:center;min-width:56px">'+
+          '<div style="font-size:22px;font-weight:700;color:var(--accent)">'+todayLeads+'</div>'+
+          '<div style="font-size:10px;color:var(--text3)">today</div>'+
+        '</div>'+
+        '<div style="text-align:center;min-width:56px">'+
+          '<div style="font-size:22px;font-weight:700;color:var(--text2)">'+raJobs.length+'</div>'+
+          '<div style="font-size:10px;color:var(--text3)">total</div>'+
+        '</div>'+
+      '</div>';
+    }).join('');
+    return '<div class="page">'+
+      '<div class="ph"><div class="ptitle">Team</div><div class="psub">Research Analysts assigned to you</div></div>'+
+      (bdCards||'<div style="padding:40px;text-align:center;color:var(--text3)">No RAs assigned to you yet.</div>')+
+    '</div>';
+  }
+
+  // RA Lead: BD managers + email IDs
+  var bdManagers=STATE.users.filter(function(x){return userHasRole(x,'bd')||userHasRole(x,'bd_lead')||userHasRole(x,'admin');});
   var cards=bdManagers.map(function(mgr){
     var emails=(STATE.userEmailsCache&&STATE.userEmailsCache[mgr.id])||[];
     var emailRows=emails.length?emails.map(function(e){
@@ -1872,7 +1909,6 @@ function renderTeam(){
         '</span>'+
       '</div>';
     }).join(''):'<div style="padding:12px 16px;font-size:12.5px;color:var(--text3)">No email IDs configured.</div>';
-
     return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);margin-bottom:14px;overflow:hidden">'+
       '<div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border)">'+
         av(mgr,'40')+
@@ -1882,19 +1918,13 @@ function renderTeam(){
         '</div>'+
         '<span style="font-size:11px;padding:3px 10px;background:var(--accent-l);color:var(--accent);border-radius:8px;font-weight:600">'+htmlEsc(roleLabel(mgr.role))+'</span>'+
       '</div>'+
-      (emails.length?'<div style="padding:6px 0 0;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;padding:8px 16px 4px">Outreach Email IDs</div>':'')+
+      (emails.length?'<div style="padding:8px 16px 4px;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Outreach Email IDs</div>':'')+
       emailRows+
     '</div>';
   }).join('');
-
-  if(!cards)cards='<div style="text-align:center;padding:40px;color:var(--text3)">No BD managers found.</div>';
-
   return '<div class="page">'+
-    '<div class="ph">'+
-      '<div class="ptitle">Team</div>'+
-      '<div class="psub">BD Managers and their outreach email accounts</div>'+
-    '</div>'+
-    cards+
+    '<div class="ph"><div class="ptitle">Team</div><div class="psub">BD Managers and their outreach email accounts</div></div>'+
+    (cards||'<div style="text-align:center;padding:40px;color:var(--text3)">No BD managers found.</div>')+
   '</div>';
 }
 
