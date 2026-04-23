@@ -323,7 +323,7 @@ var COMPANIES = [
 ];
 
 var STAGES = ["Active","No Response","Negative","Positive","Connected","Future","Out of Office","Deactivated","Referred"];
-var INDUSTRIES = ["Technology","Finance","Healthcare","Manufacturing","Retail","Education","Consulting","Media","Logistics","Legal","Real Estate"];
+var INDUSTRIES = ["Accounting & Finance","Advertising & Public Relations","Agriculture","Airline, Aviation & Transportation","Architecture, Construction & Building Materials","Art, Photography & Journalism","Automotive & Motor Vehicles","Banking & Financial Services","Biotechnology & Pharmaceutical","Broadcasting, Media & Printing","Chemical & Industrial","Computer Hardware & Software","Consulting & Consulting Engineering","Consumer Products & Retail","Credit, Loan, Mortgage & Collections","Defense, Military & Aerospace","Education, Training & Library Science","Electronics & Semiconductor","Employment, Recruiting & Staffing","Energy, Utilities, Oil & Petroleum","Entertainment & Recreation","Environmental","Fashion, Apparel & Textile","Food & Restaurant","Funeral & Cemetery","Government & Civil Service","Healthcare & Health Services","Homebuilding & Real Estate","Hospitality, Hotel & Resort","HVAC","Import & Export","Insurance & Managed Care","Internet & ECommerce","Landscaping","Law Enforcement, Legal & Security","Manufacturing & Manufacturing Engineering","Medical Equipment","Not for Profit & Social Services","Office Supplies & Equipment","Packaging","Sales & Marketing","Securities","Social Media & Wireless Telecommunications","Travel"];
 var SOURCES = ["LinkedIn","Indeed","Naukri","Company Website","Glassdoor","AngelList","Referral","Other"];
 var POSITIONS = ["CTO","VP of Engineering","Head of Product","Procurement Director","Head of Digital","CFO","Director HR","VP Sales","Head of Operations","CMO","CHRO"];
 var FIRSTNAMES = ["Arjun","Sunita","Vikram","Pooja","Rahul","Priya","Aditya","Sneha","Rohan","Meera","Karan","Divya","Amit","Neha"];
@@ -1112,7 +1112,7 @@ function renderJobs(){
   }
 
   var allStagesList=['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'];
-  var allIndustriesList=['Engineering','Healthcare','Legal','Accounting','Management','Other'];
+  var allIndustriesList=INDUSTRIES;
   var stageActive=f.stages&&f.stages.length>0;
   var indActive=f.industries&&f.industries.length>0;
   var dateActive=f.dateRange&&f.dateRange!=='all';
@@ -2271,14 +2271,55 @@ function renderModal(){
 }
 
 function normalizeIndustry(raw){
-  if(!raw)return'Other';
+  if(!raw)return'';
+  // If it already exactly matches one of our industries, use it directly
+  if(INDUSTRIES.indexOf(raw)>-1)return raw;
   var r=raw.toLowerCase();
-  if(r.indexOf('engineer')>-1||r.indexOf('manufactur')>-1||r.indexOf('construction')>-1||r.indexOf('civil')>-1||r.indexOf('mechanical')>-1||r.indexOf('oil')>-1||r.indexOf('gas')>-1||r.indexOf('aerospace')>-1||r.indexOf('aviation')>-1||r.indexOf('transportation')>-1||r.indexOf('logistics')>-1||r.indexOf('real estate')>-1||r.indexOf('architecture')>-1||r.indexOf('industrial')>-1||r.indexOf('defense')>-1||r.indexOf('machinery')>-1||r.indexOf('automation')>-1)return'Engineering';
-  if(r.indexOf('health')>-1||r.indexOf('medical')>-1||r.indexOf('pharma')>-1||r.indexOf('hospital')>-1||r.indexOf('wellness')>-1||r.indexOf('fitness')>-1||r.indexOf('biotech')>-1||r.indexOf('dental')>-1||r.indexOf('clinical')>-1)return'Healthcare';
-  if(r.indexOf('legal')>-1||r.indexOf('law')>-1||r.indexOf('attorney')>-1||r.indexOf('compliance')>-1||r.indexOf('litigation')>-1)return'Legal';
-  if(r.indexOf('account')>-1||r.indexOf('financ')>-1||r.indexOf('audit')>-1||r.indexOf('tax')>-1||r.indexOf('bookkeep')>-1||r.indexOf('cpa')>-1)return'Accounting';
-  if(r.indexOf('manag')>-1||r.indexOf('consult')>-1||r.indexOf('staffing')>-1||r.indexOf('recruit')>-1||r.indexOf('human resource')>-1||r.indexOf('executive')>-1||r.indexOf('strategy')>-1)return'Management';
-  return'Other';
+  if(r.indexOf('account')>-1||r.indexOf('cpa')>-1||r.indexOf('bookkeep')>-1)return'Accounting & Finance';
+  if(r.indexOf('advertis')>-1||r.indexOf('public relation')>-1||r.indexOf(' pr ')>-1)return'Advertising & Public Relations';
+  if(r.indexOf('agricultur')>-1||r.indexOf('farm')>-1||r.indexOf('crop')>-1)return'Agriculture';
+  if(r.indexOf('airline')>-1||r.indexOf('aviation')>-1||r.indexOf('transport')>-1||r.indexOf('logistics')>-1||r.indexOf('shipping')>-1||r.indexOf('freight')>-1)return'Airline, Aviation & Transportation';
+  if(r.indexOf('architect')>-1||r.indexOf('construction')>-1||r.indexOf('building material')>-1)return'Architecture, Construction & Building Materials';
+  if(r.indexOf('photo')>-1||r.indexOf('journalism')>-1||r.indexOf('art ')>-1||r.indexOf('creative')>-1)return'Art, Photography & Journalism';
+  if(r.indexOf('automotive')>-1||r.indexOf('motor vehicle')>-1||r.indexOf('automobile')>-1||r.indexOf('car dealer')>-1)return'Automotive & Motor Vehicles';
+  if(r.indexOf('banking')>-1||r.indexOf('bank ')>-1||r.indexOf('financial service')>-1)return'Banking & Financial Services';
+  if(r.indexOf('biotech')>-1||r.indexOf('pharma')>-1||r.indexOf('drug')>-1||r.indexOf('life science')>-1)return'Biotechnology & Pharmaceutical';
+  if(r.indexOf('broadcast')>-1||r.indexOf('media')>-1||r.indexOf('print')>-1||r.indexOf('publish')>-1||r.indexOf('radio')>-1||r.indexOf('television')>-1||r.indexOf('tv ')>-1)return'Broadcasting, Media & Printing';
+  if(r.indexOf('chemical')>-1||r.indexOf('industrial')>-1||r.indexOf('petrochemical')>-1)return'Chemical & Industrial';
+  if(r.indexOf('software')>-1||r.indexOf('computer')>-1||r.indexOf('hardware')>-1||r.indexOf('technology')>-1||r.indexOf('tech ')>-1||r.indexOf(' it ')>-1||r.indexOf('information tech')>-1)return'Computer Hardware & Software';
+  if(r.indexOf('consult')>-1||r.indexOf('consulting engineer')>-1||r.indexOf('advisory')>-1)return'Consulting & Consulting Engineering';
+  if(r.indexOf('consumer')>-1||r.indexOf('retail')>-1||r.indexOf('ecommerce')>-1||r.indexOf('e-commerce')>-1||r.indexOf('shop')>-1)return'Consumer Products & Retail';
+  if(r.indexOf('credit')>-1||r.indexOf('loan')>-1||r.indexOf('mortgage')>-1||r.indexOf('collection')>-1)return'Credit, Loan, Mortgage & Collections';
+  if(r.indexOf('defense')>-1||r.indexOf('military')>-1||r.indexOf('aerospace')>-1||r.indexOf('government contractor')>-1)return'Defense, Military & Aerospace';
+  if(r.indexOf('education')>-1||r.indexOf('training')>-1||r.indexOf('school')>-1||r.indexOf('university')>-1||r.indexOf('college')>-1||r.indexOf('library')>-1||r.indexOf('e-learning')>-1)return'Education, Training & Library Science';
+  if(r.indexOf('electronic')>-1||r.indexOf('semiconductor')>-1||r.indexOf('chip')>-1)return'Electronics & Semiconductor';
+  if(r.indexOf('employ')>-1||r.indexOf('recruit')>-1||r.indexOf('staffing')>-1||r.indexOf('hiring')>-1||r.indexOf('hr ')>-1||r.indexOf('human resource')>-1)return'Employment, Recruiting & Staffing';
+  if(r.indexOf('energy')>-1||r.indexOf('utility')>-1||r.indexOf('utilities')>-1||r.indexOf('oil ')>-1||r.indexOf('gas ')>-1||r.indexOf('petroleum')>-1||r.indexOf('power')>-1||r.indexOf('solar')>-1||r.indexOf('renewable')>-1)return'Energy, Utilities, Oil & Petroleum';
+  if(r.indexOf('entertainment')>-1||r.indexOf('recreation')>-1||r.indexOf('gaming')>-1||r.indexOf('sport')>-1||r.indexOf('leisure')>-1)return'Entertainment & Recreation';
+  if(r.indexOf('environment')>-1||r.indexOf('sustainability')>-1||r.indexOf('green')>-1||r.indexOf('waste')>-1||r.indexOf('recycl')>-1)return'Environmental';
+  if(r.indexOf('fashion')>-1||r.indexOf('apparel')>-1||r.indexOf('textile')>-1||r.indexOf('clothing')>-1||r.indexOf('garment')>-1)return'Fashion, Apparel & Textile';
+  if(r.indexOf('food')>-1||r.indexOf('restaurant')>-1||r.indexOf('beverage')>-1||r.indexOf('catering')>-1||r.indexOf('hospitality food')>-1)return'Food & Restaurant';
+  if(r.indexOf('funeral')>-1||r.indexOf('cemetery')>-1||r.indexOf('mortuary')>-1)return'Funeral & Cemetery';
+  if(r.indexOf('government')>-1||r.indexOf('civil service')>-1||r.indexOf('public sector')>-1||r.indexOf('municipal')>-1||r.indexOf('federal')>-1||r.indexOf('state agency')>-1)return'Government & Civil Service';
+  if(r.indexOf('health')>-1||r.indexOf('medical')>-1||r.indexOf('hospital')>-1||r.indexOf('clinic')>-1||r.indexOf('wellness')>-1||r.indexOf('dental')>-1||r.indexOf('clinical')>-1||r.indexOf('healthcare')>-1)return'Healthcare & Health Services';
+  if(r.indexOf('real estate')>-1||r.indexOf('homebuilding')>-1||r.indexOf('property')>-1||r.indexOf('housing')>-1||r.indexOf('realty')>-1)return'Homebuilding & Real Estate';
+  if(r.indexOf('hotel')>-1||r.indexOf('resort')>-1||r.indexOf('hospitality')>-1||r.indexOf('lodging')>-1||r.indexOf('inn ')>-1)return'Hospitality, Hotel & Resort';
+  if(r.indexOf('hvac')>-1||r.indexOf('heating')>-1||r.indexOf('cooling')>-1||r.indexOf('ventilation')>-1||r.indexOf('air condition')>-1)return'HVAC';
+  if(r.indexOf('import')>-1||r.indexOf('export')>-1||r.indexOf('trade')>-1||r.indexOf('customs')>-1)return'Import & Export';
+  if(r.indexOf('insurance')>-1||r.indexOf('managed care')>-1||r.indexOf('actuar')>-1)return'Insurance & Managed Care';
+  if(r.indexOf('internet')>-1||r.indexOf('ecommerce')>-1||r.indexOf('e-commerce')>-1||r.indexOf('online')>-1||r.indexOf('digital')>-1||r.indexOf('web')>-1||r.indexOf('saas')>-1||r.indexOf('cloud')>-1)return'Internet & ECommerce';
+  if(r.indexOf('landscap')>-1||r.indexOf('lawn')>-1||r.indexOf('garden')>-1||r.indexOf('horticultur')>-1)return'Landscaping';
+  if(r.indexOf('law enforce')>-1||r.indexOf('legal')>-1||r.indexOf('law')>-1||r.indexOf('attorney')>-1||r.indexOf('compliance')>-1||r.indexOf('litigation')>-1||r.indexOf('security')>-1)return'Law Enforcement, Legal & Security';
+  if(r.indexOf('manufactur')>-1||r.indexOf('engineering')>-1||r.indexOf('mechanical')>-1||r.indexOf('civil engineer')>-1||r.indexOf('production')>-1||r.indexOf('assembly')>-1)return'Manufacturing & Manufacturing Engineering';
+  if(r.indexOf('medical equip')>-1||r.indexOf('medical device')>-1||r.indexOf('surgical')>-1||r.indexOf('diagnostic')>-1)return'Medical Equipment';
+  if(r.indexOf('nonprofit')>-1||r.indexOf('not for profit')>-1||r.indexOf('social service')>-1||r.indexOf('charity')>-1||r.indexOf('ngo')>-1||r.indexOf('foundation')>-1)return'Not for Profit & Social Services';
+  if(r.indexOf('office suppl')>-1||r.indexOf('office equip')>-1||r.indexOf('stationery')>-1)return'Office Supplies & Equipment';
+  if(r.indexOf('packag')>-1||r.indexOf('container')>-1||r.indexOf('box')>-1)return'Packaging';
+  if(r.indexOf('sales')>-1||r.indexOf('marketing')>-1)return'Sales & Marketing';
+  if(r.indexOf('securit')>-1||r.indexOf('investment')>-1||r.indexOf('hedge fund')>-1||r.indexOf('private equity')>-1||r.indexOf('wealth manage')>-1)return'Securities';
+  if(r.indexOf('social media')>-1||r.indexOf('wireless')>-1||r.indexOf('telecom')>-1||r.indexOf('mobile')>-1||r.indexOf('network')>-1)return'Social Media & Wireless Telecommunications';
+  if(r.indexOf('travel')>-1||r.indexOf('tourism')>-1||r.indexOf('airline ticket')>-1||r.indexOf('tour operator')>-1)return'Travel';
+  return raw; // return as-is if no match — don't discard the value
 }
 function htmlEsc(s){
   return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -2377,7 +2418,7 @@ window.saveLead=function(){
   if(coNewMode){
     var coname=document.getElementById("f-coname");
     if(!coname||!coname.value){showToast("Company name is required","warning");return;}
-    var newco={id:"c"+Date.now(),name:coname.value,web:(document.getElementById("f-web")||{}).value||"",ind:(document.getElementById("f-ind")||{}).value||"Technology",loc:(document.getElementById("f-loc")||{}).value||""};
+    var newco={id:"c"+Date.now(),name:coname.value,web:(document.getElementById("f-web")||{}).value||"",ind:(document.getElementById("f-ind")||{}).value||"",loc:(document.getElementById("f-loc")||{}).value||""};
     STATE.companies.push(newco);
     coid=newco.id;
   } else {
@@ -3881,7 +3922,7 @@ window.doImportProcess=function(toProcess,dupEmailMap){
 function renderRALeadForm(){
   var f=STATE.raForm;
   var isEditing=!!f.editJobId;
-  var indOpts=['','Engineering','Healthcare','Legal','Accounting','Management'].map(function(v){
+  var indOpts=[''].concat(INDUSTRIES).map(function(v){
     return '<option value="'+v+'"'+(f.industry===v?' selected':'')+'>'+( v||'— Select Industry —')+'</option>';
   }).join('');
 
