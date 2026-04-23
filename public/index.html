@@ -731,7 +731,7 @@ function renderApp(){
     {id:"dashboard",lbl:"Dashboard",ic:"dashboard"},
     {id:"leads",lbl:"Leads",ic:"leads",badge:todayCnt},
     ...(!userHasRole(u,'ra')||userHasAnyRole(u,'bd','bd_lead','admin','ra_lead')?[{id:"email",lbl:"Email",ic:"email"}]:[]),
-    ...(userHasRole(u,'ra')&&!userHasAnyRole(u,'admin','bd','bd_lead','ra_lead')?[{id:"insights",lbl:"Insights",ic:"dashboard"}]:[{id:"reminders",lbl:"Reminders",ic:"star",badge:STATE.reminders.filter(function(r){return r.user_id===u.id&&r.status==="pending"}).length||null}]),
+    ...(userHasRole(u,'ra')&&!userHasAnyRole(u,'admin','bd','bd_lead','ra_lead')?[{id:"insights",lbl:"Insights",ic:"dashboard"}]:userHasRole(u,'ra_lead')&&!userHasAnyRole(u,'admin','bd','bd_lead')?[]:[{id:"reminders",lbl:"Reminders",ic:"star",badge:STATE.reminders.filter(function(r){return r.user_id===u.id&&r.status==="pending"}).length||null}]),
     {id:"profile",lbl:"My Profile",ic:"profile"}
   ];
   if(userHasAnyRole(u,'admin','ra_lead','bd_lead'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
