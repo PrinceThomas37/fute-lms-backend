@@ -514,7 +514,7 @@ var STATE = {
   raForm: {
     coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',
     position:'',jobUrl:'',jobCreatedDate:'',jobOpenedDate:'',salaryRange:'',source:'',editJobId:null,
-    contacts:[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}]
+    contacts:[{firstName:'',lastName:'',designation:'',email:'',phone:'',phoneType:'personal',linkedin:'',emailStatus:'',emailDupInfo:null}]
   },
   raFormCoSuggestions:[],
   raFormZipSuggestions:[],
@@ -3935,7 +3935,13 @@ function renderRALeadForm(){
         '</div>'+
       '</div>'+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
-        '<input class="inp" placeholder="Phone" value="'+htmlEsc(c.phone||'')+'" oninput="raFormUpdateContact('+idx+',\'phone\',this.value)"/>'+
+        '<div style="display:flex;gap:6px">'+
+          '<select class="sel" style="width:110px;flex-shrink:0" onchange="raFormUpdateContact('+idx+',\'phoneType\',this.value)">'+
+            '<option value="personal"'+(( c.phoneType||'personal')==='personal'?' selected':'')+'>Personal</option>'+
+            '<option value="office"'+(c.phoneType==='office'?' selected':'')+'>Office</option>'+
+          '</select>'+
+          '<input class="inp" placeholder="Phone number" value="'+htmlEsc(c.phone||'')+'" oninput="raFormUpdateContact('+idx+',\'phone\',this.value)" style="flex:1"/>'+
+        '</div>'+
         '<input class="inp" placeholder="LinkedIn URL (POC\'s profile)" value="'+htmlEsc(c.linkedin||'')+'" oninput="raFormUpdateContact('+idx+',\'linkedin\',this.value)"/>'+
       '</div>'+
     '</div>';
@@ -3975,8 +3981,7 @@ function renderRALeadForm(){
       '</div>'+
     '</div>'+
     '<div style="margin-bottom:16px">'+
-      '<input class="inp" id="ra-location" placeholder="Location (City, State) *" value="'+htmlEsc(f.location||'')+'" oninput="raFormSet(\'location\',this.value)" style="border-color:'+(f.location?'var(--border)':'')+'"/>'+
-      (!f.location?'<div style="font-size:11px;color:var(--red);margin-top:3px">Location is required</div>':'')+
+      '<input class="inp" id="ra-location" placeholder="Location (City, State) *" value="'+htmlEsc(f.location||'')+'" oninput="raFormSet(\'location\',this.value)"/>'+
     '</div>'+
 
     // ── Job ──
@@ -4040,7 +4045,7 @@ window.raFormEdit=function(jobId){
     contacts:cs.length?cs.map(function(c){
       return{firstName:c.first_name,lastName:c.last_name,designation:c.designation,
              email:c.email,phone:c.phone,linkedin:c.linkedin,emailStatus:'',emailDupInfo:null};
-    }):[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}]
+    }):[{firstName:'',lastName:'',designation:'',email:'',phone:'',phoneType:'personal',linkedin:'',emailStatus:'',emailDupInfo:null}]
   };
   STATE.raFormCoSuggestions=[];
   STATE.raFormZipSuggestions=[];
@@ -4051,7 +4056,7 @@ window.raFormEdit=function(jobId){
 
 window.raFormZipSearch=function(val){
   STATE.raForm.zipCode=val;
-  if(!val||val.length<3){STATE.raFormZipSuggestions=[];render();return;}
+  if(!val||val.length<4){STATE.raFormZipSuggestions=[];render();return;}
   apiGet('/lookup/zipcode?zip='+encodeURIComponent(val)).then(function(results){
     STATE.raFormZipSuggestions=results;
     render();
@@ -4060,7 +4065,8 @@ window.raFormZipSearch=function(val){
       Array.prototype.forEach.call(items,function(el){
         el.addEventListener('mouseenter',function(){this.style.background='var(--accent-l)';});
         el.addEventListener('mouseleave',function(){this.style.background='';});
-        el.addEventListener('click',function(){
+        el.addEventListener('mousedown',function(e){
+          e.preventDefault(); // prevent blur from firing before click
           var idx=parseInt(this.getAttribute('data-idx'));
           var z=STATE.raFormZipSuggestions[idx];
           if(!z)return;
@@ -4078,7 +4084,7 @@ window.raFormZipSearch=function(val){
 };
 
 window.raFormZipBlur=function(){
-  setTimeout(function(){STATE.raFormZipSuggestions=[];render();},200);
+  setTimeout(function(){STATE.raFormZipSuggestions=[];render();},300);
 };
 
 window.raFormCoSearch=function(val){
@@ -4134,7 +4140,7 @@ window.raFormUpdateContact=function(idx,field,val){
 };
 
 window.raFormAddContact=function(){
-  STATE.raForm.contacts.push({firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null});
+  STATE.raForm.contacts.push({firstName:'',lastName:'',designation:'',email:'',phone:'',phoneType:'personal',linkedin:'',emailStatus:'',emailDupInfo:null});
   render();
 };
 
@@ -4144,7 +4150,7 @@ window.raFormRemoveContact=function(idx){
 };
 
 window.raFormClear=function(){
-  STATE.raForm={coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',position:'',jobUrl:'',jobCreatedDate:'',jobOpenedDate:'',salaryRange:'',source:'',editJobId:null,contacts:[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}]};
+  STATE.raForm={coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',position:'',jobUrl:'',jobCreatedDate:'',jobOpenedDate:'',salaryRange:'',source:'',editJobId:null,contacts:[{firstName:'',lastName:'',designation:'',email:'',phone:'',phoneType:'personal',linkedin:'',emailStatus:'',emailDupInfo:null}]};
   STATE.raFormCoSuggestions=[];
   STATE.raFormZipSuggestions=[];
   render();
