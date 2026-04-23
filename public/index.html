@@ -5524,9 +5524,18 @@ function loadAppData(){
     }
     STATE.loading=false;render();
   }).catch(function(err){
-    STATE.loading=false;STATE.user=null;STATE.token=null;
-    sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');
-    showToast('Could not connect: '+err.message,'error');render();
+    STATE.loading=false;
+    var is401=err.message&&(err.message.indexOf('401')>-1||err.message.toLowerCase().indexOf('unauthorized')>-1);
+    if(is401){
+      STATE.user=null;STATE.token=null;
+      sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');
+      sessionStorage.removeItem('fg_last_activity');
+      showToast('Session expired. Please log in again.','warning');
+    } else {
+      // Network error / cold start — keep session, just show error
+      showToast('Could not reach server. Check your connection.','error');
+    }
+    render();
   });
 }
 function refreshJobs(){return apiGet('/jobs').then(function(j){STATE.jobs=j.map(normaliseJob);STATE.contacts=flattenContacts(j);render();});}
@@ -5541,6 +5550,7 @@ window.doLogin=function(){
   apiPost('/auth/login',{email:em,password:pw}).then(function(d){
     STATE.token=d.token;STATE.user=normaliseUser(d.user);
     sessionStorage.setItem('fg_token',d.token);sessionStorage.setItem('fg_user',JSON.stringify(STATE.user));
+    resetInactivityTimer();
     STATE.page='dashboard';loadAppData();
   }).catch(function(err){
     STATE.loading=false;render();
@@ -5548,7 +5558,7 @@ window.doLogin=function(){
   });
 };
 window.loginAs=function(){showToast('Use email + password to log in','warning');};
-window.doLogout=function(){STATE.user=null;STATE.token=null;sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');STATE.jobs=[];STATE.contacts=[];STATE.page='login';render();};
+window.doLogout=function(){STATE.user=null;STATE.token=null;sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');sessionStorage.removeItem('fg_last_activity');if(_inactivityTimer)clearTimeout(_inactivityTimer);STATE.jobs=[];STATE.contacts=[];STATE.page='login';render();};
 
 // ── Jobs (wired) ───────────────────────────────
 window.changeJobStage=function(jid,st){
@@ -5600,7 +5610,47 @@ window.deleteContact=function(cid){
 };
 
 // ── Boot ───────────────────────────────────────
-if(STATE.token&&STATE.user){STATE.page='dashboard';loadAppData();}else{STATE.page='login';render();}
+// ── Inactivity auto-logout (15 minutes) ───────────
+var INACTIVITY_MS = 15 * 60 * 1000;
+var _inactivityTimer = null;
+
+function resetInactivityTimer(){
+  sessionStorage.setItem('fg_last_activity', Date.now().toString());
+  if(_inactivityTimer)clearTimeout(_inactivityTimer);
+  _inactivityTimer = setTimeout(function(){
+    if(STATE.user){
+      doLogoutInactive();
+    }
+  }, INACTIVITY_MS);
+}
+
+function doLogoutInactive(){
+  STATE.user=null;STATE.token=null;
+  sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');
+  sessionStorage.removeItem('fg_last_activity');
+  STATE.jobs=[];STATE.contacts=[];STATE.page='login';
+  showToast('Logged out due to 15 minutes of inactivity.','info');
+  render();
+}
+
+['mousemove','mousedown','keypress','touchstart','scroll','click'].forEach(function(evt){
+  document.addEventListener(evt, resetInactivityTimer, {passive:true});
+});
+
+if(STATE.token&&STATE.user){
+  // Check if inactive for >15 min since last visit
+  var _lastAct=sessionStorage.getItem('fg_last_activity');
+  if(_lastAct&&(Date.now()-parseInt(_lastAct))>INACTIVITY_MS){
+    // Expired — clear and show login
+    STATE.user=null;STATE.token=null;
+    sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');
+    sessionStorage.removeItem('fg_last_activity');
+    STATE.page='login';render();
+  } else {
+    resetInactivityTimer();
+    STATE.page='dashboard';loadAppData();
+  }
+}else{STATE.page='login';render();}
 
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
