@@ -4080,6 +4080,8 @@ window.raFormZipSearch=function(val){
   apiGet('/lookup/zipcode?zip='+encodeURIComponent(val)).then(function(results){
     STATE.raFormZipSuggestions=results;
     render();
+    var inp=document.getElementById('ra-zip');
+    if(inp){inp.focus();inp.setSelectionRange(inp.value.length,inp.value.length);}
     setTimeout(function(){
       var items=document.querySelectorAll('._zip-sug');
       Array.prototype.forEach.call(items,function(el){
@@ -4115,6 +4117,9 @@ window.raFormCoSearch=function(val){
   apiGet('/companies/search?q='+encodeURIComponent(val)).then(function(results){
     STATE.raFormCoSuggestions=results;
     render();
+    // Re-focus input after render — paste causes blur which clears suggestions
+    var inp=document.getElementById('ra-co-name');
+    if(inp){inp.focus();inp.setSelectionRange(inp.value.length,inp.value.length);}
     // Use mousedown (not click) so it fires before onblur dismisses the list
     setTimeout(function(){
       var items=document.querySelectorAll('._co-sug');
