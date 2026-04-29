@@ -456,6 +456,8 @@ var STATE = {
   leadsPage: 0,
   leadsPageSize: 20,
   raLeadsPage: 0,
+  pendingEmailPage: 0,
+  sentEmailPage: 0,
   mailMerge: null,
   period: "monthly",
   emailTab: "compose",
@@ -1105,6 +1107,7 @@ function renderJobs(){
   }
 
   var _pagedJobs=jobs.slice(_pg*20,(_pg+1)*20);
+  var _totalTodayCount=jobs.filter(function(j){return jobDateIST(j)===_today;}).length;
   var _todayJobs=_pagedJobs.filter(function(j){return jobDateIST(j)===_today;});
   var _olderJobs=_pagedJobs.filter(function(j){return jobDateIST(j)!==_today;});
 
@@ -1126,7 +1129,7 @@ function renderJobs(){
 
   var rows='';
   if(_todayJobs.length){
-    rows+='<tr><td colspan="7" style="padding:0;background:#f0fdf4"><div style="display:flex;align-items:center;gap:10px;padding:7px 14px;border-bottom:1px solid #bbf7d0"><span style="font-size:10.5px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.08em">Today · '+_todayJobs.length+' lead'+(  _todayJobs.length!==1?'s':'')+'</span><div style="flex:1;height:1px;background:#bbf7d0"></div></div></td></tr>';
+    rows+='<tr><td colspan="7" style="padding:0;background:#f0fdf4"><div style="display:flex;align-items:center;gap:10px;padding:7px 14px;border-bottom:1px solid #bbf7d0"><span style="font-size:10.5px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.08em">Today · '+_totalTodayCount+' lead'+(_totalTodayCount!==1?'s':'')+'</span><div style="flex:1;height:1px;background:#bbf7d0"></div></div></td></tr>';
     rows+=_todayJobs.map(renderJobRow).join('');
   }
   if(_olderJobs.length){
@@ -1509,9 +1512,14 @@ function renderEmail(){
   var pendingHtml='';
   if(STATE.emailTab==='pending'){
     var totalRecipients=pending.length;
+    var _pendingPg=STATE.pendingEmailPage||0;
+    var _pendingPs=20;
+    var _pendingTp=Math.max(1,Math.ceil(pending.length/_pendingPs));
+    _pendingPg=Math.min(_pendingPg,_pendingTp-1);
+    var pendingPaged=pending.slice(_pendingPg*_pendingPs,(_pendingPg+1)*_pendingPs);
     var sendAllBtn='<button onclick="openSendAllConfirm()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer'+(totalRecipients?'':';opacity:.4;cursor:not-allowed')+'"'+(totalRecipients?'':'disabled')+'>Send all pending ('+totalRecipients+')</button>';
 
-    var pendingRows=pending.map(function(e,idx){
+    var pendingRows=pendingPaged.map(function(e,idx){
       var isSelected=STATE.previewPendingId===e.id;
       var jname=(e.job&&e.job.position?e.job.position:'')+(e.job&&e.job.company?(' · '+e.job.company.name):'');
       var fu=e.followup_type;
@@ -1557,6 +1565,14 @@ function renderEmail(){
             '</thead>'+
             '<tbody>'+pendingRows+'</tbody>'+
           '</table>'+
+          '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-top:1px solid var(--border)">'+
+            '<div style="font-size:12px;color:var(--text3)">'+pending.length+' total · page '+(_pendingPg+1)+' of '+_pendingTp+'</div>'+
+            (_pendingTp>1?'<div style="display:flex;gap:5px">'+
+              '<button onclick="STATE.pendingEmailPage=Math.max(0,'+_pendingPg+'-1);render()" style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer" '+(_pendingPg===0?'disabled':'')+'>← Prev</button>'+
+              '<span style="padding:5px 10px;font-size:12px;font-weight:600">'+(_pendingPg+1)+' / '+_pendingTp+'</span>'+
+              '<button onclick="STATE.pendingEmailPage=Math.min('+(_pendingTp-1)+','+_pendingPg+'+1);render()" style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer" '+(_pendingPg>=_pendingTp-1?'disabled':'')+'>Next →</button>'+
+            '</div>':'')+
+          '</div>'+
         '</div>'+
         previewPanel+
       '</div>'+
@@ -1566,7 +1582,12 @@ function renderEmail(){
   // ── SENT TAB ──
   var sentHtml='';
   if(STATE.emailTab==='sent'){
-    var sentRows=sentEmails.map(function(e){
+    var _sentPg=STATE.sentEmailPage||0;
+    var _sentPs=20;
+    var _sentTp=Math.max(1,Math.ceil(sentEmails.length/_sentPs));
+    _sentPg=Math.min(_sentPg,_sentTp-1);
+    var sentPaged=sentEmails.slice(_sentPg*_sentPs,(_sentPg+1)*_sentPs);
+    var sentRows=sentPaged.map(function(e){
       var jname=(e.job&&e.job.position?e.job.position:'')+(e.job&&e.job.company?(' · '+e.job.company.name):'');
       return '<tr style="border-bottom:1px solid var(--border2)">'+
         '<td style="padding:10px 12px;font-size:13px">'+htmlEsc(e.to_email||'')+'</td>'+
@@ -1584,6 +1605,14 @@ function renderEmail(){
         '</thead>'+
         '<tbody>'+sentRows+'</tbody>'+
       '</table>'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-top:1px solid var(--border)">'+
+        '<div style="font-size:12px;color:var(--text3)">'+sentEmails.length+' total · page '+(_sentPg+1)+' of '+_sentTp+'</div>'+
+        (_sentTp>1?'<div style="display:flex;gap:5px">'+
+          '<button onclick="STATE.sentEmailPage=Math.max(0,'+_sentPg+'-1);render()" style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer" '+(_sentPg===0?'disabled':'')+'>← Prev</button>'+
+          '<span style="padding:5px 10px;font-size:12px;font-weight:600">'+(_sentPg+1)+' / '+_sentTp+'</span>'+
+          '<button onclick="STATE.sentEmailPage=Math.min('+(_sentTp-1)+','+_sentPg+'+1);render()" style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer" '+(_sentPg>=_sentTp-1?'disabled':'')+'>Next →</button>'+
+        '</div>':'')+
+      '</div>'+
     '</div>';
   }
 
@@ -2701,7 +2730,7 @@ window.exportXL=function(){
   }catch(e){showToast("Export failed: "+e.message,"error");}
 }
 
-window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;STATE.composeFromEmailId=null;render();}
+window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;STATE.composeFromEmailId=null;STATE.pendingEmailPage=0;STATE.sentEmailPage=0;render();}
 
 // ── Manager Users functions ──────────────────────────────────
 window.loadUserEmails=function(userId){
