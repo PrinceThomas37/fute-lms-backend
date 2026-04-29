@@ -17,8 +17,14 @@ app.use(express.json({ limit: '5mb' }));
 function auth(req, res, next) {
   const header = req.headers.authorization;
   if (!header) return res.status(401).json({ error: 'No token' });
+  const token = header.replace('Bearer ', '');
+  // Guest bypass — read-only portfolio access
+  if (token === 'guest') {
+    req.user = { id: 'guest', name: 'Guest User', email: 'guest@futeglobal.com', role: 'bd', roles: ['bd'], isGuest: true };
+    return next();
+  }
   try {
-    req.user = jwt.verify(header.replace('Bearer ', ''), process.env.JWT_SECRET);
+    req.user = jwt.verify(token, process.env.JWT_SECRET);
     next();
   } catch { res.status(401).json({ error: 'Invalid token' }); }
 }
@@ -35,6 +41,16 @@ function hasRole(req, ...roles) {
   return roles.includes(u.role);
 }
 
+// Guest guard — block write operations
+function notGuest(req, res) {
+  if (req.user && req.user.isGuest) {
+    res.status(403).json({ error: 'Guest users cannot perform write operations.' });
+    return true;
+  }
+  return false;
+}
+}
+
 const today = () => new Date().toISOString().split('T')[0];
 
 async function logActivity(job_id, contact_id, user_id, action_type, description, old_value, new_value) {
@@ -49,6 +65,14 @@ async function logActivity(job_id, contact_id, user_id, action_type, description
 
 // ── HEALTH ─────────────────────────────────────────────────────
 app.use(express.static('public'));
+// Block all write operations for guest users
+app.use(function(req, res, next) {
+  if (['POST','PUT','PATCH','DELETE'].includes(req.method)) {
+    const token = (req.headers.authorization||'').replace('Bearer ','');
+    if (token === 'guest') return res.status(403).json({ error: 'Guest users have read-only access.' });
+  }
+  next();
+});
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.get('/health', (req, res) => res.json({ ok: true }));
 
