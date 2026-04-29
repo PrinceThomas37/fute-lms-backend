@@ -570,13 +570,13 @@ function render(){
   if(!root)return;
   if(!STATE.user){root.innerHTML=renderLogin();bindLogin();initLoginCanvas();return;}
   if(STATE.loading){
-    root.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:14px;background:var(--bg)">'+
-      '<div style="width:36px;height:36px;border:3px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite"></div>'+
-      '<div style="font-size:13.5px;color:var(--text3)">Signing in...</div>'+
-      '<div id="slow-msg" style="font-size:12px;color:var(--text3);opacity:0;transition:opacity 1s;text-align:center;max-width:280px">Server is waking up — this can take up to 30 seconds on first load.</div>'+
+    root.innerHTML='<div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;background:var(--bg);z-index:9999">'+
+      '<div style="width:40px;height:40px;border:3px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite"></div>'+
+      '<div style="font-size:13.5px;color:var(--text2);font-weight:500">Signing in...</div>'+
+      '<div id="slow-msg" style="font-size:12px;color:var(--text3);opacity:0;transition:opacity 1.5s;text-align:center;max-width:260px;line-height:1.6">Server is waking up.<br>This can take up to 30 seconds on first load.</div>'+
       '<style>@keyframes spin{to{transform:rotate(360deg)}}</style>'+
-      '<script>setTimeout(function(){var el=document.getElementById("slow-msg");if(el)el.style.opacity="1";},6000)<\/script>'+
     '</div>';
+    setTimeout(function(){var el=document.getElementById('slow-msg');if(el)el.style.opacity='1';},7000);
     return;
   }
   // Save all scroll positions before re-render
@@ -6067,23 +6067,6 @@ function normaliseJob(j){
 function flattenContacts(jobs){var out=[];jobs.forEach(function(j){(j.contacts||[]).forEach(function(c){out.push({id:c.id,job_id:c.job_id,first_name:c.first_name,last_name:c.last_name||'',designation:c.designation||'',email:c.email||'',phone:c.phone||'',linkedin:c.linkedin||'',is_primary:!!c.is_primary,email_status:c.email_status||'valid',ooo_until:c.ooo_until||null});});});return out;}
 
 function loadAppData(){
-  // Guest user — works purely client-side, no backend needed
-  if(STATE.user&&STATE.user.isGuest){
-    STATE.users=[STATE.user];
-    STATE.jobs=[];STATE.contacts=[];STATE.companies=[];
-    STATE.reminders=[];STATE.pendingEmails=[];STATE.sentEmails=[];
-    STATE.loading=false;
-    STATE.page='dashboard';
-    render();
-    // Try to load real data in background silently — if backend has guest support
-    apiGet('/jobs').then(function(r){
-      if(r&&r.length){STATE.jobs=r.map(normaliseJob);STATE.contacts=flattenContacts(r);render();}
-    }).catch(function(){});
-    apiGet('/companies').then(function(r){
-      if(r&&r.length){STATE.companies=r.map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});render();}
-    }).catch(function(){});
-    return;
-  }
   STATE.loading=true;render();
   var calls=[apiGet('/users'),apiGet('/jobs'),apiGet('/companies'),apiGet('/reminders')];
   var u=STATE.user;
@@ -6169,18 +6152,25 @@ function refreshJobs(){return apiGet('/jobs').then(function(j){STATE.jobs=j.map(
 
 // ── Guest Login ─────────────────────────────────
 window.doGuestLogin=function(){
+  STATE.loading=false;
   STATE.user={
     id:'guest',name:'Guest User',email:'guest@futeglobal.com',
     role:'bd',roles:['bd'],av:'G',avc:'av-bd',
     empId:'GUEST',desig:'Portfolio Viewer',isGuest:true
   };
   STATE.token='guest';
+  STATE.jobs=[];STATE.contacts=[];STATE.companies=[];
+  STATE.users=[STATE.user];STATE.reminders=[];
+  STATE.pendingEmails=[];STATE.sentEmails=[];
+  STATE.page='dashboard';
   sessionStorage.setItem('fg_token','guest');
   sessionStorage.setItem('fg_user',JSON.stringify(STATE.user));
   sessionStorage.setItem('fg_last_activity',Date.now().toString());
-  STATE.page='dashboard';
-  showToast('Signed in as Guest · Portfolio preview mode','info');
-  loadAppData();
+  render();
+  showToast('Signed in as Guest · Portfolio preview','info');
+  // Load real data silently in background
+  apiGet('/jobs').then(function(r){if(r&&r.length){STATE.jobs=r.map(normaliseJob);STATE.contacts=flattenContacts(r);render();}}).catch(function(){});
+  apiGet('/companies').then(function(r){if(r&&r.length){STATE.companies=r.map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});render();}}).catch(function(){});
 };
 
 // ── Auth ───────────────────────────────────────
