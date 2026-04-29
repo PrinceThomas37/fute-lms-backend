@@ -49,7 +49,6 @@ function notGuest(req, res) {
   }
   return false;
 }
-}
 
 const today = () => new Date().toISOString().split('T')[0];
 
