@@ -1507,12 +1507,12 @@ function closeModal(){ STATE.modal=null; render(); }
 // ── EMAIL ──────────────────────────────────────
 function renderEmail(){
   var u=STATE.user;
-  // BD sees pending+queued+sent; others see sent only
-  var isBD=userHasAnyRole(u,'bd','bd_lead','admin','ra_lead');
+  var isBD=userHasAnyRole(u,'bd','bd_lead','admin');
+  var isRALead=userHasRole(u,'ra_lead')&&!userHasAnyRole(u,'admin','bd','bd_lead');
   var pending=STATE.pendingEmails||[];
   var sentEmails=STATE.sentEmails||[];
   var tabs=isBD?['pending','compose','sent','outreachplan']:['compose','sent','outreachplan'];
-  if(!STATE.emailTab)STATE.emailTab=isBD?'pending':'compose';
+  if(!STATE.emailTab||( isRALead&&STATE.emailTab==='pending'))STATE.emailTab=isBD?'pending':'compose';
 
   var tabBar=tabs.map(function(t){
     var lbl=t==='pending'?('Pending'+(pending.length?' ('+pending.length+')':'')):t==='outreachplan'?'Outreach Plan':t.charAt(0).toUpperCase()+t.slice(1);
@@ -5763,7 +5763,7 @@ window.toggleEmailAccount=function(id,active){
 function renderAssignLeads(){
   var u=STATE.user;
   var poolStats=STATE.distributePoolStats||{total:0,by_freshness:{},by_industry:{},by_timezone:{},duplicates:0};
-  var managers=STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead';});
+  var managers=STATE.users.filter(function(x){return userHasRole(x,'bd')||userHasRole(x,'bd_lead');});
 
   // Show manager cards
   var managerCards=managers.map(function(m){
