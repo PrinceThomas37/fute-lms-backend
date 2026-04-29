@@ -26,6 +26,7 @@
 --mono:'DM Mono',monospace;
 }
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.5}
+#root{min-height:100vh;}
 *{-webkit-font-smoothing:antialiased}
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
@@ -720,9 +721,9 @@ function renderLogin(){
           'Continue as Guest &nbsp;<span style="font-size:11px;color:#9ca3af;font-weight:400">· Portfolio preview</span>'+
         '</button>'+
         '<div class="or-div">or sign in with email</div>'+
-        '<div class="fgrp"><label class="flbl">Work email</label><input class="inp" id="login-email" type="email" placeholder="you@futeglobal.com"/></div>'+
-        '<div class="fgrp"><label class="flbl">Password</label><input class="inp" id="login-pass" type="password" placeholder="••••••••"/></div>'+
-        '<div id="login-err" style="display:none;color:var(--red);font-size:12px;background:var(--red-l);padding:8px 10px;border-radius:var(--r);margin-bottom:10px"></div>'+
+        '<div class="fgrp"><label class="flbl">Work email</label><input class="inp" id="login-email" type="email" placeholder="you@futeglobal.com" oninput="STATE._loginErr=null"/></div>'+
+        '<div class="fgrp"><label class="flbl">Password</label><input class="inp" id="login-pass" type="password" placeholder="••••••••" oninput="STATE._loginErr=null"/></div>'+
+        '<div id="login-err" style="'+(STATE._loginErr?'':'display:none;')+'color:var(--red);font-size:12px;background:var(--red-l);padding:8px 10px;border-radius:var(--r);margin-bottom:10px">'+(STATE._loginErr?htmlEsc(STATE._loginErr):'')+'</div>'+
         '<button class="btn btn-primary w100" style="justify-content:center;padding:12px;font-size:14px;border-radius:10px;box-shadow:0 4px 16px rgba(30,122,60,.3)" onclick="doLogin()">Sign in</button>'+
         '<div style="margin-top:20px;font-size:11.5px;color:#9ca3af;text-align:center">Internal platform · Authorized personnel only</div>'+
       '</div>'+
@@ -6188,8 +6189,9 @@ window.doLogin=function(){
     resetInactivityTimer();
     STATE.page='dashboard';loadAppData();
   }).catch(function(err){
-    STATE.loading=false;render();
-    var e=document.getElementById('login-err');if(e){e.textContent=err.message||'Invalid credentials';e.style.display='block';}
+    STATE.loading=false;
+    STATE._loginErr=err.message||'Invalid credentials';
+    render();
   });
 };
 window.loginAs=function(){showToast('Use email + password to log in','warning');};
