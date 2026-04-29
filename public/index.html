@@ -6037,7 +6037,7 @@ function normaliseUser(u){
   var roles=u.roles||(u.role?[u.role]:[]);
   var primaryRole=roles[0]||u.role||'ra';
   var roleAvc={admin:'av-admin',bd:'av-bd',ra:'av-ra',ra_lead:'av-admin',bd_lead:'av-bd'};
-  return{id:u.id,name:nm,email:u.email,role:primaryRole,roles:roles,empId:u.employee_id,desig:u.designation,plt:u.platform||'Gmail',ooo:u.ooo_until||null,av:initials.toUpperCase()||'?',avc:roleAvc[primaryRole]||'av-ra',bdm:null};
+  return{id:u.id,name:nm,email:u.email,role:primaryRole,roles:roles,empId:u.employee_id,desig:u.designation,plt:u.platform||'Gmail',ooo:u.ooo_until||null,av:initials.toUpperCase()||'?',avc:roleAvc[primaryRole]||'av-ra',bdm:null,isGuest:!!u.isGuest};
 }
 function userHasRole(u,role){
   if(!u)return false;
@@ -6272,17 +6272,26 @@ function doLogoutInactive(){
 });
 
 if(STATE.token&&STATE.user){
-  // Check if inactive for >15 min since last visit
-  var _lastAct=sessionStorage.getItem('fg_last_activity');
-  if(_lastAct&&(Date.now()-parseInt(_lastAct))>INACTIVITY_MS){
-    // Expired — clear and show login
-    STATE.user=null;STATE.token=null;
-    sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');
-    sessionStorage.removeItem('fg_last_activity');
-    STATE.page='login';render();
+  // Guest session restore — go straight to dashboard, no API call
+  if(STATE.user.isGuest){
+    STATE.page='dashboard';
+    STATE.users=[STATE.user];
+    STATE.jobs=[];STATE.contacts=[];STATE.companies=[];
+    STATE.reminders=[];STATE.pendingEmails=[];STATE.sentEmails=[];
+    render();
+    apiGet('/jobs').then(function(r){if(r&&r.length){STATE.jobs=r.map(normaliseJob);STATE.contacts=flattenContacts(r);render();}}).catch(function(){});
   } else {
-    resetInactivityTimer();
-    STATE.page='dashboard';loadAppData();
+    // Check if inactive for >15 min since last visit
+    var _lastAct=sessionStorage.getItem('fg_last_activity');
+    if(_lastAct&&(Date.now()-parseInt(_lastAct))>INACTIVITY_MS){
+      STATE.user=null;STATE.token=null;
+      sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');
+      sessionStorage.removeItem('fg_last_activity');
+      STATE.page='login';render();
+    } else {
+      resetInactivityTimer();
+      STATE.page='dashboard';loadAppData();
+    }
   }
 }else{STATE.page='login';render();}
 
