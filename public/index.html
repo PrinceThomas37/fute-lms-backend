@@ -455,6 +455,7 @@ var STATE = {
   leadsSelected: {},
   leadsPage: 0,
   leadsPageSize: 20,
+  raLeadsPage: 0,
   mailMerge: null,
   period: "monthly",
   emailTab: "compose",
@@ -922,6 +923,12 @@ function renderDashboard(){
         '<div><div class="bstat-val">'+rr+'%</div><div class="bstat-lbl">Response rate</div></div>'+
         '<div style="width:1px;background:rgba(255,255,255,.25);align-self:stretch"></div>'+
         '<div><div class="bstat-val">'+pos+'</div><div class="bstat-lbl">Positive</div></div>'+
+        (userHasAnyRole(u,'bd','bd_lead')&&STATE.todaySummary&&STATE.todaySummary.total>0?
+          '<div style="width:1px;background:rgba(255,255,255,.25);align-self:stretch"></div>'+
+          '<div onclick="STATE.modal={type:\'todaySummary\'};render()" style="cursor:pointer">'+
+            '<div class="bstat-val">'+STATE.todaySummary.total+'</div>'+
+            '<div class="bstat-lbl" style="display:flex;align-items:center;gap:4px">Today\'s leads <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>'+
+          '</div>':'')+
       '</div>'+
     '</div>'+
 
@@ -1134,8 +1141,13 @@ function renderJobs(){
 
   // Build RA-specific rows with 24hr edit button
   var now24=new Date();
-  var _raTodayJobs=jobs.filter(function(j){return jobDateIST(j)===_today;});
-  var _raOlderJobs=jobs.filter(function(j){return jobDateIST(j)!==_today;});
+  var _raPageSize=20;
+  var _raTp=Math.max(1,Math.ceil(jobs.length/_raPageSize));
+  var _raPg=Math.min(STATE.raLeadsPage||0,_raTp-1);
+  var _raAllOrdered=jobs.filter(function(j){return jobDateIST(j)===_today;}).concat(jobs.filter(function(j){return jobDateIST(j)!==_today;}));
+  var _raPagedJobs=_raAllOrdered.slice(_raPg*_raPageSize,(_raPg+1)*_raPageSize);
+  var _raTodayJobs=_raPagedJobs.filter(function(j){return jobDateIST(j)===_today;});
+  var _raOlderJobs=_raPagedJobs.filter(function(j){return jobDateIST(j)!==_today;});
 
   function renderRARow(j){
     var cs=jobContacts(j.id);
@@ -1183,7 +1195,14 @@ function renderJobs(){
           '<tbody>'+raRows+'</tbody>'+
         '</table>'+
       '</div>'+
-      '<div style="margin-top:10px;font-size:12px;color:var(--text3)">'+jobs.length+' lead'+(jobs.length===1?'':'s')+' submitted by you</div>'+
+      '<div style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">'+
+        '<div style="font-size:12px;color:var(--text3)">'+jobs.length+' lead'+(jobs.length===1?'':'s')+' submitted · page '+(_raPg+1)+' of '+_raTp+'</div>'+
+        (_raTp>1?'<div style="display:flex;gap:5px">'+
+          '<button onclick="STATE.raLeadsPage=Math.max(0,'+(  _raPg)+'-1);render()" style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer" '+(_raPg===0?'disabled':'')+'>← Prev</button>'+
+          '<span style="padding:5px 10px;font-size:12px;font-weight:600">'+(_raPg+1)+' / '+_raTp+'</span>'+
+          '<button onclick="STATE.raLeadsPage=Math.min('+(_raTp-1)+','+(  _raPg)+'+1);render()" style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--card);font-size:12px;cursor:pointer" '+(_raPg>=_raTp-1?'disabled':'')+'>Next →</button>'+
+        '</div>':'')+
+      '</div>'+
     '</div>';
   }
 
@@ -1837,11 +1856,8 @@ function renderEmail(){
     '</div>';
   }
 
-  // BD today summary card
+  // BD today summary — shown as modal trigger only
   var bdSummaryCard='';
-  if((u.role==='bd'||u.role==='bd_lead')&&STATE.todaySummary&&STATE.todaySummary.total>0){
-    bdSummaryCard=renderTodaySummaryCard(STATE.todaySummary);
-  }
 
   return '<div class="page">'+
     (oooCards?'<div style="padding:0 24px;padding-top:16px">'+oooCards+'</div>':'')+
@@ -2458,9 +2474,45 @@ function renderModal(){
   if(STATE.modal&&STATE.modal.type==="jobDetail")return renderJobDetailModal();
   if(STATE.modal&&STATE.modal.type==="addJob")return renderAddJobModal();
   if(STATE.modal&&STATE.modal.type==="addContact")return renderAddContactModal();
+  if(STATE.modal&&STATE.modal.type==="todaySummary")return renderTodaySummaryModal();
   if(STATE.mailMerge&&!STATE.modal)return'<div class="overlay">'+renderMailMergeModal()+'</div>';
   if(!STATE.modal)return"";
   return'<div class="overlay" onclick="overlayClick(event)">'+STATE.modal+'</div>';
+}
+
+function renderTodaySummaryModal(){
+  var ts=STATE.todaySummary||{};
+  var bi=normalizeIndustryMap(ts.by_industry||{});
+  var btz=ts.by_timezone||{};
+  function rows(obj){
+    return Object.keys(obj).sort().map(function(k){
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">'+
+        '<span style="font-size:13px;color:var(--text)">'+escHtml(k)+'</span>'+
+        '<span style="font-size:13px;font-weight:600;color:var(--accent)">'+obj[k]+'</span>'+
+      '</div>';
+    }).join('');
+  }
+  return '<div class="overlay" onclick="overlayClick(event)">'+
+    '<div class="modal-box" style="max-width:540px;width:100%" onclick="event.stopPropagation()">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'+
+        '<div>'+
+          '<div style="font-weight:700;font-size:16px">Today\'s Assignment Summary</div>'+
+          '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+ts.total+' leads assigned today</div>'+
+        '</div>'+
+        '<button onclick="closeModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text3);line-height:1">&times;</button>'+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">'+
+        '<div>'+
+          '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">By Industry</div>'+
+          rows(bi)+
+        '</div>'+
+        '<div>'+
+          '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">By Timezone</div>'+
+          rows(btz)+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
 }
 
 function normalizeIndustry(raw){
