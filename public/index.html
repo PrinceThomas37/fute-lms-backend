@@ -1262,6 +1262,17 @@ function renderJobs(){
         '<input type="file" id="xl-import" accept=".xlsx,.xls" style="display:none" onchange="importXL(this)"/>'+
       '</div>'+
     '</div>'+
+    (userHasAnyRole(u,'bd','bd_lead')&&STATE.todaySummary&&STATE.todaySummary.total>0?
+      '<div onclick="STATE.modal={type:\'todaySummary\'};render()" style="display:flex;align-items:center;justify-content:space-between;background:var(--accent-l);border:1.5px solid rgba(30,122,60,.25);border-radius:10px;padding:10px 16px;margin-bottom:14px;cursor:pointer">'+
+        '<div style="display:flex;align-items:center;gap:10px">'+
+          '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>'+
+          '<span style="font-size:13px;font-weight:600;color:var(--accent)">'+STATE.todaySummary.total+' leads assigned today</span>'+
+          '<span style="font-size:12px;color:var(--text3)">Click to see breakdown →</span>'+
+        '</div>'+
+        '<div style="display:flex;gap:12px">'+
+          Object.keys(STATE.todaySummary.by_timezone||{}).map(function(k){return '<span style="font-size:12px;color:var(--text2)"><strong>'+STATE.todaySummary.by_timezone[k]+'</strong> '+k+'</span>';}).join('')+
+        '</div>'+
+      '</div>':'')  +
     '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden">'+
       '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
         '<thead style="background:var(--bg3);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
