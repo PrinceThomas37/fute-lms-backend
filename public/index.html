@@ -568,7 +568,6 @@ function startClock(){
 function render(){
   var root=document.getElementById("app");
   if(!root)return;
-  if(!STATE.user){root.innerHTML=renderLogin();bindLogin();initLoginCanvas();return;}
   if(STATE.loading){
     root.innerHTML='<div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;background:var(--bg);z-index:9999">'+
       '<div style="width:40px;height:40px;border:3px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite"></div>'+
@@ -577,6 +576,13 @@ function render(){
       '<style>@keyframes spin{to{transform:rotate(360deg)}}</style>'+
     '</div>';
     setTimeout(function(){var el=document.getElementById('slow-msg');if(el)el.style.opacity='1';},7000);
+    return;
+  }
+  if(!STATE.user){
+    var wasLogin=!!document.getElementById('login-canvas');
+    root.innerHTML=renderLogin();
+    bindLogin();
+    if(!wasLogin)initLoginCanvas(); // only init once — don't respawn on every render
     return;
   }
   // Save all scroll positions before re-render
@@ -2668,7 +2674,8 @@ function htmlEsc(s){return escHtml(s);}  // alias — use escHtml going forward
 // ════════════════════════════════════════════════
 function initLoginCanvas(){
   var c=document.getElementById("login-canvas");
-  if(!c)return;
+  if(!c||c._running)return;
+  c._running=true;
   var ctx=c.getContext("2d");
   var W,H,particles=[],streams=[];
   function resize(){W=c.width=window.innerWidth;H=c.height=window.innerHeight;}
@@ -6015,7 +6022,7 @@ window.submitBulkAssign=function(){
 // ════════════════════════════════════════════════
 var IS_FILE=window.location.protocol==='file:';
 var API_URL=(function(){var h=window.location.hostname;if(h===''||h==='localhost'||h.indexOf('127.')===0)return'https://fute-lms-backend.onrender.com';if(h.indexOf('onrender.com')>=0)return'';return'https://fute-lms-backend.onrender.com';})();
-function apiFetch(method,path,body){var headers={'Content-Type':'application/json'};if(STATE.token)headers['Authorization']='Bearer '+STATE.token;return fetch(API_URL+path,{method:method,headers:headers,body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||('HTTP '+r.status));return d;});});}
+function apiFetch(method,path,body){var headers={'Content-Type':'application/json'};if(STATE.token)headers['Authorization']='Bearer '+STATE.token;return fetch(API_URL+path,{method:method,headers:headers,body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||('HTTP '+r.status));return d;}).catch(function(e){if(e.message&&e.message.indexOf('HTTP ')===0)throw e;throw new Error('HTTP '+r.status+' (server returned non-JSON)');});}).catch(function(e){if(e.message&&(e.message.indexOf('HTTP ')===0||e.message.indexOf('Failed to fetch')===0||e.message.indexOf('NetworkError')===0))throw e;throw new Error(e.message||'Network error');});}
 function apiGet(p){return apiFetch('GET',p);}
 function apiPost(p,b){return apiFetch('POST',p,b);}
 function apiPut(p,b){return apiFetch('PUT',p,b);}
