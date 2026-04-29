@@ -49,7 +49,8 @@ async function logActivity(job_id, contact_id, user_id, action_type, description
 
 // ── HEALTH ─────────────────────────────────────────────────────
 app.use(express.static('public'));
-app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Fute Global LMS API', version: '3.0.0' }));
+app.get('/api/health', (req, res) => res.json({ ok: true }));
+app.get('/health', (req, res) => res.json({ ok: true }));
 
 // ══════════════════════════════════════════════════════════════
 // AUTH
@@ -1482,11 +1483,12 @@ app.post('/distribute/execute', auth, async (req, res) => {
 app.get('/distribute/pool-stats', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'RA Lead only' });
-    const { data: pool } = await supabase.from('jobs').select('id,freshness,industry,timezone,is_duplicate').is('deleted_at', null).eq('stage', 'Unassigned').is('assigned_to_bd', null);
-    const stats = { total: pool?.length || 0, by_freshness: {}, by_industry: {}, by_timezone: {}, duplicates: 0 };
+    const { data: pool } = await supabase.from('jobs').select('id,freshness,industry,timezone,is_duplicate,company:companies(industry)').is('deleted_at', null).eq('stage', 'Unassigned').is('assigned_to_bd', null);
+    const stats = { total: pool?.length || 0, by_industry: {}, by_timezone: {}, duplicates: 0 };
     (pool || []).forEach(j => {
-      stats.by_freshness[j.freshness || 'Unknown'] = (stats.by_freshness[j.freshness || 'Unknown'] || 0) + 1;
-      stats.by_industry[j.industry || 'Unknown'] = (stats.by_industry[j.industry || 'Unknown'] || 0) + 1;
+      const rawInd = j.industry || j.company?.industry || '';
+      const ind = normInd(rawInd) || 'Unknown';
+      stats.by_industry[ind] = (stats.by_industry[ind] || 0) + 1;
       stats.by_timezone[j.timezone || 'Unknown'] = (stats.by_timezone[j.timezone || 'Unknown'] || 0) + 1;
       if (j.is_duplicate) stats.duplicates++;
     });
@@ -1497,11 +1499,12 @@ app.get('/distribute/pool-stats', auth, async (req, res) => {
 app.get('/distribute/today-summary', auth, async (req, res) => {
   try {
     const targetId = req.query.manager_id || req.user.id;
-    const { data: jobs } = await supabase.from('jobs').select('id,freshness,industry,timezone,assigned_at').eq('assigned_to_bd', targetId).gte('assigned_at', today() + 'T00:00:00Z');
-    const summary = { total: jobs?.length || 0, by_freshness: {}, by_industry: {}, by_timezone: {} };
+    const { data: jobs } = await supabase.from('jobs').select('id,industry,timezone,assigned_at,company:companies(industry)').eq('assigned_to_bd', targetId).gte('assigned_at', today() + 'T00:00:00Z');
+    const summary = { total: jobs?.length || 0, by_industry: {}, by_timezone: {} };
     (jobs || []).forEach(j => {
-      summary.by_freshness[j.freshness || 'Unknown'] = (summary.by_freshness[j.freshness || 'Unknown'] || 0) + 1;
-      summary.by_industry[j.industry || 'Unknown'] = (summary.by_industry[j.industry || 'Unknown'] || 0) + 1;
+      const rawInd = j.industry || j.company?.industry || '';
+      const ind = normInd(rawInd) || 'Unknown';
+      summary.by_industry[ind] = (summary.by_industry[ind] || 0) + 1;
       summary.by_timezone[j.timezone || 'Unknown'] = (summary.by_timezone[j.timezone || 'Unknown'] || 0) + 1;
     });
     res.json(summary);
