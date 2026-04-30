@@ -472,6 +472,16 @@ app.post('/jobs/bulk', auth, async (req, res) => {
   try {
     const { jobs } = req.body;
     if (!Array.isArray(jobs) || !jobs.length) return res.status(400).json({ error: 'jobs array required' });
+    // Filter out companies in 21-day cooldown for RA users
+    const cooldownDate = new Date(Date.now() - 21 * 24 * 3600 * 1000).toISOString();
+    const companyIds = [...new Set(jobs.map(j => j.company_id).filter(Boolean))];
+    let cooledDown = new Set();
+    if (companyIds.length) {
+      const { data: recent } = await supabase.from('jobs').select('company_id').in('company_id', companyIds).gte('created_at', cooldownDate).is('deleted_at', null);
+      cooledDown = new Set((recent || []).map(r => r.company_id));
+    }
+    const skipped = jobs.filter(j => cooledDown.has(j.company_id)).length;
+    const filteredJobs = jobs.filter(j => !cooledDown.has(j.company_id));
     const tzMap = {'ny':'EST','nj':'EST','fl':'EST','ma':'EST','pa':'EST','ga':'EST','nc':'EST','sc':'EST','va':'EST','ct':'EST','me':'EST','nh':'EST','vt':'EST','ri':'EST','de':'EST','md':'EST','dc':'EST','oh':'EST','mi':'EST','in':'EST','ky':'EST','wv':'EST','tn':'EST','tx':'CST','il':'CST','mn':'CST','wi':'CST','mo':'CST','ia':'CST','ks':'CST','ne':'CST','sd':'CST','nd':'CST','ok':'CST','la':'CST','ar':'CST','ms':'CST','al':'CST','co':'MST','az':'MST','nm':'MST','ut':'MST','wy':'MST','mt':'MST','id':'MST','ca':'PST','wa':'PST','or':'PST','nv':'PST','ak':'PST','hi':'PST'};
     function getTimezone(location) {
       if (!location) return 'EST';
@@ -485,19 +495,20 @@ app.post('/jobs/bulk', auth, async (req, res) => {
       const days = Math.floor((new Date() - new Date(ref)) / 86400000);
       if (days <= 3) return 'New'; if (days <= 10) return 'Normal'; return 'Old';
     }
-    const jobRows = jobs.map(j => ({ company_id: j.company_id, position: j.position || '(unknown)', location: j.location || null, source: j.source || 'Import', job_url: j.job_url || null, stage: 'Unassigned', notes: '', created_by: req.user.id, assigned_to: null, is_duplicate: j.is_duplicate || false, duplicate_of: j.duplicate_of || null, salary_range: j.salary_range || null, job_created_date: j.job_created_date || null, job_opened_date: j.job_opened_date || null, timezone: getTimezone(j.location), freshness: getFreshness(j.job_opened_date, j.job_created_date), bdm_assigned_name: j.bdm_assigned_name || null, industry: j.industry || null }));
+    const jobRows = filteredJobs.map(j => ({ company_id: j.company_id, position: j.position || '(unknown)', location: j.location || null, source: j.source || 'Import', job_url: j.job_url || null, stage: 'Unassigned', notes: '', created_by: req.user.id, assigned_to: null, is_duplicate: j.is_duplicate || false, duplicate_of: j.duplicate_of || null, salary_range: j.salary_range || null, job_created_date: j.job_created_date || null, job_opened_date: j.job_opened_date || null, timezone: getTimezone(j.location), freshness: getFreshness(j.job_opened_date, j.job_created_date), bdm_assigned_name: j.bdm_assigned_name || null, industry: j.industry || null }));
+    if (!jobRows.length) return res.status(200).json({ imported: 0, contacts: 0, skipped, message: `All ${skipped} companies are in a 21-day cooldown period.` });
     const { data: insertedJobs, error: jobErr } = await supabase.from('jobs').insert(jobRows).select('id');
     if (jobErr) throw jobErr;
     const contactRows = [];
     insertedJobs.forEach((job, idx) => {
-      const contacts = jobs[idx].contacts || [];
+      const contacts = filteredJobs[idx].contacts || [];
       contacts.forEach((c, ci) => {
         if (!c.first_name && !c.email) return;
         contactRows.push({ job_id: job.id, first_name: c.first_name || '', last_name: c.last_name || '', designation: c.designation || null, email: c.email || null, phone: c.phone || null, linkedin: c.linkedin || null, is_primary: ci === 0 });
       });
     });
     if (contactRows.length) { await supabase.from('contacts').insert(contactRows); }
-    res.status(201).json({ imported: insertedJobs.length, contacts: contactRows.length });
+    res.status(201).json({ imported: insertedJobs.length, contacts: contactRows.length, skipped });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -505,6 +516,16 @@ app.post('/jobs', auth, async (req, res) => {
   try {
     const { company_id, position, location, source, job_url, stage, notes, assigned_to, is_duplicate, duplicate_of, contacts, salary_range, job_created_date, job_opened_date, bdm_assigned_name, industry: jobIndustry } = req.body;
     if (!company_id || !position) return res.status(400).json({ error: 'company_id and position required' });
+    // 21-day company cooldown — block RA from re-adding same company within 21 days
+    if (hasRole(req, 'ra')) {
+      const cooldownDate = new Date(Date.now() - 21 * 24 * 3600 * 1000).toISOString();
+      const { data: recent } = await supabase.from('jobs').select('id,position,created_at').eq('company_id', company_id).gte('created_at', cooldownDate).is('deleted_at', null).limit(1);
+      if (recent && recent.length > 0) {
+        const daysAgo = Math.floor((Date.now() - new Date(recent[0].created_at).getTime()) / 86400000);
+        const daysLeft = 21 - daysAgo;
+        return res.status(409).json({ error: `This company is in a 21-day cooldown period. ${daysLeft} day${daysLeft !== 1 ? 's' : ''} remaining (last added: ${recent[0].position}).` });
+      }
+    }
     const tzMap = {'ny':'EST','nj':'EST','fl':'EST','ma':'EST','pa':'EST','ga':'EST','nc':'EST','sc':'EST','va':'EST','ct':'EST','tx':'CST','il':'CST','mn':'CST','co':'MST','az':'MST','ca':'PST','wa':'PST','or':'PST'};
     let timezone = 'EST';
     if (location) { const loc = location.toLowerCase(); for (const [s, tz] of Object.entries(tzMap)) { if (loc.includes(s)) { timezone = tz; break; } } }
