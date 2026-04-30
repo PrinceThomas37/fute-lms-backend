@@ -1166,7 +1166,29 @@ function renderJobs(){
       '</div>':'')  +
   '</div>';
 
+  // Stage summary counts from ALL jobs (not filtered)
+  var allJobs=getMyJobs(u);
+  var stageCounts={};
+  var stageList=['Unassigned','Assigned','Connected','In Discussion','Future','Rejected'];
+  stageList.forEach(function(s){stageCounts[s]=allJobs.filter(function(j){return j.stage===s;}).length;});
+  var stageColors={Unassigned:'var(--text3)',Assigned:'var(--accent)',Connected:'var(--green)',['In Discussion']:'#8b5cf6',Future:'var(--amber)',Rejected:'var(--red)'};
+  var stageBg={Unassigned:'var(--bg)',Assigned:'var(--accent-l)',Connected:'var(--green-l)',['In Discussion']:'#f5f3ff',Future:'var(--amber-l)',Rejected:'var(--red-l)'};
+  var stageSummary='<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">'+
+    stageList.filter(function(s){return stageCounts[s]>0;}).map(function(s){
+      return '<div onclick="STATE.jobsFilter.stages=[\''+s+'\'];STATE.leadsPage=0;render()" style="display:flex;align-items:center;gap:6px;padding:6px 12px;background:'+stageBg[s]+';border:1px solid '+stageColors[s]+'33;border-radius:20px;cursor:pointer;transition:opacity .15s" title="Filter by '+s+'">'+
+        '<div style="width:7px;height:7px;border-radius:50%;background:'+stageColors[s]+';flex-shrink:0"></div>'+
+        '<span style="font-size:12px;font-weight:600;color:'+stageColors[s]+'">'+s+'</span>'+
+        '<span style="font-size:12px;font-weight:700;color:'+stageColors[s]+'">'+stageCounts[s]+'</span>'+
+      '</div>';
+    }).join('')+
+    '<div style="display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--card);border:1px solid var(--border);border-radius:20px;margin-left:auto">'+
+      '<span style="font-size:12px;color:var(--text3)">Total</span>'+
+      '<span style="font-size:12px;font-weight:700;color:var(--text)">'+allJobs.length+'</span>'+
+    '</div>'+
+  '</div>';
+
   return '<div style="padding:24px">'+
+    stageSummary+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;gap:12px;flex-wrap:wrap">'+
       '<div style="display:flex;gap:10px;align-items:center;flex:1;min-width:280px;flex-wrap:wrap">'+
         '<input id="jobs-search" placeholder="Search jobs, companies, contacts..." value="'+escAttr(f.search)+'" style="flex:1;max-width:340px;padding:9px 13px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);font-size:13px"/>'+
