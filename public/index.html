@@ -4790,6 +4790,15 @@ function refreshPoolStats(){
   }).catch(function(){});
 }
 
+window.updateAssignCountPreview=function(){
+  // If manual count is set, regenerate the ratio with that count
+  var el=document.getElementById('assign-manual-count');
+  if(el&&el.value){
+    clearTimeout(window._assignCountDebounce);
+    window._assignCountDebounce=setTimeout(function(){generateAutoRatio();},400);
+  }
+};
+
 window.openAssignToManager=function(managerId){
   var m=STATE.users.find(function(u){return u.id===managerId;})||{name:'Manager'};
   var pool=STATE.distributePoolStats||{total:0};
@@ -4807,6 +4816,15 @@ window.openAssignToManager=function(managerId){
       '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button>'+
     '</div>'+
     '<div class="mb_">'+
+      // Manual count override
+      '<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--bg);border-radius:var(--r2);margin-bottom:14px;border:1px solid var(--border)">'+
+        '<div style="flex:1">'+
+          '<div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:2px">Number of leads to assign</div>'+
+          '<div style="font-size:11px;color:var(--text3)">Leave blank to let AI decide based on capacity ('+capacity+' max)</div>'+
+        '</div>'+
+        '<input type="number" id="assign-manual-count" min="1" max="'+pool.total+'" placeholder="Auto" style="width:80px;padding:8px 10px;border:1px solid var(--border2);border-radius:8px;font-size:14px;font-weight:600;text-align:center;font-family:inherit" oninput="updateAssignCountPreview()"/>'+
+        '<span style="font-size:12px;color:var(--text3)">/ '+pool.total+'</span>'+
+      '</div>'+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">'+
         '<div onclick="setAssignMode(\'auto\')" id="mode-auto" style="padding:14px;border:2px solid var(--accent);border-radius:var(--r2);cursor:pointer;background:var(--accent-l);text-align:center">'+
           '<div style="font-size:18px;margin-bottom:4px">\u26a1</div>'+
@@ -4884,6 +4902,10 @@ function generateAutoRatio(){
   var managerId=STATE._assignManagerId;
   var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
   var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
+  // Respect manual count if set
+  var manualEl=document.getElementById('assign-manual-count');
+  var manualCount=manualEl&&manualEl.value?parseInt(manualEl.value):0;
+  if(manualCount>0)capacity=Math.min(manualCount,pool.total||99999);
   var ps=Object.assign({},pool,{capacity:capacity});
   var prev=document.getElementById('assign-ratio-preview');
   if(prev){prev.style.display='block';prev.innerHTML='<div style="font-size:12px;color:var(--text3);padding:10px">Calculating balanced ratio\u2026</div>';}
@@ -5242,7 +5264,13 @@ window.toggleEmailAccount=function(id,active){
 // ════════════════════════════════════════════════
 function renderAssignLeads(){
   var u=STATE.user;
-  var poolStats=STATE.distributePoolStats||{total:0,by_freshness:{},by_industry:{},by_timezone:{},duplicates:0};
+  // Use API pool stats if loaded, otherwise count from STATE.jobs directly
+  var poolStats=STATE.distributePoolStats||{total:0,by_industry:{},by_timezone:{},duplicates:0};
+  if(!STATE.distributePoolStats){
+    // Fallback: count unassigned from STATE.jobs while API loads
+    var _unassigned=STATE.jobs.filter(function(j){return j.stage==='Unassigned'&&!j.assigned_to_bd;});
+    poolStats={total:_unassigned.length,by_industry:{},by_timezone:{},duplicates:_unassigned.filter(function(j){return j.is_duplicate;}).length};
+  }
   var managers=STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead';});
 
   // Show manager cards
