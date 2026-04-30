@@ -457,6 +457,8 @@ var STATE = {
   mailMerge: null,
   period: "monthly",
   emailTab: "compose",
+  sendProgress: null,
+  _progressPollTimer: null,
   previewEmail: null,
   showEmailPreview: false,
   mergeLeadId: null,
@@ -1421,6 +1423,32 @@ function renderEmail(){
   var tabs=isBD?['pending','compose','sent','outreachplan']:['compose','sent','outreachplan'];
   if(!STATE.emailTab)STATE.emailTab=isBD?'pending':'compose';
 
+  // ── Send progress bar ──
+  var sp=STATE.sendProgress;
+  var progressBar='';
+  if(sp&&(sp.active||sp.done)){
+    var pct=sp.total>0?Math.round((sp.sent+sp.failed)/sp.total*100):0;
+    var barColor=sp.done?(sp.failed>0?'var(--amber)':'var(--green)'):'var(--accent)';
+    progressBar='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px 18px;margin-bottom:16px">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'+
+        '<div style="font-weight:600;font-size:13.5px">'+(sp.done?'Send complete':'Sending emails...')+'</div>'+
+        '<div style="font-size:13px;color:var(--text2)">'+sp.sent+' sent · '+sp.failed+' failed · '+sp.total+' total</div>'+
+      '</div>'+
+      '<div style="background:var(--border);border-radius:99px;height:8px;overflow:hidden;margin-bottom:8px">'+
+        '<div style="height:100%;border-radius:99px;background:'+barColor+';width:'+pct+'%;transition:width .3s ease"></div>'+
+      '</div>'+
+      '<div style="display:flex;align-items:center;justify-content:space-between">'+
+        '<div style="font-size:12px;color:var(--text3)">'+(sp.active&&sp.current?'Currently sending to: '+htmlEsc(sp.current):(sp.done?'Completed at '+(sp.completedAt?new Date(sp.completedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):''):''))+'</div>'+
+        '<div style="font-size:12px;font-weight:700;color:'+barColor+'">'+pct+'%</div>'+
+      '</div>'+
+      (sp.failDetails&&sp.failDetails.length?
+        '<div style="margin-top:10px;padding:8px 12px;background:var(--amber-l);border-radius:6px;font-size:12px;color:var(--amber)">'+
+          sp.failDetails.slice(0,3).map(function(f){return htmlEsc(f.to)+': '+htmlEsc(f.error);}).join(' · ')+
+          (sp.failDetails.length>3?' + '+(sp.failDetails.length-3)+' more':'')+
+        '</div>':'')+
+    '</div>';
+  }
+
   var tabBar=tabs.map(function(t){
     var lbl=t==='pending'?('Pending'+(pending.length?' ('+pending.length+')':'')):t==='outreachplan'?'Outreach Plan':t.charAt(0).toUpperCase()+t.slice(1);
     return '<div class="tab'+(STATE.emailTab===t?' active':'')+'" onclick="setEmailTab(\''+t+'\')">'+lbl+'</div>';
@@ -1811,6 +1839,7 @@ function renderEmail(){
     '<div class="ph"><div class="ptitle">Email</div>'+
       '<div class="psub">'+(isBD?'Manage AI-generated outreach emails':'Email outreach')+' · '+u.name+'</div>'+
     '</div>'+
+    progressBar+
     '<div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:18px;overflow-x:auto">'+tabBar+'</div>'+
     (STATE.emailTab==='pending'?pendingHtml:'')+
     (STATE.emailTab==='compose'?composeHtml:'')+
@@ -2479,6 +2508,36 @@ window.exportXL=function(){
 }
 
 window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;STATE.composeFromEmailId=null;STATE.pendingEmailPage=0;STATE.sentEmailPage=0;render();}
+
+// ── Send progress polling ──────────────────────
+function startProgressPoll(){
+  if(STATE._progressPollTimer)return; // already polling
+  STATE._progressPollTimer=setInterval(function(){
+    if(!STATE.user||!STATE.token||STATE.token==='guest')return;
+    apiGet('/emails/send-progress').then(function(d){
+      STATE.sendProgress=d;
+      if(STATE.page==='email')render();
+      // Stop polling when done
+      if(d&&d.done&&!d.active){
+        stopProgressPoll();
+        // Refresh email lists after send completes
+        loadEmailsForCurrentUser();
+      }
+    }).catch(function(){stopProgressPoll();});
+  },2000);
+}
+function stopProgressPoll(){
+  if(STATE._progressPollTimer){clearInterval(STATE._progressPollTimer);STATE._progressPollTimer=null;}
+}
+function loadEmailsForCurrentUser(){
+  var u=STATE.user;
+  if(!u)return;
+  var isBD=userHasAnyRole(u,'bd','bd_lead','admin','ra_lead');
+  if(isBD){
+    apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];render();}).catch(function(){});
+    apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];render();}).catch(function(){});
+  }
+}
 
 // ── Manager Users functions ──────────────────────────────────
 window.loadUserEmails=function(userId){
@@ -4735,6 +4794,8 @@ window.submitSendAll=function(){
   apiPost('/emails/queue-all',{}).then(function(res){
     showToast(res.queued+' emails queued for sending','success');
     STATE.pendingEmails=[];
+    STATE.sendProgress=null;
+    startProgressPoll(); // start watching progress
     return apiGet('/emails?status=queued').then(function(d){STATE.emails=d;render();});
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
@@ -5017,9 +5078,11 @@ window.submitAssignToManager=function(){
   if(!ratio||!managerId)return;
   closeModal();
   apiPost('/distribute/execute',{manager_id:managerId,ratio:ratio}).then(function(res){
-    var msg=res.total_assigned+' leads assigned to '+STATE.users.find(function(u){return u.id===managerId;}).name;
+    var msg=res.total_assigned+' leads assigned to '+STATE.users.find(function(u){return u.id===managerId;}).name+' · emails sending automatically';
     showToast(msg,'success');
     STATE._assignRatio=null;STATE._assignManagerId=null;
+    STATE.sendProgress=null;
+    startProgressPoll(); // watch auto-send progress
     return Promise.all([refreshPoolStats(),refreshJobs()]);
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
