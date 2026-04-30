@@ -1430,9 +1430,17 @@ app.post('/distribute/execute', auth, async (req, res) => {
     const totalCapacity = accounts.reduce((s, a) => s + a.remaining, 0);
     const totalToSend = Math.min(ratio.total_to_send || 50, totalCapacity);
 
-    let query = supabase.from('jobs').select('id,position,freshness,industry,timezone,is_duplicate').is('deleted_at', null).eq('stage', 'Unassigned').is('assigned_to_bd', null);
-    if (ratio.exclude_duplicates) query = query.eq('is_duplicate', false);
-    const { data: pool } = await query;
+    // Fetch all unassigned leads — use range to bypass Supabase 1000 row default limit
+    let pool = [], from = 0;
+    while (true) {
+      let q = supabase.from('jobs').select('id,position,freshness,industry,timezone,is_duplicate').is('deleted_at', null).eq('stage', 'Unassigned').is('assigned_to_bd', null).range(from, from + 999);
+      if (ratio.exclude_duplicates) q = q.eq('is_duplicate', false);
+      const { data } = await q;
+      if (!data || !data.length) break;
+      pool = pool.concat(data);
+      if (data.length < 1000) break;
+      from += 1000;
+    }
     if (!pool?.length) return res.status(400).json({ error: 'No unassigned leads in pool' });
 
     const freshnessOrder = { 'Old': 0, 'Normal': 1, 'New': 2, '': 3 };
@@ -1527,9 +1535,21 @@ app.post('/distribute/execute', auth, async (req, res) => {
 app.get('/distribute/pool-stats', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'RA Lead only' });
-    const { data: pool } = await supabase.from('jobs').select('id,freshness,industry,timezone,is_duplicate,company:companies(industry)').is('deleted_at', null).eq('stage', 'Unassigned').is('assigned_to_bd', null);
-    const stats = { total: pool?.length || 0, by_industry: {}, by_timezone: {}, duplicates: 0 };
-    (pool || []).forEach(j => {
+    // Supabase default limit is 1000 — use range to fetch all rows in batches
+    let pool = [], from = 0, batchSize = 1000;
+    while (true) {
+      const { data, error } = await supabase.from('jobs')
+        .select('id,freshness,industry,timezone,is_duplicate,company:companies(industry)')
+        .is('deleted_at', null).eq('stage', 'Unassigned').is('assigned_to_bd', null)
+        .range(from, from + batchSize - 1);
+      if (error) throw error;
+      if (!data || !data.length) break;
+      pool = pool.concat(data);
+      if (data.length < batchSize) break;
+      from += batchSize;
+    }
+    const stats = { total: pool.length, by_industry: {}, by_timezone: {}, duplicates: 0 };
+    pool.forEach(j => {
       const rawInd = j.industry || j.company?.industry || '';
       const ind = normInd(rawInd) || 'Unknown';
       stats.by_industry[ind] = (stats.by_industry[ind] || 0) + 1;
