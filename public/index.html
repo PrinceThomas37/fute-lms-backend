@@ -1073,7 +1073,10 @@ function renderJobs(){
       '<td style="padding:12px"><div>'+escHtml((primary.first_name||"")+" "+(primary.last_name||""))+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(primary.email||"—")+'</div></td>'+
       '<td style="padding:12px;text-align:center"><span style="background:rgba(99,102,241,.1);color:var(--accent);padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600">'+cs.length+'</span></td>'+
       (canChangeStageInline?'<td style="padding:12px"><select onchange="changeJobStage(\''+j.id+'\',this.value);event.stopPropagation()" onclick="event.stopPropagation()" style="font-size:11px;padding:4px 8px;border:1.5px solid '+stageColor+';border-radius:8px;background:'+stageColor+'1a;color:'+stageColor+';font-weight:600;cursor:pointer">'+['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'].map(function(s){return'<option value="'+s+'"'+(j.stage===s?' selected':'')+'>'+s+'</option>';}).join('')+'</select></td>':'<td style="padding:12px"><span style="background:'+stageColor+'1a;color:'+stageColor+';padding:4px 10px;border-radius:10px;font-size:11px;font-weight:600">'+j.stage+'</span></td>')+
-      '<td style="padding:12px;font-size:12px;color:var(--text2)">'+(j.assigned_bd_name?'<div style="font-weight:500">'+escHtml(j.assigned_bd_name)+'</div><div style="font-size:10px;color:var(--text3)">'+( j.assigned_at?(new Date(j.assigned_at)).toLocaleDateString("en-GB",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"")+'</div>':'<span style="color:var(--text3)">—</span>')+'</td>'+'<td style="padding:12px;font-size:11px;color:var(--text3)">'+escHtml(j.created_date||"")+'</td>'+
+      '<td style="padding:12px;font-size:12px;color:var(--text2)">'+(j.assigned_bd_name?'<div style="font-weight:500">'+escHtml(j.assigned_bd_name)+'</div><div style="font-size:10px;color:var(--text3)">'+( j.assigned_at?(new Date(j.assigned_at)).toLocaleDateString("en-GB",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"")+'</div>':'<span style="color:var(--text3)">—</span>')+'</td>'+
+      '<td style="padding:12px;font-size:11px;color:var(--text3)">'+
+        (j.created_at?'<div>'+escHtml(j.created_date||new Date(j.created_at).toISOString().slice(0,10))+'</div><div style="font-size:10px;margin-top:1px">'+new Date(new Date(j.created_at).getTime()+5.5*3600000).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})+'</div>':escHtml(j.created_date||''))+
+      '</td>'+
     '</tr>';
   }).join("");
 
@@ -1099,7 +1102,9 @@ function renderJobs(){
       '<td style="padding:12px"><div>'+escHtml((primary.first_name||'')+(primary.last_name?' '+primary.last_name:''))+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(primary.email||'\u2014')+'</div></td>'+
       '<td style="padding:12px;text-align:center"><span style="background:rgba(99,102,241,.1);color:var(--accent);padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600">'+cs.length+'</span></td>'+
       '<td style="padding:12px"><span style="background:'+stageColor+'1a;color:'+stageColor+';padding:4px 10px;border-radius:10px;font-size:11px;font-weight:600">'+j.stage+'</span></td>'+
-      '<td style="padding:12px;font-size:11px;color:var(--text3)">'+escHtml(j.created_date||'')+'</td>'+
+      '<td style="padding:12px;font-size:11px;color:var(--text3)">'+
+        (j.created_at?'<div>'+escHtml(j.created_date||new Date(j.created_at).toISOString().slice(0,10))+'</div><div style="font-size:10px;margin-top:1px">'+new Date(new Date(j.created_at).getTime()+5.5*3600000).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})+'</div>':escHtml(j.created_date||''))+
+      '</td>'+
       '<td style="padding:12px" onclick="event.stopPropagation()">'+editBtn+'</td>'+
     '</tr>';
   }).join('');
@@ -3988,17 +3993,19 @@ function renderRALeadForm(){
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
       '<div>'+
         '<div style="position:relative">'+
-          '<input class="inp" id="ra-co-name" placeholder="Company name *" value="'+htmlEsc(f.coName||'')+'" autocomplete="off" oninput="raFormCoSearch(this.value)" onblur="raFormCoBlur()"/>'+
+          '<input class="inp" id="ra-co-name" placeholder="Company name *" value="'+htmlEsc(f.coName||'')+'" autocomplete="off" oninput="raFormCoSearch(this.value)" onblur="raFormCoBlur()" style="'+(companyCooldownCheck(f.coName)?'border-color:#f59e0b':'')+'"/>'+
           (STATE.raFormCoSuggestions&&STATE.raFormCoSuggestions.length?
             '<div style="position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);z-index:100;max-height:200px;overflow-y:auto;margin-top:2px" id="co-suggestions">'+
               STATE.raFormCoSuggestions.map(function(co,i){
-                return '<div class="_co-sug" data-idx="'+i+'" style="padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border)">'+
-                  '<div style="font-weight:500;font-size:13px">'+htmlEsc(co.name)+'</div>'+
+                var cool=companyCooldownCheck(co.name);
+                return '<div class="_co-sug" data-idx="'+i+'" style="padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border);opacity:'+(cool?'.5':'1')+'">'+
+                  '<div style="font-weight:500;font-size:13px">'+htmlEsc(co.name)+(cool?'<span style="margin-left:6px;font-size:10px;background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px">Cooldown '+cool.daysLeft+'d</span>':'')+'</div>'+
                   '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(co.industry||'')+(co.location?' \u00b7 '+htmlEsc(co.location):'')+( co.job_count?' \u00b7 '+co.job_count+' jobs':'')+( co.bd_name?' \u00b7 '+htmlEsc(co.bd_name):'')+'</div>'+
                 '</div>';
               }).join('')+
             '</div>':'')+
         '</div>'+
+        (function(){var cool=companyCooldownCheck(f.coName);return cool?'<div style="margin-top:5px;padding:8px 10px;background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;font-size:11.5px;color:#92400e"><strong>⚠ 21-day cooldown active</strong> — '+htmlEsc(f.coName)+' was added '+cool.daysAgo+' day'+(cool.daysAgo!==1?'s':'')+' ago ('+htmlEsc(cool.position)+'). '+cool.daysLeft+' day'+(cool.daysLeft!==1?'s':'')+' remaining.</div>':'';})()  +
         coBanner+
       '</div>'+
       '<input class="inp" placeholder="Website" value="'+htmlEsc(f.website||'')+'" oninput="raFormSet(\'website\',this.value)"/>'+
@@ -4120,6 +4127,22 @@ window.raFormZipBlur=function(){
   setTimeout(function(){STATE.raFormZipSuggestions=[];render();},200);
 };
 
+// ── Company cooldown helper ─────────────────────
+function companyCooldownCheck(coName){
+  if(!coName)return null;
+  var COOLDOWN_DAYS=21;
+  var cutoff=new Date(Date.now()-COOLDOWN_DAYS*24*3600000);
+  var match=STATE.jobs.find(function(j){
+    if(j.company_name.toLowerCase()!==coName.toLowerCase())return false;
+    var d=j.created_at?new Date(j.created_at):j.created_date?new Date(j.created_date):null;
+    return d&&d>cutoff;
+  });
+  if(!match)return null;
+  var daysAgo=Math.floor((Date.now()-new Date(match.created_at||match.created_date).getTime())/(24*3600000));
+  var daysLeft=COOLDOWN_DAYS-daysAgo;
+  return{daysLeft:daysLeft,daysAgo:daysAgo,position:match.position,addedBy:match.created_by_name||'an RA'};
+}
+
 window.raFormCoSearch=function(val){
   STATE.raForm.coName=val;
   STATE.raForm.coId=null;
@@ -4196,6 +4219,9 @@ window.raFormSubmit=function(){
   if(!f.position){showToast('Job title is required','warning');return;}
   var validContacts=f.contacts.filter(function(c){return c.firstName||c.email;});
   if(!validContacts.length){showToast('At least one contact is required','warning');return;}
+  // 21-day company cooldown check
+  var cooldown=companyCooldownCheck(f.coName);
+  if(cooldown){showToast(f.coName+' is in a 21-day cooldown. '+cooldown.daysLeft+' day'+(cooldown.daysLeft!==1?'s':'')+' remaining.','warning');return;}
   if(guestSimulate('addJob',{coName:f.coName,position:f.position,industry:f.industry,location:f.location,contacts:validContacts}))return;
 
   STATE.raFormSubmitting=true;render();
