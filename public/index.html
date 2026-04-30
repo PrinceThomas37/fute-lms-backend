@@ -247,7 +247,7 @@ tr.sel-row td{background:var(--accent-l)}
 .ind-fill{height:100%;border-radius:3px;transition:width .5s ease}
 
 /* LOGIN */
-.login-wrap{min-height:100vh;background:linear-gradient(150deg,#F0FDF4 0%,#F5F7FA 40%,#FEF6E0 100%);display:flex;align-items:center;justify-content:center;padding:16px}
+.login-wrap{min-height:100vh;width:100vw;display:flex;align-items:center;justify-content:center;padding:24px;position:relative;overflow:hidden;background:#e8f5ee;box-sizing:border-box}
 .login-card{background:var(--card);border:1px solid var(--border);border-radius:20px;box-shadow:var(--sh3);width:100%;max-width:440px;overflow:visible}
 .login-top{background:linear-gradient(130deg,#1E7A3C 0%,#3AAE57 100%);padding:24px 28px 20px;color:#fff;border-radius:20px 20px 0 0}
 .login-body{padding:22px 28px 26px;border-radius:0 0 20px 20px}
@@ -689,10 +689,11 @@ function renderLogin(){
     return '<button class="fc" onclick="loginAs(\''+u.id+'\')" style="font-size:11.5px">'+u.name+'</button>';
   }).join("");
   return '<div class="login-wrap">'+
-    '<div class="login-card">'+
+    '<canvas id="login-canvas" style="position:fixed;inset:0;width:100%;height:100%;z-index:0"></canvas>'+
+    '<div class="login-card" style="position:relative;z-index:2">'+
       '<div class="login-top">'+
         '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">'+
-          '<div style="width:44px;height:44px;min-width:44px;background:rgba(255,255,255,.2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:var(--display);font-weight:700;font-size:17px;color:#fff;flex-shrink:0">FG</div>'+
+          '<div style="line-height:1;flex-shrink:0"><span style="font-family:var(--display);font-weight:700;font-size:36px;color:#fff;letter-spacing:-.5px">fut</span><span style="font-family:var(--display);font-weight:700;font-size:36px;color:#F5C23B;letter-spacing:-.5px">é</span></div>'+
           '<div><div style="font-family:var(--display);font-weight:700;font-size:20px;color:#fff;line-height:1.2">Fute Global LLC</div><div style="font-size:12px;color:rgba(255,255,255,.82);margin-top:2px">Lead Management Software</div></div>'+
         '</div>'+
         '<div style="font-size:11.5px;color:rgba(255,255,255,.65);border-top:1px solid rgba(255,255,255,.2);padding-top:10px">Internal platform · Authorized personnel only</div>'+
@@ -751,8 +752,8 @@ function renderApp(){
 
   return '<div id="sidebar">'+
     '<div class="sb-brand"><div class="sb-logo">'+
-      '<div class="sb-icon">FG</div>'+
-      '<div><div class="sb-name">Fute Global</div><div class="sb-sub">Lead Management</div></div>'+
+      '<div style="line-height:1;flex-shrink:0"><span style="font-family:var(--display);font-weight:700;font-size:22px;color:var(--accent);letter-spacing:-.5px">fut</span><span style="font-family:var(--display);font-weight:700;font-size:22px;color:#F5C23B;letter-spacing:-.5px">é</span></div>'+
+      '<div><div class="sb-name">Global</div><div class="sb-sub">Lead Management</div></div>'+
     '</div></div>'+
     '<div class="sb-nav"><div class="sb-lbl">Menu</div>'+nav+'</div>'+
     '<div class="sb-footer">'+
@@ -2300,6 +2301,31 @@ function htmlEsc(s){
 function bindLogin(){
   var passEl=document.getElementById("login-pass");
   if(passEl)passEl.addEventListener("keydown",function(e){if(e.key==="Enter")doLogin();});
+  // Init canvas only once per login page load
+  if(!document.getElementById('login-canvas')||document.getElementById('login-canvas')._running)return;
+  try{initLoginCanvas();}catch(e){}
+}
+
+function initLoginCanvas(){
+  var c=document.getElementById("login-canvas");
+  if(!c||c._running)return;
+  c._running=true;
+  var ctx=c.getContext("2d");
+  var W,H,pts=[],streams=[];
+  function resize(){W=c.width=window.innerWidth;H=c.height=window.innerHeight;}
+  window.addEventListener("resize",resize);resize();
+  for(var i=0;i<80;i++)pts.push({x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*.35,vy:(Math.random()-.5)*.35,r:Math.random()*2+1,a:Math.random()*Math.PI*2,green:Math.random()<.7});
+  for(var s=0;s<12;s++)streams.push({x:Math.random()*W,y:Math.random()*H,angle:Math.random()*Math.PI*2,speed:.7+Math.random()*.5,len:60+Math.random()*80,t:Math.random()*100});
+  function draw(){
+    if(!document.getElementById('login-canvas')){return;} // stop if logged in
+    ctx.fillStyle="rgba(232,245,238,0.2)";ctx.fillRect(0,0,W,H);
+    for(var i=0;i<pts.length;i++){for(var j=i+1;j<pts.length;j++){var dx=pts[i].x-pts[j].x,dy=pts[i].y-pts[j].y,d=Math.sqrt(dx*dx+dy*dy);if(d<120){ctx.strokeStyle="rgba(30,122,60,"+((1-d/120)*.2)+")";ctx.lineWidth=.6;ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);ctx.lineTo(pts[j].x,pts[j].y);ctx.stroke();}}}
+    streams.forEach(function(s){s.t+=.018;var a=Math.sin(s.t)*.5+.5,ex=s.x+Math.cos(s.angle)*s.len,ey=s.y+Math.sin(s.angle)*s.len,g=ctx.createLinearGradient(s.x,s.y,ex,ey);g.addColorStop(0,"rgba(210,140,0,0)");g.addColorStop(.5,"rgba(210,140,0,"+(a*.6)+")");g.addColorStop(1,"rgba(210,140,0,0)");ctx.strokeStyle=g;ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(ex,ey);ctx.stroke();s.x+=Math.cos(s.angle)*s.speed;s.y+=Math.sin(s.angle)*s.speed;if(s.x<-100||s.x>W+100||s.y<-100||s.y>H+100){s.x=Math.random()*W;s.y=Math.random()*H;s.angle=Math.random()*Math.PI*2;}});
+    pts.forEach(function(p){p.x+=p.vx;p.y+=p.vy;if(p.x<0||p.x>W)p.vx*=-1;if(p.y<0||p.y>H)p.vy*=-1;p.a+=.008;var pulse=.4+Math.sin(p.a)*.3;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fillStyle=p.green?"rgba(22,101,52,"+pulse+")":"rgba(180,110,0,"+(pulse*.85)+")";ctx.fill();});
+    requestAnimationFrame(draw);
+  }
+  ctx.fillStyle="#e8f5ee";ctx.fillRect(0,0,W,H);
+  draw();
 }
 function bindApp(){}
 
