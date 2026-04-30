@@ -2532,22 +2532,32 @@ window.exportXL=function(){
 window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;STATE.composeFromEmailId=null;STATE.pendingEmailPage=0;STATE.sentEmailPage=0;render();}
 
 // ── Send progress polling ──────────────────────
+// Auto-starts on login for BD/BD_Lead. No button click required.
+// Polls every 2s when sending is active, every 10s when idle.
 function startProgressPoll(){
   if(STATE._progressPollTimer)return;
-  STATE._progressPollTimer=setInterval(function(){
-    if(!STATE.user||!STATE.token||STATE.token==='guest')return;
+  function pollOnce(){
+    if(!STATE.user||!STATE.token||STATE.token==='guest'){STATE._progressPollTimer=null;return;}
     apiGet('/emails/send-progress').then(function(d){
-      STATE.sendProgress=d;
-      render(); // always render so progress shows wherever user is
+      var newProgress=(d&&(d.active||d.done))?d:null;
+      var hadProgress=!!STATE.sendProgress;
+      STATE.sendProgress=newProgress;
+      if(d&&d.active){render();}
+      else if(!!newProgress!==hadProgress){render();}
       if(d&&d.done&&!d.active){
-        stopProgressPoll();
-        loadEmailsForCurrentUser(); // refresh pending+sent lists
+        loadEmailsForCurrentUser();
+        setTimeout(function(){STATE.sendProgress=null;render();},30000);
       }
-    }).catch(function(){stopProgressPoll();});
-  },2000);
+      var delay=(d&&d.active)?2000:10000;
+      STATE._progressPollTimer=setTimeout(pollOnce,delay);
+    }).catch(function(){
+      STATE._progressPollTimer=setTimeout(pollOnce,30000);
+    });
+  }
+  STATE._progressPollTimer=setTimeout(pollOnce,2000);
 }
 function stopProgressPoll(){
-  if(STATE._progressPollTimer){clearInterval(STATE._progressPollTimer);STATE._progressPollTimer=null;}
+  if(STATE._progressPollTimer){clearTimeout(STATE._progressPollTimer);STATE._progressPollTimer=null;}
 }
 function loadEmailsForCurrentUser(){
   var u=STATE.user;
@@ -4810,14 +4820,21 @@ window.openSendAllConfirm=function(){
 };
 
 window.submitSendAll=function(){
+  var pending=STATE.pendingEmails||[];
   closeModal();
+  // Show progress bar immediately — don't wait for first poll
+  STATE.sendProgress={active:true,total:pending.length,sent:0,failed:0,current:'Initiating send...',failDetails:[],startedAt:new Date().toISOString()};
+  STATE.pendingEmails=[];
+  render(); // bar is visible right now
+  stopProgressPoll(); // clear any stale timer from previous send
+  startProgressPoll(); // start polling for real backend updates
   apiPost('/emails/queue-all',{}).then(function(res){
     showToast(res.queued+' emails queued for sending','success');
-    STATE.pendingEmails=[];
+  }).catch(function(e){
     STATE.sendProgress=null;
-    startProgressPoll(); // start watching progress
-    return apiGet('/emails?status=queued').then(function(d){STATE.emails=d;render();});
-  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+    loadEmailsForCurrentUser();
+    showToast('Failed: '+e.message,'error');
+  });
 };
 
 window.saveEmailEdit=function(id){
@@ -5634,6 +5651,8 @@ function loadAppData(){
       }).catch(function(){});
     }
     STATE.loading=false;render();
+    // Auto-start progress poll for BD/BD_Lead so bar appears without any button click
+    if(STATE.user&&userHasAnyRole(STATE.user,'bd','bd_lead','admin')){startProgressPoll();}
   }).catch(function(err){
     STATE.loading=false;STATE.user=null;STATE.token=null;
     localStorage.removeItem('fg_token');localStorage.removeItem('fg_user');
