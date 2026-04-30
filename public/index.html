@@ -5448,6 +5448,9 @@ window.doLogin=function(){
   var em=(document.getElementById('login-email')||{}).value||'';
   var pw=(document.getElementById('login-pass')||{}).value||'';
   if(!em||!pw){var e=document.getElementById('login-err');if(e){e.textContent='Enter email and password';e.style.display='block';}return;}
+  // Clear any guest session before attempting real login
+  STATE.token=null;STATE.user=null;
+  sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');
   STATE.loading=true;render();
   apiPost('/auth/login',{email:em,password:pw}).then(function(d){
     STATE.token=d.token;STATE.user=normaliseUser(d.user);
