@@ -765,7 +765,7 @@ async function generateEmailsForJobs(job_ids, callerUserId) {
   const emailsToInsert = [];
   for (const job of jobs) {
     const bd = bdMap[job.assigned_to_bd] || { id: callerUserId, name: '', email: '' };
-    const contacts = (job.contacts || []).filter(c => c.email);
+    const contacts = (job.contacts || []).filter(c => isValidEmail(c.email));
     const savedSubj = tmplSettings[`u_${bd.id}_tmpl_o1_subject`] || '';
     const savedBody = tmplSettings[`u_${bd.id}_tmpl_o1_body`] || '';
     for (const contact of contacts) {
@@ -859,7 +859,7 @@ app.post('/emails/generate', auth, async (req, res) => {
     const failed = [];
     for (const job of jobs) {
       const bd = bdMap[job.assigned_to_bd] || { id: req.user.id, name: req.user.name, email: req.user.email };
-      const contacts = (job.contacts || []).filter(c => c.email);
+      const contacts = (job.contacts || []).filter(c => isValidEmail(c.email));
 
       // Get this BD's saved template, fall back to global defaults
       const savedSubj = tmplSettings[`u_${bd.id}_tmpl_o1_subject`] || '';
@@ -1051,6 +1051,13 @@ app.post('/emails/queue-all', auth, async (req, res) => {
       if (platform === 'gmail' || platform === 'google') {
         failed++;
         failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: 'Gmail sending not connected yet — please connect Google OAuth' });
+        try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
+        await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
+        continue;
+      }
+      if (!isValidEmail(email.to_email)) {
+        failed++;
+        failDetails.push({ id: email.id, to: email.to_email || '(empty)', from: sendingEmail?.email_address || email.from_email || '—', error: `Invalid recipient address: "${email.to_email}" — not an email` });
         try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
         await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
         continue;
@@ -1364,6 +1371,13 @@ async function autoSendForManager(managerId, host, authHeader) {
         await setSendProgress(managerId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString(), autoSend: true });
         continue;
       }
+      if (!isValidEmail(email.to_email)) {
+        failed++;
+        failDetails.push({ id: email.id, to: email.to_email || '(empty)', from: sendingEmail?.email_address || '—', error: `Invalid recipient address: "${email.to_email}" — not an email` });
+        try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch(_) {}
+        await setSendProgress(managerId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString(), autoSend: true });
+        continue;
+      }
       await setSendProgress(managerId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString(), autoSend: true });
       try {
         console.log(`[AutoSend] Getting token for userEmailId=${userEmailId}`);
@@ -1509,7 +1523,7 @@ app.post('/distribute/execute', auth, async (req, res) => {
     const { data: assignedJobs } = await supabase.from('jobs').select('id,sending_email_id,contacts(id,email)').in('id', jobIds);
     const followUpRows = [];
     for (const aj of (assignedJobs || [])) {
-      const contacts = (aj.contacts || []).filter(c => c.email);
+      const contacts = (aj.contacts || []).filter(c => isValidEmail(c.email));
       for (const c of contacts) {
         followUpRows.push({ job_id: aj.id, contact_id: c.id, user_email_id: aj.sending_email_id, outreach_sent_at: outreachDateStr, followup1_due_date: fu1Str, followup2_due_date: fu2Str, status: 'active' });
       }
@@ -1956,6 +1970,11 @@ app.get('/auth/microsoft/callback', async (req, res) => {
 });
 
 // Random delay between emails to avoid domain flagging (1–120 seconds)
+// Validate recipient email before sending — prevents Microsoft Graph 'not resolved' errors
+function isValidEmail(addr) {
+  return typeof addr === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr.trim());
+}
+
 function randomDelay(minSec = 1, maxSec = 120) {
   const ms = Math.floor(Math.random() * (maxSec - minSec + 1) + minSec) * 1000;
   return new Promise(resolve => setTimeout(resolve, ms));
