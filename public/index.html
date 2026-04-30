@@ -2533,17 +2533,15 @@ window.setEmailTab=function(t){STATE.emailTab=t;STATE.genEmail=null;STATE.emailS
 
 // ── Send progress polling ──────────────────────
 function startProgressPoll(){
-  if(STATE._progressPollTimer)return; // already polling
+  if(STATE._progressPollTimer)return;
   STATE._progressPollTimer=setInterval(function(){
     if(!STATE.user||!STATE.token||STATE.token==='guest')return;
     apiGet('/emails/send-progress').then(function(d){
       STATE.sendProgress=d;
-      if(STATE.page==='email')render();
-      // Stop polling when done
+      render(); // always render so progress shows wherever user is
       if(d&&d.done&&!d.active){
         stopProgressPoll();
-        // Refresh email lists after send completes
-        loadEmailsForCurrentUser();
+        loadEmailsForCurrentUser(); // refresh pending+sent lists
       }
     }).catch(function(){stopProgressPoll();});
   },2000);
@@ -5100,11 +5098,13 @@ window.submitAssignToManager=function(){
   if(!ratio||!managerId)return;
   closeModal();
   apiPost('/distribute/execute',{manager_id:managerId,ratio:ratio}).then(function(res){
-    var msg=res.total_assigned+' leads assigned to '+STATE.users.find(function(u){return u.id===managerId;}).name+' · emails sending automatically';
+    var msg=res.total_assigned+' leads assigned · emails sending automatically';
     showToast(msg,'success');
     STATE._assignRatio=null;STATE._assignManagerId=null;
     STATE.sendProgress=null;
-    startProgressPoll(); // watch auto-send progress
+    STATE.page='email'; // go to email page so progress bar is visible
+    render();
+    startProgressPoll();
     return Promise.all([refreshPoolStats(),refreshJobs()]);
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
