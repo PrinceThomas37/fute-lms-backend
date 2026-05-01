@@ -1483,30 +1483,38 @@ function renderEmail(){
 
     // ── RA LEAD: BD user picker ──────────────────────────────────────
     if(isRaLead && !STATE.raLeadSelectedBD){
-      // Group pending emails by BD user
+      // Group ALL emails (pending + sent + failed) by BD user for the picker
       var bdGroups={};
-      (STATE.pendingEmails||[]).forEach(function(e){
+      (STATE.allBDEmails||STATE.pendingEmails||[]).forEach(function(e){
         var sid=e.sender&&e.sender.id?e.sender.id:(e.sent_by||'unknown');
         var sname=e.sender&&e.sender.name?e.sender.name:'Unknown';
-        if(!bdGroups[sid])bdGroups[sid]={id:sid,name:sname,count:0};
-        bdGroups[sid].count++;
+        if(!bdGroups[sid])bdGroups[sid]={id:sid,name:sname,pending:0,sent:0,failed:0};
+        if(e.status==='pending')bdGroups[sid].pending++;
+        else if(e.status==='sent')bdGroups[sid].sent++;
+        else if(e.status==='failed')bdGroups[sid].failed++;
       });
-      // Also show BD users with 0 pending (from STATE.users)
+      // Always show all BD/BD_Lead users even if they have no emails yet
       (STATE.users||[]).filter(function(usr){return userHasRole(usr,'bd')||userHasRole(usr,'bd_lead');}).forEach(function(usr){
-        if(!bdGroups[usr.id])bdGroups[usr.id]={id:usr.id,name:usr.name,count:0};
+        if(!bdGroups[usr.id])bdGroups[usr.id]={id:usr.id,name:usr.name,pending:0,sent:0,failed:0};
+        else if(!bdGroups[usr.id].name)bdGroups[usr.id].name=usr.name; // fill name if missing
       });
-      var bdCards=Object.values(bdGroups).sort(function(a,b){return b.count-a.count;}).map(function(bd){
+      var bdCards=Object.values(bdGroups).sort(function(a,b){return (b.pending+b.sent+b.failed)-(a.pending+a.sent+a.failed);}).map(function(bd){
         var initials=bd.name.split(' ').map(function(w){return w[0]||'';}).slice(0,2).join('').toUpperCase();
-        var hasEmails=bd.count>0;
-        return '<div onclick="'+(hasEmails?'STATE.raLeadSelectedBD=\''+bd.id+'\';STATE.pendingEmailPage=0;render()':'')+'" style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid var(--border);'+(hasEmails?'cursor:pointer;':'cursor:default;opacity:.55;')+'transition:background .1s" '+(hasEmails?'onmouseover="this.style.background=\'var(--accent-l)\'" onmouseout="this.style.background=\'\'"':'')+'>'+
+        var total=bd.pending+bd.sent+bd.failed;
+        var statusLine=total===0?'<span style="color:var(--text3)">No emails yet</span>':(
+          (bd.pending?'<span style="color:var(--amber);font-weight:600">'+bd.pending+' pending</span>':'')+
+          (bd.pending&&(bd.sent||bd.failed)?' · ':'')+
+          (bd.sent?'<span style="color:var(--green);font-weight:600">'+bd.sent+' sent</span>':'')+
+          (bd.sent&&bd.failed?' · ':'')+
+          (bd.failed?'<span style="color:var(--red,#dc2626);font-weight:600">'+bd.failed+' failed</span>':'')
+        );
+        return '<div onclick="STATE.raLeadSelectedBD=\''+bd.id+'\';STATE.pendingEmailPage=0;render()" style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s" onmouseover="this.style.background=\'var(--accent-l)\'" onmouseout="this.style.background=\'\'" >'+
           '<div style="width:38px;height:38px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0">'+htmlEsc(initials)+'</div>'+
           '<div style="flex:1">'+
             '<div style="font-weight:600;font-size:13.5px">'+htmlEsc(bd.name)+'</div>'+
-            '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+
-              (hasEmails?'<span style="color:var(--amber);font-weight:600">'+bd.count+' pending email'+(bd.count!==1?'s':'')+'</span>':'No pending emails')+
-            '</div>'+
+            '<div style="font-size:12px;margin-top:2px">'+statusLine+'</div>'+
           '</div>'+
-          (hasEmails?'<div style="color:var(--text3);font-size:16px">→</div>':'')+
+          '<div style="color:var(--text3);font-size:16px">→</div>'+
         '</div>';
       }).join('');
       if(!bdCards)bdCards='<div style="padding:40px;text-align:center;color:var(--text3)">No BD users found.</div>';
@@ -1519,7 +1527,7 @@ function renderEmail(){
     } else {
       var viewingBD=isRaLead&&STATE.raLeadSelectedBD;
       var displayPending=viewingBD
-        ? (STATE.pendingEmails||[]).filter(function(e){return (e.sender&&e.sender.id?e.sender.id:e.sent_by)===STATE.raLeadSelectedBD;})
+        ? (STATE.allBDEmails||STATE.pendingEmails||[]).filter(function(e){return (e.sender&&e.sender.id?e.sender.id:e.sent_by)===STATE.raLeadSelectedBD;})
         : pending;
       var bdName=viewingBD?(function(){var bd=(STATE.users||[]).find(function(u){return u.id===STATE.raLeadSelectedBD;});return bd?bd.name:'BD Manager';})():'';
 
@@ -1535,7 +1543,7 @@ function renderEmail(){
         var fu=e.followup_type;
         var rowBg=isSelected?'var(--accent-l)':fu==='fu2'?'#fff8f0':fu==='fu1'?'#fffdf0':'';
         var fuBadge=fu==='fu1'?'<span style="font-size:10px;padding:2px 7px;background:#fef9c3;color:#92400e;border-radius:6px;font-weight:700;margin-left:6px">FU1</span>':fu==='fu2'?'<span style="font-size:10px;padding:2px 7px;background:#ffedd5;color:#9a3412;border-radius:6px;font-weight:700;margin-left:6px">FU2</span>':'';
-        return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer;background:'+rowBg+'" onclick="previewPendingEmail(\''+e.id+'\')">'+'<td style="padding:10px 12px;font-size:13px"><div style="font-weight:500">'+htmlEsc(e.to_email)+fuBadge+'</div>'+'<div style="font-size:11px;color:var(--text3)">'+htmlEsc((e.contact&&e.contact.first_name?e.contact.first_name+' '+(e.contact.last_name||''):''))+'</div></td>'+'<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+htmlEsc(jname)+'</td>'+'<td style="padding:10px 12px;font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subject||'')+'</td>'+'<td style="padding:10px 12px;white-space:nowrap">'+'<span style="font-size:11px;padding:2px 8px;background:var(--amber-l);color:var(--amber);border-radius:8px;font-weight:600">'+htmlEsc(e.status)+'</span>'+'</td>'+'</tr>';
+        return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer;background:'+rowBg+'" onclick="previewPendingEmail(\''+e.id+'\')">'+'<td style="padding:10px 12px;font-size:13px"><div style="font-weight:500">'+htmlEsc(e.to_email)+fuBadge+'</div>'+'<div style="font-size:11px;color:var(--text3)">'+htmlEsc((e.contact&&e.contact.first_name?e.contact.first_name+' '+(e.contact.last_name||''):''))+'</div></td>'+'<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+htmlEsc(jname)+'</td>'+'<td style="padding:10px 12px;font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subject||'')+'</td>'+'<td style="padding:10px 12px;white-space:nowrap">'+(function(){var sc=e.status==='sent'?'background:var(--green-l);color:var(--green)':e.status==='failed'?'background:#fee2e2;color:#dc2626':'background:var(--amber-l);color:var(--amber)';return '<span style="font-size:11px;padding:2px 8px;'+sc+';border-radius:8px;font-weight:600">'+htmlEsc(e.status)+'</span>';})() +'</td>'+'</tr>';
       }).join('');
       if(!pendingRows)pendingRows='<tr><td colspan="4" style="padding:40px;text-align:center;color:var(--text3)">No pending emails yet.</td></tr>';
 
@@ -2613,8 +2621,18 @@ function loadEmailsForCurrentUser(){
   if(!u)return;
   var isBD=userHasAnyRole(u,'bd','bd_lead','admin','ra_lead');
   if(isBD){
-    apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];render();}).catch(function(){});
-    apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];render();}).catch(function(){});
+    if(userHasRole(u,'ra_lead')){
+      // RA Lead needs all emails across all BD users (no status filter)
+      apiGet('/emails').then(function(d){
+        var all=d||[];
+        STATE.pendingEmails=all.filter(function(e){return e.status==='pending';});
+        STATE.allBDEmails=all; // full set for BD picker
+        render();
+      }).catch(function(){});
+    } else {
+      apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];render();}).catch(function(){});
+      apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];render();}).catch(function(){});
+    }
   }
 }
 
