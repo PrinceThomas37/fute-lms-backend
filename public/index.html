@@ -740,6 +740,7 @@ function renderApp(){
   if(userHasAnyRole(u,'admin','ra_lead','bd_lead'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
   if(userHasAnyRole(u,'admin','bd_lead'))navItems.splice(5,0,{id:"managerusers",lbl:"Manager Users",ic:"email"});
   if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
+  if(userHasRole(u,'admin'))navItems.push({id:"rag",lbl:"RAG Settings",ic:"admin"});
 
   var nav=navItems.map(function(n){
     var active=STATE.page===n.id?" active":"";
@@ -749,7 +750,7 @@ function renderApp(){
 
   var switchers=""; // removed — use team list to switch views
 
-  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",profile:"My Profile",reminders:"Reminders"};
+  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",profile:"My Profile",reminders:"Reminders",rag:"RAG Settings"};
   var viewingName=STATE.viewingUser&&STATE.viewingUser.id!==u.id?" · Viewing: "+STATE.viewingUser.name:"";
 
   return '<div id="sidebar">'+
@@ -804,6 +805,7 @@ function renderPage(){
   if(STATE.page==="reminders")return renderReminders();
   if(STATE.page==="admin")return renderAdmin();
   if(STATE.page==="profile")return renderProfile();
+  if(STATE.page==="rag")return renderRAGSettings();
   return "<div class='page'>Page not found</div>";
 }
 
@@ -1928,6 +1930,113 @@ function renderEmail(){
 }
 
 // ── ADMIN ──────────────────────────────────────
+// ════════════════════════════════════════════════
+// RAG SETTINGS PAGE — Admin only
+// ════════════════════════════════════════════════
+function renderRAGSettings(){
+  var u=STATE.user;
+  if(!userHasRole(u,'admin'))return'<div class="page"><div style="padding:40px;text-align:center;color:var(--red)">Admin only</div></div>';
+  var s=STATE.ragStatus;
+  var statusCard='';
+  if(!s){
+    statusCard='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:20px;margin-bottom:16px;text-align:center;color:var(--text3);font-size:13px">Loading RAG status\u2026</div>';
+  } else {
+    var pct=s.total>0?Math.round(s.embedded/s.total*100):0;
+    var connColor=s.enabled?'var(--green)':'var(--amber)';
+    var connLabel=s.enabled?'\u2713 OpenAI API key connected':'No OPENAI_API_KEY \u2014 add to Render env vars';
+    statusCard=
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
+          '<div style="font-weight:700;font-size:13px">Embedding status</div>'+
+          '<span style="font-size:12px;padding:3px 10px;border-radius:99px;font-weight:600;background:'+(s.enabled?'var(--green-l)':'var(--amber-l)')+';color:'+connColor+'">'+connLabel+'</span>'+
+        '</div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">'+
+          '<div style="text-align:center;padding:14px;background:var(--bg);border-radius:var(--r2)"><div style="font-size:26px;font-weight:700;color:var(--accent)">'+s.total+'</div><div style="font-size:11px;color:var(--text3);margin-top:2px">Total companies</div></div>'+
+          '<div style="text-align:center;padding:14px;background:var(--bg);border-radius:var(--r2)"><div style="font-size:26px;font-weight:700;color:var(--green)">'+s.embedded+'</div><div style="font-size:11px;color:var(--text3);margin-top:2px">Embedded</div></div>'+
+          '<div style="text-align:center;padding:14px;background:var(--bg);border-radius:var(--r2)"><div style="font-size:26px;font-weight:700;color:'+(s.pending>0?'var(--amber)':'var(--text3)')+'">'+s.pending+'</div><div style="font-size:11px;color:var(--text3);margin-top:2px">Pending</div></div>'+
+        '</div>'+
+        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">'+
+          '<div style="flex:1;background:var(--border);border-radius:99px;height:8px;overflow:hidden">'+
+            '<div style="width:'+pct+'%;background:var(--green);height:100%;border-radius:99px;transition:width .4s"></div>'+
+          '</div>'+
+          '<span style="font-size:12px;font-weight:600;color:var(--text2);min-width:42px;text-align:right">'+pct+'%</span>'+
+        '</div>'+
+        '<div style="font-size:11px;color:var(--text3)">Model: <strong>'+s.model+'</strong> \u00b7 Dimensions: '+s.dims+'</div>'+
+      '</div>';
+  }
+  return '<div class="page">'+
+    '<div class="ph"><div class="ptitle">RAG Settings</div><div class="psub">Retrieval-Augmented email generation \u2014 powered by pgvector + OpenAI</div></div>'+
+    statusCard+
+    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+        '<div><div style="font-weight:700;font-size:13px">Step 1 \u2014 Run setup SQL in Supabase</div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:2px">One-time only. Supabase project \u2192 SQL Editor \u2192 paste and run.</div></div>'+
+        '<button onclick="copyRAGSetupSQL()" style="padding:6px 14px;background:var(--accent);color:#fff;border:0;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Copy SQL</button>'+
+      '</div>'+
+      '<pre id="rag-sql-block" style="background:var(--bg);border:1px solid var(--border2);border-radius:var(--r);padding:12px;font-family:var(--mono);font-size:11px;overflow-x:auto;line-height:1.6;max-height:220px;overflow-y:auto;color:var(--text2)">Loading\u2026</pre>'+
+    '</div>'+
+    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
+      '<div style="font-weight:700;font-size:13px;margin-bottom:4px">Step 2 \u2014 Add OPENAI_API_KEY to Render</div>'+
+      '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Render dashboard \u2192 your service \u2192 Environment \u2192 Add variable: <code style="background:var(--bg);padding:1px 6px;border-radius:4px;font-size:11px">OPENAI_API_KEY = sk-...</code></div>'+
+      '<div style="font-size:12px;color:var(--text3)">Cost: OpenAI <strong>text-embedding-3-small</strong> is $0.02 per million tokens. 3 years of lead data = roughly $0.10 total for the backfill.</div>'+
+    '</div>'+
+    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
+      '<div style="font-weight:700;font-size:13px;margin-bottom:4px">Step 3 \u2014 Run backfill</div>'+
+      '<div style="font-size:12px;color:var(--text3);margin-bottom:14px">Embeds your existing companies 100 at a time. Click until pending = 0. New companies embed automatically going forward.</div>'+
+      '<div style="display:flex;align-items:center;gap:12px">'+
+        '<button id="rag-backfill-btn" onclick="runRAGBackfill()" style="padding:8px 20px;background:var(--teal);color:#fff;border:0;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">\u26a1 Run backfill (next 100)</button>'+
+        '<span id="rag-backfill-status" style="font-size:12px;color:var(--text3)"></span>'+
+      '</div>'+
+    '</div>'+
+    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
+      '<div style="font-weight:700;font-size:13px;margin-bottom:4px">Step 4 \u2014 Tag outcome labels (optional but high value)</div>'+
+      '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Outcome labels get injected directly into the Claude prompt alongside similar companies. Without them RAG still works \u2014 it references similar companies by industry + location. With them, Claude knows what actually worked.</div>'+
+      '<div style="padding:10px 14px;background:var(--amber-l);border:1px solid rgba(217,119,6,.2);border-radius:var(--r2);font-size:12px;color:var(--amber)">Open any company in the Leads list \u2192 RAG Outcome field \u2192 type a short note, e.g. \u201cPlaced 2 engineers in 2024\u201d or \u201cConnected, no placement yet\u201d.</div>'+
+    '</div>'+
+    '<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r2);padding:18px">'+
+      '<div style="font-weight:700;font-size:13px;margin-bottom:10px">How it works end-to-end</div>'+
+      '<div style="display:flex;flex-direction:column;gap:7px;font-size:13px;color:var(--text2)">'+
+        '<div><span style="font-weight:700;color:var(--accent)">1.</span> New company created \u2192 background embed via OpenAI \u2192 vector stored in Supabase.</div>'+
+        '<div><span style="font-weight:700;color:var(--accent)">2.</span> Email generation triggered \u2192 cosine similarity search finds top 5 similar companies.</div>'+
+        '<div><span style="font-weight:700;color:var(--accent)">3.</span> Similar companies (+ outcome labels) are injected as context into the Claude prompt.</div>'+
+        '<div><span style="font-weight:700;color:var(--accent)">4.</span> Claude generates an email that is aware of your historical outreach to similar companies.</div>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+
+window.copyRAGSetupSQL=function(){
+  var el=document.getElementById('rag-sql-block');
+  if(!el||el.textContent.trim()==='Loading\u2026'){showToast('SQL not loaded yet, wait a moment','warning');return;}
+  navigator.clipboard.writeText(el.textContent).then(function(){showToast('SQL copied to clipboard','success');}).catch(function(){showToast('Copy failed — select the text manually','warning');});
+};
+
+window.runRAGBackfill=function(){
+  var btn=document.getElementById('rag-backfill-btn');
+  var stat=document.getElementById('rag-backfill-status');
+  if(btn){btn.disabled=true;btn.textContent='Running\u2026';}
+  if(stat)stat.textContent='Embedding companies\u2026';
+  apiPost('/rag/backfill',{}).then(function(r){
+    if(btn){btn.disabled=false;btn.textContent='\u26a1 Run backfill (next 100)';}
+    var msg=r.processed+' embedded';
+    if(r.failed)msg+=', '+r.failed+' failed';
+    msg+=r.remaining>0?'. '+r.remaining+' still pending \u2014 run again.':'. All done \u2713';
+    if(stat)stat.textContent=msg;
+    showToast(msg,'success');
+    loadRAGStatus();
+  }).catch(function(e){
+    if(btn){btn.disabled=false;btn.textContent='\u26a1 Run backfill (next 100)';}
+    if(stat)stat.textContent='Error: '+e.message;
+    showToast('Backfill failed: '+e.message,'error');
+  });
+};
+
+function loadRAGStatus(){
+  if(!STATE.user||!userHasRole(STATE.user,'admin'))return;
+  apiGet('/rag/status').then(function(s){STATE.ragStatus=s;if(STATE.page==='rag')render();}).catch(function(){});
+  apiGet('/rag/setup-sql').then(function(r){var el=document.getElementById('rag-sql-block');if(el&&r.sql)el.textContent=r.sql;}).catch(function(){});
+}
+
 function renderAdmin(){
   var u=STATE.user;
   var selectedUserId=STATE.adminSelectedUser||null;
@@ -2475,7 +2584,7 @@ window.doLogin=function(){
   else{var e=document.getElementById("login-err");if(e){e.textContent="No account found. Use a @futeglobal.com email.";e.style.display="block";}}
 }
 window.signOut=function(){STATE.user=null;STATE.page="dashboard";STATE.modal=null;render();}
-window.goPage=function(p){STATE.page=p;STATE.detailLead=null;STATE.modal=null;if(p!=="dashboard")STATE.viewingUser=null;render();}
+window.goPage=function(p){STATE.page=p;STATE.detailLead=null;STATE.modal=null;if(p!=="dashboard")STATE.viewingUser=null;if(p==='rag')loadRAGStatus();render();}
 window.setPeriod=function(p){STATE.period=p;render();}
 window.setSearch=function(v){STATE.leadsFilter.search=v;STATE.leadsPage=0;render();}
 window.setFilt=function(k,v){STATE.leadsFilter[k]=v;STATE.leadsPage=0;render();}
@@ -5720,6 +5829,8 @@ function loadAppData(){
     STATE.loading=false;render();
     // Auto-start progress poll for BD/BD_Lead so bar appears without any button click
     if(STATE.user&&userHasAnyRole(STATE.user,'bd','bd_lead','admin')){startProgressPoll();}
+    // Load RAG status for admin
+    if(STATE.user&&userHasRole(STATE.user,'admin')){loadRAGStatus();}
   }).catch(function(err){
     STATE.loading=false;STATE.user=null;STATE.token=null;
     sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');
