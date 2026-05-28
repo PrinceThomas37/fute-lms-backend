@@ -740,7 +740,6 @@ function renderApp(){
   if(userHasAnyRole(u,'admin','ra_lead','bd_lead'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
   if(userHasAnyRole(u,'admin','bd_lead'))navItems.splice(5,0,{id:"managerusers",lbl:"Manager Users",ic:"email"});
   if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
-  if(userHasRole(u,'admin'))navItems.push({id:"rag",lbl:"RAG Settings",ic:"admin"});
 
   var nav=navItems.map(function(n){
     var active=STATE.page===n.id?" active":"";
@@ -750,7 +749,7 @@ function renderApp(){
 
   var switchers=""; // removed — use team list to switch views
 
-  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",profile:"My Profile",reminders:"Reminders",rag:"RAG Settings"};
+  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",profile:"My Profile",reminders:"Reminders"};
   var viewingName=STATE.viewingUser&&STATE.viewingUser.id!==u.id?" · Viewing: "+STATE.viewingUser.name:"";
 
   return '<div id="sidebar">'+
@@ -805,7 +804,6 @@ function renderPage(){
   if(STATE.page==="reminders")return renderReminders();
   if(STATE.page==="admin")return renderAdmin();
   if(STATE.page==="profile")return renderProfile();
-  if(STATE.page==="rag")return renderRAGSettings();
   return "<div class='page'>Page not found</div>";
 }
 
@@ -1930,113 +1928,6 @@ function renderEmail(){
 }
 
 // ── ADMIN ──────────────────────────────────────
-// ════════════════════════════════════════════════
-// RAG SETTINGS PAGE — Admin only
-// ════════════════════════════════════════════════
-function renderRAGSettings(){
-  var u=STATE.user;
-  if(!userHasRole(u,'admin'))return'<div class="page"><div style="padding:40px;text-align:center;color:var(--red)">Admin only</div></div>';
-  var s=STATE.ragStatus;
-  var statusCard='';
-  if(!s){
-    statusCard='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:20px;margin-bottom:16px;text-align:center;color:var(--text3);font-size:13px">Loading RAG status\u2026</div>';
-  } else {
-    var pct=s.total>0?Math.round(s.embedded/s.total*100):0;
-    var connColor=s.enabled?'var(--green)':'var(--amber)';
-    var connLabel=s.enabled?'\u2713 OpenAI API key connected':'No OPENAI_API_KEY \u2014 add to Render env vars';
-    statusCard=
-      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
-          '<div style="font-weight:700;font-size:13px">Embedding status</div>'+
-          '<span style="font-size:12px;padding:3px 10px;border-radius:99px;font-weight:600;background:'+(s.enabled?'var(--green-l)':'var(--amber-l)')+';color:'+connColor+'">'+connLabel+'</span>'+
-        '</div>'+
-        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">'+
-          '<div style="text-align:center;padding:14px;background:var(--bg);border-radius:var(--r2)"><div style="font-size:26px;font-weight:700;color:var(--accent)">'+s.total+'</div><div style="font-size:11px;color:var(--text3);margin-top:2px">Total companies</div></div>'+
-          '<div style="text-align:center;padding:14px;background:var(--bg);border-radius:var(--r2)"><div style="font-size:26px;font-weight:700;color:var(--green)">'+s.embedded+'</div><div style="font-size:11px;color:var(--text3);margin-top:2px">Embedded</div></div>'+
-          '<div style="text-align:center;padding:14px;background:var(--bg);border-radius:var(--r2)"><div style="font-size:26px;font-weight:700;color:'+(s.pending>0?'var(--amber)':'var(--text3)')+'">'+s.pending+'</div><div style="font-size:11px;color:var(--text3);margin-top:2px">Pending</div></div>'+
-        '</div>'+
-        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">'+
-          '<div style="flex:1;background:var(--border);border-radius:99px;height:8px;overflow:hidden">'+
-            '<div style="width:'+pct+'%;background:var(--green);height:100%;border-radius:99px;transition:width .4s"></div>'+
-          '</div>'+
-          '<span style="font-size:12px;font-weight:600;color:var(--text2);min-width:42px;text-align:right">'+pct+'%</span>'+
-        '</div>'+
-        '<div style="font-size:11px;color:var(--text3)">Model: <strong>'+s.model+'</strong> \u00b7 Dimensions: '+s.dims+'</div>'+
-      '</div>';
-  }
-  return '<div class="page">'+
-    '<div class="ph"><div class="ptitle">RAG Settings</div><div class="psub">Retrieval-Augmented email generation \u2014 powered by pgvector + OpenAI</div></div>'+
-    statusCard+
-    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
-        '<div><div style="font-weight:700;font-size:13px">Step 1 \u2014 Run setup SQL in Supabase</div>'+
-        '<div style="font-size:12px;color:var(--text3);margin-top:2px">One-time only. Supabase project \u2192 SQL Editor \u2192 paste and run.</div></div>'+
-        '<button onclick="copyRAGSetupSQL()" style="padding:6px 14px;background:var(--accent);color:#fff;border:0;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Copy SQL</button>'+
-      '</div>'+
-      '<pre id="rag-sql-block" style="background:var(--bg);border:1px solid var(--border2);border-radius:var(--r);padding:12px;font-family:var(--mono);font-size:11px;overflow-x:auto;line-height:1.6;max-height:220px;overflow-y:auto;color:var(--text2)">Loading\u2026</pre>'+
-    '</div>'+
-    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
-      '<div style="font-weight:700;font-size:13px;margin-bottom:4px">Step 2 \u2014 Add OPENAI_API_KEY to Render</div>'+
-      '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Render dashboard \u2192 your service \u2192 Environment \u2192 Add variable: <code style="background:var(--bg);padding:1px 6px;border-radius:4px;font-size:11px">OPENAI_API_KEY = sk-...</code></div>'+
-      '<div style="font-size:12px;color:var(--text3)">Cost: OpenAI <strong>text-embedding-3-small</strong> is $0.02 per million tokens. 3 years of lead data = roughly $0.10 total for the backfill.</div>'+
-    '</div>'+
-    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
-      '<div style="font-weight:700;font-size:13px;margin-bottom:4px">Step 3 \u2014 Run backfill</div>'+
-      '<div style="font-size:12px;color:var(--text3);margin-bottom:14px">Embeds your existing companies 100 at a time. Click until pending = 0. New companies embed automatically going forward.</div>'+
-      '<div style="display:flex;align-items:center;gap:12px">'+
-        '<button id="rag-backfill-btn" onclick="runRAGBackfill()" style="padding:8px 20px;background:var(--teal);color:#fff;border:0;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">\u26a1 Run backfill (next 100)</button>'+
-        '<span id="rag-backfill-status" style="font-size:12px;color:var(--text3)"></span>'+
-      '</div>'+
-    '</div>'+
-    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
-      '<div style="font-weight:700;font-size:13px;margin-bottom:4px">Step 4 \u2014 Tag outcome labels (optional but high value)</div>'+
-      '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Outcome labels get injected directly into the Claude prompt alongside similar companies. Without them RAG still works \u2014 it references similar companies by industry + location. With them, Claude knows what actually worked.</div>'+
-      '<div style="padding:10px 14px;background:var(--amber-l);border:1px solid rgba(217,119,6,.2);border-radius:var(--r2);font-size:12px;color:var(--amber)">Open any company in the Leads list \u2192 RAG Outcome field \u2192 type a short note, e.g. \u201cPlaced 2 engineers in 2024\u201d or \u201cConnected, no placement yet\u201d.</div>'+
-    '</div>'+
-    '<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r2);padding:18px">'+
-      '<div style="font-weight:700;font-size:13px;margin-bottom:10px">How it works end-to-end</div>'+
-      '<div style="display:flex;flex-direction:column;gap:7px;font-size:13px;color:var(--text2)">'+
-        '<div><span style="font-weight:700;color:var(--accent)">1.</span> New company created \u2192 background embed via OpenAI \u2192 vector stored in Supabase.</div>'+
-        '<div><span style="font-weight:700;color:var(--accent)">2.</span> Email generation triggered \u2192 cosine similarity search finds top 5 similar companies.</div>'+
-        '<div><span style="font-weight:700;color:var(--accent)">3.</span> Similar companies (+ outcome labels) are injected as context into the Claude prompt.</div>'+
-        '<div><span style="font-weight:700;color:var(--accent)">4.</span> Claude generates an email that is aware of your historical outreach to similar companies.</div>'+
-      '</div>'+
-    '</div>'+
-  '</div>';
-}
-
-window.copyRAGSetupSQL=function(){
-  var el=document.getElementById('rag-sql-block');
-  if(!el||el.textContent.trim()==='Loading\u2026'){showToast('SQL not loaded yet, wait a moment','warning');return;}
-  navigator.clipboard.writeText(el.textContent).then(function(){showToast('SQL copied to clipboard','success');}).catch(function(){showToast('Copy failed — select the text manually','warning');});
-};
-
-window.runRAGBackfill=function(){
-  var btn=document.getElementById('rag-backfill-btn');
-  var stat=document.getElementById('rag-backfill-status');
-  if(btn){btn.disabled=true;btn.textContent='Running\u2026';}
-  if(stat)stat.textContent='Embedding companies\u2026';
-  apiPost('/rag/backfill',{}).then(function(r){
-    if(btn){btn.disabled=false;btn.textContent='\u26a1 Run backfill (next 100)';}
-    var msg=r.processed+' embedded';
-    if(r.failed)msg+=', '+r.failed+' failed';
-    msg+=r.remaining>0?'. '+r.remaining+' still pending \u2014 run again.':'. All done \u2713';
-    if(stat)stat.textContent=msg;
-    showToast(msg,'success');
-    loadRAGStatus();
-  }).catch(function(e){
-    if(btn){btn.disabled=false;btn.textContent='\u26a1 Run backfill (next 100)';}
-    if(stat)stat.textContent='Error: '+e.message;
-    showToast('Backfill failed: '+e.message,'error');
-  });
-};
-
-function loadRAGStatus(){
-  if(!STATE.user||!userHasRole(STATE.user,'admin'))return;
-  apiGet('/rag/status').then(function(s){STATE.ragStatus=s;if(STATE.page==='rag')render();}).catch(function(){});
-  apiGet('/rag/setup-sql').then(function(r){var el=document.getElementById('rag-sql-block');if(el&&r.sql)el.textContent=r.sql;}).catch(function(){});
-}
-
 function renderAdmin(){
   var u=STATE.user;
   var selectedUserId=STATE.adminSelectedUser||null;
@@ -2584,7 +2475,7 @@ window.doLogin=function(){
   else{var e=document.getElementById("login-err");if(e){e.textContent="No account found. Use a @futeglobal.com email.";e.style.display="block";}}
 }
 window.signOut=function(){STATE.user=null;STATE.page="dashboard";STATE.modal=null;render();}
-window.goPage=function(p){STATE.page=p;STATE.detailLead=null;STATE.modal=null;if(p!=="dashboard")STATE.viewingUser=null;if(p==='rag')loadRAGStatus();render();}
+window.goPage=function(p){STATE.page=p;STATE.detailLead=null;STATE.modal=null;if(p!=="dashboard")STATE.viewingUser=null;render();}
 window.setPeriod=function(p){STATE.period=p;render();}
 window.setSearch=function(v){STATE.leadsFilter.search=v;STATE.leadsPage=0;render();}
 window.setFilt=function(k,v){STATE.leadsFilter[k]=v;STATE.leadsPage=0;render();}
@@ -4646,32 +4537,209 @@ function renderInsights(){
   var selectedRA=STATE.insightsSelectedRA;
   var data=STATE.insightsData;
 
-  // If RA Lead and no RA selected, show RA list
+  // ══════════════════════════════════════════════
+  // RA LEAD — FULL TEAM PERFORMANCE DASHBOARD
+  // ══════════════════════════════════════════════
   if(isRALead&&!selectedRA){
-    var ras=STATE.users.filter(function(x){return x.role==='ra';});
-    var raCards=ras.map(function(ra){
-      // Quick stats from STATE.jobs (last 30 days approx)
-      var raJobs=STATE.jobs.filter(function(j){return j.created_by===ra.id;});
-      return '<div onclick="loadRAInsights(\''+ra.id+'\')" style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px 16px;display:flex;align-items:center;gap:14px;margin-bottom:10px;cursor:pointer;transition:background .1s">'+
-        av(ra,'36')+
+    var now=new Date();
+    var todayStr=todayIST();
+
+    // IST-aware date from a job object
+    function jDate(j){
+      if(j.created_date)return j.created_date;
+      if(j.created_at)return new Date(new Date(j.created_at).getTime()+5.5*3600000).toISOString().slice(0,10);
+      return '';
+    }
+    function daysAgoIST(n){var d=new Date(now.getTime()+5.5*3600000);d.setDate(d.getDate()-n);return d.toISOString().slice(0,10);}
+
+    var weekAgoStr=daysAgoIST(7);
+    var monthAgoStr=daysAgoIST(30);
+    var allJobs=STATE.jobs;
+
+    // Use userHasRole so users with roles array are included
+    var raUsers=STATE.users.filter(function(x){return userHasRole(x,'ra')&&!userHasAnyRole(x,'admin','ra_lead');});
+
+    // Per-RA stats
+    var raStats=raUsers.map(function(ra){
+      var myJobs=allJobs.filter(function(j){return j.created_by===ra.id;});
+      var todayJ=myJobs.filter(function(j){return jDate(j)===todayStr;});
+      var weekJ=myJobs.filter(function(j){var d=jDate(j);return d>=weekAgoStr&&d<=todayStr;});
+      var monthJ=myJobs.filter(function(j){var d=jDate(j);return d>=monthAgoStr&&d<=todayStr;});
+      var assignedJ=myJobs.filter(function(j){return j.stage!=='Unassigned';});
+      var convertedJ=myJobs.filter(function(j){return j.stage==='Connected'||j.stage==='In Discussion';});
+      var dupJ=myJobs.filter(function(j){return j.is_duplicate;});
+      // POC Relevance: % of contacts on assigned leads NOT marked invalid/deactivated
+      var assignedIds=assignedJ.map(function(j){return j.id;});
+      var assignedContacts=(STATE.contacts||[]).filter(function(c){return assignedIds.indexOf(c.job_id)>-1;});
+      var badContacts=assignedContacts.filter(function(c){return c.email_status==='invalid'||c.email_status==='deactivated';});
+      var pocScore=assignedContacts.length?Math.round((1-badContacts.length/assignedContacts.length)*100):null;
+      var target=parseInt((STATE.appSettings||{})['ra_daily_target_'+ra.id]||0);
+      return{ra:ra,total:myJobs.length,today:todayJ.length,week:weekJ.length,month:monthJ.length,
+        assigned:assignedJ.length,converted:convertedJ.length,dups:dupJ.length,
+        pocScore:pocScore,target:target,
+        assignRate:myJobs.length?Math.round(assignedJ.length/myJobs.length*100):0,
+        convRate:myJobs.length?Math.round(convertedJ.length/myJobs.length*100):0};
+    }).sort(function(a,b){return b.convRate-a.convRate;});
+
+    // Monthly leader = highest conversion rate (min 1 lead to qualify)
+    var leader=raStats.find(function(r){return r.total>0&&r.convRate>0;})||(raStats.find(function(r){return r.total>0;})||null);
+
+    // ── Monthly leader banner ──────────────────
+    var leaderBanner=leader?
+      '<div style="background:linear-gradient(135deg,var(--accent-d,#165F2E),var(--accent));border-radius:var(--r2);padding:20px 24px;margin-bottom:16px;display:flex;align-items:center;gap:20px;color:#fff">'+
+        '<div style="font-size:32px">🏆</div>'+
         '<div style="flex:1">'+
-          '<div style="font-weight:600;font-size:13.5px">'+htmlEsc(ra.name)+'</div>'+
-          '<div style="font-size:11.5px;color:var(--text3);margin-top:2px">'+htmlEsc(ra.email)+'</div>'+
+          '<div style="font-size:11px;font-weight:700;letter-spacing:.1em;opacity:.75;text-transform:uppercase;margin-bottom:4px">Monthly Leader</div>'+
+          '<div style="font-size:20px;font-weight:700;font-family:var(--display)">'+htmlEsc(leader.ra.name)+'</div>'+
+          '<div style="font-size:12px;opacity:.82;margin-top:2px">'+leader.convRate+'% conversion \u00b7 '+leader.month+' leads this month</div>'+
         '</div>'+
-        '<div style="text-align:center;min-width:60px">'+
-          '<div style="font-size:20px;font-weight:700;color:var(--accent)">'+raJobs.length+'</div>'+
-          '<div style="font-size:10px;color:var(--text3)">leads</div>'+
+        '<div style="text-align:right">'+
+          '<div style="font-size:36px;font-weight:700;font-family:var(--display);line-height:1">'+leader.convRate+'%</div>'+
+          '<div style="font-size:11px;opacity:.78">conversion</div>'+
         '</div>'+
-        '<div style="color:var(--text3);font-size:18px">\u203a</div>'+
+      '</div>'
+    :'';
+
+    // ── Daily target progress bars ─────────────
+    var targetBars=raStats.map(function(r){
+      var pct=r.target>0?Math.min(100,Math.round(r.today/r.target*100)):0;
+      var barColor=pct>=100?'var(--green)':pct>=60?'var(--accent)':'var(--amber)';
+      return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">'+
+        av(r.ra,'32')+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">'+
+            '<span style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(r.ra.name)+'</span>'+
+            '<span style="font-size:12px;color:var(--text3);flex-shrink:0;margin-left:8px">'+r.today+(r.target>0?' / '+r.target:' today')+'</span>'+
+          '</div>'+
+          '<div style="background:var(--border);border-radius:99px;height:6px;overflow:hidden">'+
+            '<div style="width:'+pct+'%;background:'+barColor+';height:100%;border-radius:99px;transition:width .3s"></div>'+
+          '</div>'+
+        '</div>'+
+        '<button onclick="openSetTarget(\''+r.ra.id+'\',\''+htmlEsc(r.ra.name)+'\','+r.target+')" style="font-size:11px;padding:3px 9px;background:var(--bg);border:1px solid var(--border2);border-radius:6px;color:var(--text3);cursor:pointer;flex-shrink:0">'+
+          (r.target>0?'Edit target':'Set target')+
+        '</button>'+
       '</div>';
     }).join('');
+
+    // ── Leaderboard table ──────────────────────
+    var lbRows=raStats.map(function(r,i){
+      var pocBadge=r.pocScore!==null?
+        '<span style="font-size:11px;padding:1px 7px;border-radius:6px;font-weight:600;background:'+(r.pocScore>=80?'var(--green-l)':r.pocScore>=60?'var(--amber-l)':'var(--red-l)')+';color:'+(r.pocScore>=80?'var(--green)':r.pocScore>=60?'var(--amber)':'var(--red)')+'">'+r.pocScore+'%</span>':
+        '<span style="font-size:11px;color:var(--text3)">—</span>';
+      return '<tr onclick="loadRAInsights(\''+r.ra.id+'\')" style="cursor:pointer;transition:background .1s" onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'\'">'+
+        '<td style="padding:10px 14px;font-weight:500;font-size:13px">'+
+          '<div style="display:flex;align-items:center;gap:9px">'+
+            '<span style="font-size:11px;font-weight:700;color:var(--text3);min-width:16px">'+(i+1)+'</span>'+
+            av(r.ra,'28')+
+            '<span>'+htmlEsc(r.ra.name)+'</span>'+
+          '</div>'+
+        '</td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px;font-weight:600;color:var(--accent)">'+r.today+'</td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px">'+r.week+'</td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px;font-weight:600">'+r.month+'</td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px;color:var(--teal)">'+r.assignRate+'%</td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px;color:var(--green);font-weight:600">'+r.convRate+'%</td>'+
+        '<td style="padding:10px 8px;text-align:center">'+pocBadge+'</td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px;color:'+(r.dups>0?'var(--amber)':'var(--text3)')+'">'+r.dups+'</td>'+
+      '</tr>';
+    }).join('');
+
+    // ── 7-day trend chart ──────────────────────
+    var days7=[];for(var di=6;di>=0;di--)days7.push(daysAgoIST(di));
+    var day7max=1;
+    var day7vals=days7.map(function(d){
+      var cnt=allJobs.filter(function(j){return raUsers.some(function(r){return r.id===j.created_by;})&&jDate(j)===d;}).length;
+      if(cnt>day7max)day7max=cnt;
+      return{date:d,cnt:cnt};
+    });
+    var barChart7=day7vals.map(function(dv){
+      var pct=Math.round(dv.cnt/day7max*100);
+      var isToday=dv.date===todayStr;
+      var dayLabel=new Date(dv.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short'});
+      return '<div style="display:flex;flex-direction:column;align-items:center;gap:3px;flex:1">'+
+        '<div style="font-size:11px;font-weight:600;color:var(--accent)">'+dv.cnt+'</div>'+
+        '<div style="width:100%;background:var(--border);border-radius:4px;height:48px;display:flex;align-items:flex-end">'+
+          '<div style="width:100%;background:'+(isToday?'var(--green)':'var(--accent)')+';border-radius:4px;height:'+Math.max(pct,dv.cnt?4:0)+'%;opacity:'+(isToday?'1':'.65')+'"></div>'+
+        '</div>'+
+        '<div style="font-size:10px;color:var(--text3)'+(isToday?';font-weight:700;color:var(--green)':'')+'">'+dayLabel+'</div>'+
+      '</div>';
+    }).join('');
+
+    // ── 8-week trend chart ─────────────────────
+    var week8max=1;
+    var week8vals=[];
+    for(var wi=7;wi>=0;wi--){
+      var wEnd=daysAgoIST(wi*7);
+      var wStart=daysAgoIST((wi+1)*7-1);
+      var cnt=allJobs.filter(function(j){var d=jDate(j);return raUsers.some(function(r){return r.id===j.created_by;})&&d>=wStart&&d<=wEnd;}).length;
+      if(cnt>week8max)week8max=cnt;
+      week8vals.push({label:'W'+(8-wi),cnt:cnt});
+    }
+    var barChart8=week8vals.map(function(wv){
+      var pct=Math.round(wv.cnt/week8max*100);
+      return '<div style="display:flex;flex-direction:column;align-items:center;gap:3px;flex:1">'+
+        '<div style="font-size:10px;font-weight:600;color:var(--teal)">'+wv.cnt+'</div>'+
+        '<div style="width:100%;background:var(--border);border-radius:4px;height:48px;display:flex;align-items:flex-end">'+
+          '<div style="width:100%;background:var(--teal);border-radius:4px;height:'+Math.max(pct,wv.cnt?4:0)+'%;opacity:.7"></div>'+
+        '</div>'+
+        '<div style="font-size:10px;color:var(--text3)">'+wv.label+'</div>'+
+      '</div>';
+    }).join('');
+
+    var totalToday=raStats.reduce(function(s,r){return s+r.today;},0);
+    var totalMonth=raStats.reduce(function(s,r){return s+r.month;},0);
+
     return '<div class="page">'+
-      '<div class="ph"><div class="ptitle">Insights</div><div class="psub">Team activity \u00b7 '+ras.length+' RAs</div></div>'+
-      (raCards||'<div style="padding:40px;text-align:center;color:var(--text3)">No RAs in the system yet.</div>')+
+      '<div class="ph"><div class="flex jb aic">'+
+        '<div><div class="ptitle">Team Insights</div><div class="psub">'+raUsers.length+' Research Analysts \u00b7 '+totalToday+' leads today \u00b7 '+totalMonth+' this month</div></div>'+
+      '</div></div>'+
+
+      leaderBanner+
+
+      // Target progress
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:16px 18px;margin-bottom:14px">'+
+        '<div style="font-weight:700;font-size:13px;margin-bottom:12px">Daily targets</div>'+
+        (raStats.length?targetBars:'<div style="font-size:13px;color:var(--text3);padding:8px 0">No RAs yet.</div>')+
+      '</div>'+
+
+      // Leaderboard
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;margin-bottom:14px">'+
+        '<div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;font-size:13px">Performance leaderboard</div>'+
+        '<div class="tbl-wrap">'+
+          '<table style="width:100%;border-collapse:collapse">'+
+            '<thead><tr style="background:var(--bg)">'+
+              '<th style="padding:9px 14px;text-align:left;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">RA</th>'+
+              '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Today</th>'+
+              '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Week</th>'+
+              '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Month</th>'+
+              '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Assign %</th>'+
+              '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Conv %</th>'+
+              '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">POC Rel.</th>'+
+              '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Dups</th>'+
+            '</tr></thead>'+
+            '<tbody>'+(lbRows||'<tr><td colspan="8" style="padding:24px;text-align:center;color:var(--text3);font-size:13px">No data yet.</td></tr>')+'</tbody>'+
+          '</table>'+
+        '</div>'+
+      '</div>'+
+
+      // Trend charts
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'+
+        '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:16px">'+
+          '<div style="font-weight:600;font-size:13px;margin-bottom:12px">Last 7 days <span style="font-size:11px;color:var(--green);margin-left:6px">\u25cf Today</span></div>'+
+          '<div style="display:flex;gap:5px;align-items:flex-end">'+barChart7+'</div>'+
+        '</div>'+
+        '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:16px">'+
+          '<div style="font-weight:600;font-size:13px;margin-bottom:12px">Last 8 weeks</div>'+
+          '<div style="display:flex;gap:5px;align-items:flex-end">'+barChart8+'</div>'+
+        '</div>'+
+      '</div>'+
+
     '</div>';
   }
 
-  // Show individual RA insights
+  // ══════════════════════════════════════════════
+  // INDIVIDUAL RA DRILL-DOWN
+  // ══════════════════════════════════════════════
   var raUser=isRALead?STATE.users.find(function(x){return x.id===selectedRA;}):u;
   var d=data||{total_month:0,total_week:0,total_today:0,duplicates:0,last_7_days:{},by_industry:{},by_timezone:{},by_freshness:{},by_stage:{}};
 
@@ -4682,7 +4750,7 @@ function renderInsights(){
   var barChart=l7keys.map(function(k){
     var val=l7[k];
     var pct=Math.round(val/l7max*100);
-    var day=new Date(k).toLocaleDateString('en-US',{weekday:'short'});
+    var day=new Date(k+'T12:00:00').toLocaleDateString('en-US',{weekday:'short'});
     return '<div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1">'+
       '<div style="font-size:11px;font-weight:600;color:var(--accent)">'+val+'</div>'+
       '<div style="width:100%;background:var(--border);border-radius:4px;height:48px;display:flex;align-items:flex-end">'+
@@ -4716,7 +4784,6 @@ function renderInsights(){
         '<div class="psub" style="margin:0">Last 30 days activity</div></div>'+
     '</div></div>'+
 
-    // ── Top stats ──
     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:18px">'+
       [['Today',d.total_today,'var(--accent)'],['This Week',d.total_week,'var(--teal)'],['This Month',d.total_month,'var(--purple)'],['Duplicates',d.duplicates,'var(--amber)']].map(function(s){
         return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;text-align:center">'+
@@ -4726,29 +4793,23 @@ function renderInsights(){
       }).join('')+
     '</div>'+
 
-    // ── Last 7 days bar chart ──
     '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:16px;margin-bottom:14px">'+
       '<div style="font-weight:600;font-size:13px;margin-bottom:12px">Last 7 days</div>'+
       '<div style="display:flex;gap:6px;align-items:flex-end">'+barChart+'</div>'+
     '</div>'+
 
-    // ── Category breakdowns ──
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+
       '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px">'+
-        '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Industry</div>'+
-        categoryRows(d.by_industry,true)+
+        '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Industry</div>'+categoryRows(d.by_industry,true)+
       '</div>'+
       '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px">'+
-        '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Timezone</div>'+
-        categoryRows(d.by_timezone)+
+        '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Timezone</div>'+categoryRows(d.by_timezone)+
       '</div>'+
       '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px">'+
-        '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Freshness</div>'+
-        categoryRows(d.by_freshness)+
+        '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Freshness</div>'+categoryRows(d.by_freshness)+
       '</div>'+
       '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px">'+
-        '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Stage</div>'+
-        categoryRows(d.by_stage)+
+        '<div style="font-weight:600;font-size:13px;margin-bottom:10px">By Stage</div>'+categoryRows(d.by_stage)+
       '</div>'+
     '</div>'+
   '</div>';
@@ -4761,6 +4822,36 @@ window.loadRAInsights=function(raId){
   apiGet('/insights/ra/'+raId).then(function(d){
     STATE.insightsData=d;render();
   }).catch(function(e){showToast('Could not load insights: '+e.message,'error');});
+};
+
+window.openSetTarget=function(raId,raName,current){
+  STATE.modal='<div class="modal modal-w400">'+
+    '<div class="mh"><div class="mt">Set daily target \u2014 '+htmlEsc(raName)+'</div>'+
+    '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      '<div style="font-size:13px;color:var(--text2);margin-bottom:14px">Daily target is shown as a progress bar on the Insights page. It\'s only visible to the RA Lead and Admin.</div>'+
+      '<div class="fgrp"><label class="flbl">Leads per day</label>'+
+        '<input class="inp" type="number" id="target-input" value="'+(current||'')+'" min="0" max="999" placeholder="e.g. 30" style="width:140px"/>'+
+      '</div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" onclick="saveRATarget(\''+raId+'\')">Save target</button>'+
+    '</div>'+
+  '</div>';
+  render();
+};
+
+window.saveRATarget=function(raId){
+  var val=parseInt((document.getElementById('target-input')||{}).value||'0');
+  if(isNaN(val)||val<0){showToast('Enter a valid number','warning');return;}
+  apiPost('/app-settings',{key:'ra_daily_target_'+raId,value:String(val)}).then(function(){
+    STATE.appSettings=STATE.appSettings||{};
+    STATE.appSettings['ra_daily_target_'+raId]=String(val);
+    closeModal();
+    showToast('Target saved','success');
+    render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
 // Auto-load insights for RA on page visit
@@ -5829,8 +5920,6 @@ function loadAppData(){
     STATE.loading=false;render();
     // Auto-start progress poll for BD/BD_Lead so bar appears without any button click
     if(STATE.user&&userHasAnyRole(STATE.user,'bd','bd_lead','admin')){startProgressPoll();}
-    // Load RAG status for admin
-    if(STATE.user&&userHasRole(STATE.user,'admin')){loadRAGStatus();}
   }).catch(function(err){
     STATE.loading=false;STATE.user=null;STATE.token=null;
     sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');
