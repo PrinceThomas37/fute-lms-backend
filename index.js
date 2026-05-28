@@ -10,6 +10,66 @@ const PORT = process.env.PORT || 3000;
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
+// ══════════════════════════════════════════════════════════════
+// RAG — VECTOR EMBEDDING HELPERS
+// Requires OPENAI_API_KEY env var. Gracefully no-ops if not set.
+// ══════════════════════════════════════════════════════════════
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || null;
+const RAG_ENABLED = () => !!(OPENAI_API_KEY);
+const EMBED_MODEL = 'text-embedding-3-small';
+const EMBED_DIMS  = 1536;
+
+async function getEmbedding(text) {
+  if (!RAG_ENABLED()) return null;
+  const resp = await fetch('https://api.openai.com/v1/embeddings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+    body: JSON.stringify({ model: EMBED_MODEL, input: String(text).slice(0, 8000) })
+  });
+  const data = await resp.json();
+  if (data.error) throw new Error('OpenAI embed: ' + data.error.message);
+  return data.data[0].embedding;
+}
+
+function buildCompanyText(co) {
+  return [co.name, co.industry ? `Industry: ${co.industry}` : '', co.location ? `Location: ${co.location}` : '', co.website ? `Website: ${co.website}` : '', co.notes || ''].filter(Boolean).join('. ');
+}
+
+async function embedCompanyAsync(companyId) {
+  if (!RAG_ENABLED()) return;
+  try {
+    const { data: co } = await supabase.from('companies').select('id,name,industry,location,website,notes').eq('id', companyId).single();
+    if (!co) return;
+    const embedding = await getEmbedding(buildCompanyText(co));
+    if (!embedding) return;
+    await supabase.from('companies').update({ embedding: JSON.stringify(embedding), embedded_at: new Date() }).eq('id', companyId);
+    console.log(`[RAG] Embedded: ${co.name}`);
+  } catch (e) { console.error('[RAG] Embed error:', e.message); }
+}
+
+async function matchSimilarCompanies(queryEmbedding, excludeId, limit = 5) {
+  if (!queryEmbedding) return [];
+  try {
+    const { data, error } = await supabase.rpc('match_companies', { query_embedding: JSON.stringify(queryEmbedding), match_count: limit + 1 });
+    if (error) throw error;
+    return (data || []).filter(r => r.id !== excludeId).slice(0, limit);
+  } catch (e) { console.error('[RAG] Match error:', e.message); return []; }
+}
+
+// Build RAG context string for email prompt — fetches similar companies for a given company_id
+async function buildRagContext(companyId) {
+  if (!RAG_ENABLED() || !companyId) return '';
+  try {
+    const { data: co } = await supabase.from('companies').select('id,embedding').eq('id', companyId).single();
+    if (!co?.embedding) return '';
+    const emb = typeof co.embedding === 'string' ? JSON.parse(co.embedding) : co.embedding;
+    const similar = await matchSimilarCompanies(emb, companyId, 5);
+    if (!similar.length) return '';
+    return '\n\nContext — similar companies Fute Global has previously worked with (use this to inform tone and approach):\n' +
+      similar.map(s => `- ${s.name} (${s.industry || 'Unknown industry'}, ${s.location || ''})${s.rag_outcome ? ': ' + s.rag_outcome : ''}`).join('\n');
+  } catch (e) { console.error('[RAG] Context error:', e.message); return ''; }
+}
+
 // ── MIDDLEWARE ─────────────────────────────────────────────────
 app.use(cors({ origin: '*', methods: ['GET','POST','PUT','PATCH','DELETE'], allowedHeaders: ['Content-Type','Authorization'] }));
 app.use(express.json({ limit: '5mb' }));
@@ -368,6 +428,7 @@ app.post('/companies/bulk', auth, async (req, res) => {
     const rows = companies.map(c => ({ name: c.name, website: c.website || null, industry: c.industry || null, location: c.location || null, created_by: req.user.id }));
     const { data, error } = await supabase.from('companies').insert(rows).select('id,name');
     if (error) throw error;
+    if (RAG_ENABLED()) setImmediate(async () => { for (const c of (data || [])) await embedCompanyAsync(c.id); });
     res.status(201).json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -378,6 +439,7 @@ app.post('/companies', auth, async (req, res) => {
     if (!name) return res.status(400).json({ error: 'Company name required' });
     const { data, error } = await supabase.from('companies').insert({ name, website, industry, location, size, notes, created_by: req.user.id }).select().single();
     if (error) throw error;
+    setImmediate(() => embedCompanyAsync(data.id));
     res.status(201).json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -776,11 +838,12 @@ async function generateEmailsForJobs(job_ids, callerUserId) {
         if (savedSubj && savedBody) {
           subject = fillTmpl(savedSubj, vars); body = fillTmpl(savedBody, vars);
         } else if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== 'your_anthropic_api_key_here') {
+          const ragContext = await buildRagContext(job.company?.id);
           const prompt = `Write a hyper-personalized cold outreach email from ${senderDisplayName} at Fute Global LLC (a staffing/recruitment firm) to ${contact.first_name} ${contact.last_name || ''}, ${contact.designation || 'Hiring Manager'} at ${job.company?.name || ''} (${job.company?.industry || ''}, ${job.company?.location || ''}).
 
 They are hiring for: ${job.position}
 
-Instructions: 3 short paragraphs, warm but professional tone, no fluff, end with a clear call to action.
+Instructions: 3 short paragraphs, warm but professional tone, no fluff, end with a clear call to action.${ragContext}
 
 Format strictly as:
 Subject: [subject line]
@@ -887,8 +950,9 @@ app.post('/emails/generate', auth, async (req, res) => {
             subject = fillTmpl(savedSubj, vars);
             body = fillTmpl(savedBody, vars);
           } else if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== 'your_anthropic_api_key_here') {
-            // No saved template — use AI to generate
-            const prompt = `Write a hyper-personalized cold outreach email from ${senderDisplayName} at Fute Global LLC (a staffing/recruitment firm) to ${contact.first_name} ${contact.last_name || ''}, ${contact.designation || 'Hiring Manager'} at ${job.company?.name || ''} (${job.company?.industry || ''}, ${job.company?.location || ''}).\n\nThey are hiring for: ${job.position}\n\nInstructions: 3 short paragraphs, warm but professional tone, no fluff, end with a clear call to action.\n\nFormat strictly as:\nSubject: [subject line]\n\n[email body]`;
+            // No saved template — use AI to generate with RAG context
+            const ragContext = await buildRagContext(job.company?.id);
+            const prompt = `Write a hyper-personalized cold outreach email from ${senderDisplayName} at Fute Global LLC (a staffing/recruitment firm) to ${contact.first_name} ${contact.last_name || ''}, ${contact.designation || 'Hiring Manager'} at ${job.company?.name || ''} (${job.company?.industry || ''}, ${job.company?.location || ''}).\n\nThey are hiring for: ${job.position}\n\nInstructions: 3 short paragraphs, warm but professional tone, no fluff, end with a clear call to action.${ragContext}\n\nFormat strictly as:\nSubject: [subject line]\n\n[email body]`;
             const aiResp = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 500, messages: [{ role: 'user', content: prompt }] }) });
             const aiData = await aiResp.json();
             const text = aiData.content?.[0]?.text || '';
@@ -1904,6 +1968,84 @@ setInterval(async () => {
     }
   } catch (e) { console.error('[Cron] Error:', e.message); }
 }, 60000);
+
+// ══════════════════════════════════════════════════════════════
+// RAG — EMBEDDING STATUS & BACKFILL ROUTES
+// ══════════════════════════════════════════════════════════════
+
+app.get('/rag/setup-sql', auth, async (req, res) => {
+  if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
+  const sql = `-- ════════════════════════════════════════════════
+-- Fute Global LMS — RAG Setup SQL
+-- Run these in your Supabase SQL editor (in order, once)
+-- ════════════════════════════════════════════════
+
+-- Step 1: Enable pgvector
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- Step 2: Add columns to companies table
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS embedding vector(1536);
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS rag_outcome text;
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS embedded_at timestamptz;
+
+-- Step 3: Create match_companies RPC function
+CREATE OR REPLACE FUNCTION match_companies(
+  query_embedding vector(1536),
+  match_count int DEFAULT 5
+)
+RETURNS TABLE (
+  id uuid, name text, industry text, location text, rag_outcome text, similarity float
+)
+LANGUAGE plpgsql AS $$
+BEGIN
+  RETURN QUERY
+  SELECT c.id, c.name, c.industry, c.location, c.rag_outcome,
+    (1 - (c.embedding <=> query_embedding))::float AS similarity
+  FROM companies c
+  WHERE c.embedding IS NOT NULL AND c.deleted_at IS NULL
+  ORDER BY c.embedding <=> query_embedding
+  LIMIT match_count;
+END; $$;
+
+-- Step 4: (Run AFTER backfill — optional, for large datasets >10k companies)
+-- CREATE INDEX ON companies USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);`;
+  res.json({ sql });
+});
+
+app.get('/rag/status', auth, async (req, res) => {
+  if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
+  try {
+    const { count: total } = await supabase.from('companies').select('id', { count: 'exact', head: true }).is('deleted_at', null);
+    const { count: embedded } = await supabase.from('companies').select('id', { count: 'exact', head: true }).not('embedded_at', 'is', null).is('deleted_at', null);
+    res.json({ enabled: RAG_ENABLED(), total: total || 0, embedded: embedded || 0, pending: (total || 0) - (embedded || 0), model: EMBED_MODEL, dims: EMBED_DIMS });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/rag/backfill', auth, async (req, res) => {
+  if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
+  if (!RAG_ENABLED()) return res.status(400).json({ error: 'OPENAI_API_KEY not set. Add it to your Render environment variables.' });
+  try {
+    const { data: companies } = await supabase.from('companies').select('id,name,industry,location,website,notes').is('deleted_at', null).is('embedded_at', null).limit(100);
+    if (!companies?.length) return res.json({ processed: 0, failed: 0, remaining: 0, message: 'All companies already embedded.' });
+    let processed = 0, failed = 0;
+    for (const co of companies) {
+      try { await embedCompanyAsync(co.id); processed++; await new Promise(r => setTimeout(r, 65)); }
+      catch (e) { failed++; console.error('[RAG] Backfill failed:', co.name, e.message); }
+    }
+    const { count: remaining } = await supabase.from('companies').select('id', { count: 'exact', head: true }).is('deleted_at', null).is('embedded_at', null);
+    res.json({ processed, failed, remaining: remaining || 0 });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/companies/:id/rag-outcome', auth, async (req, res) => {
+  if (!hasRole(req, 'admin', 'ra_lead', 'bd_lead')) return res.status(403).json({ error: 'Admin/Lead only' });
+  try {
+    const { rag_outcome } = req.body;
+    const { data, error } = await supabase.from('companies').update({ rag_outcome, updated_at: new Date() }).eq('id', req.params.id).select('id,rag_outcome').single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // ══════════════════════════════════════════════════════════════
 // MICROSOFT OAUTH
