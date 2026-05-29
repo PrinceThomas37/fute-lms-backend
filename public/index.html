@@ -2486,7 +2486,7 @@ window.doLogin=function(){
   if(u){STATE.user=u;STATE.page="dashboard";render();}
   else{var e=document.getElementById("login-err");if(e){e.textContent="No account found. Use a @futeglobal.com email.";e.style.display="block";}}
 }
-window.signOut=function(){STATE.user=null;STATE.page="dashboard";STATE.modal=null;render();}
+window.signOut=function(){stopBackgroundPoll();stopProgressPoll();STATE.user=null;STATE.token=null;sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');STATE.page='login';STATE.modal=null;render();}
 window.goPage=function(p){STATE.page=p;STATE.detailLead=null;STATE.modal=null;if(p!=="dashboard")STATE.viewingUser=null;if(p!=='bdleadinsights')STATE.bdLeadSelectedBD=null;if(p!=='bdinsights')STATE.bdInsightsData=null;if(p==='email')loadEmailsForCurrentUser();render();}
 window.setPeriod=function(p){STATE.period=p;render();}
 window.setSearch=function(v){STATE.leadsFilter.search=v;STATE.leadsPage=0;render();}
@@ -6077,6 +6077,8 @@ function loadAppData(){
     STATE.loading=false;render();
     // Auto-start progress poll for BD/BD_Lead so bar appears without any button click
     if(STATE.user&&userHasAnyRole(STATE.user,'bd','bd_lead','admin')){startProgressPoll();}
+    // Start background polling to keep UI in sync (every 30s)
+    startBackgroundPoll();
   }).catch(function(err){
     STATE.loading=false;STATE.user=null;STATE.token=null;
     sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');
@@ -6084,6 +6086,35 @@ function loadAppData(){
   });
 }
 function refreshJobs(){return apiGet('/jobs').then(function(j){STATE.jobs=j.map(normaliseJob);STATE.contacts=flattenContacts(j);render();});}
+
+// ── Background polling — keeps UI in sync ──────
+var _bgPollTimer=null;
+function startBackgroundPoll(){
+  if(_bgPollTimer)return;
+  _bgPollTimer=setInterval(function(){
+    if(!STATE.user||!STATE.token)return;
+    var pg=STATE.page;
+    // Always refresh jobs (stage changes, new leads, assignments)
+    apiGet('/jobs').then(function(j){
+      STATE.jobs=j.map(normaliseJob);
+      STATE.contacts=flattenContacts(j);
+      render();
+    }).catch(function(){});
+    // Refresh emails when on email page
+    if(pg==='email'){loadEmailsForCurrentUser();}
+    // Refresh pool stats when on assign page
+    if(pg==='assign'&&STATE.user&&userHasAnyRole(STATE.user,'ra_lead','admin')){
+      apiGet('/distribute/pool-stats').then(function(d){STATE.distributePoolStats=d;render();}).catch(function(){});
+    }
+    // Refresh reminders when on reminders or dashboard page
+    if(pg==='reminders'||pg==='dashboard'){
+      apiGet('/reminders').then(function(d){STATE.reminders=d||[];render();}).catch(function(){});
+    }
+  },30000);
+}
+function stopBackgroundPoll(){
+  if(_bgPollTimer){clearInterval(_bgPollTimer);_bgPollTimer=null;}
+}
 
 // ── Auth ───────────────────────────────────────
 window.guestSwitchRole=function(role){
