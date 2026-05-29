@@ -4555,29 +4555,80 @@ function renderInsights(){
   var selectedRA=STATE.insightsSelectedRA;
   var data=STATE.insightsData;
 
-  // If RA Lead and no RA selected, show RA list
+  // If RA Lead and no RA selected, show RA team overview (mirrors BD Lead layout)
   if(isRALead&&!selectedRA){
     var ras=STATE.users.filter(function(x){return x.role==='ra';});
-    var raCards=ras.map(function(ra){
-      // Quick stats from STATE.jobs (last 30 days approx)
+    var now=new Date();
+    var todayStr=todayIST();
+    function raDaysAgo(n){var d=new Date(now.getTime()+5.5*3600000);d.setDate(d.getDate()-n);return d.toISOString().slice(0,10);}
+    var weekAgo=raDaysAgo(7),monthAgo=raDaysAgo(30);
+
+    var raStats=ras.map(function(ra){
       var raJobs=STATE.jobs.filter(function(j){return j.created_by===ra.id;});
-      return '<div onclick="loadRAInsights(\''+ra.id+'\')" style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px 16px;display:flex;align-items:center;gap:14px;margin-bottom:10px;cursor:pointer;transition:background .1s">'+
-        av(ra,'36')+
-        '<div style="flex:1">'+
-          '<div style="font-weight:600;font-size:13.5px">'+htmlEsc(ra.name)+'</div>'+
-          '<div style="font-size:11.5px;color:var(--text3);margin-top:2px">'+htmlEsc(ra.email)+'</div>'+
-        '</div>'+
-        '<div style="text-align:center;min-width:60px">'+
-          '<div style="font-size:20px;font-weight:700;color:var(--accent)">'+raJobs.length+'</div>'+
-          '<div style="font-size:10px;color:var(--text3)">leads</div>'+
-        '</div>'+
-        '<div style="color:var(--text3);font-size:18px">\u203a</div>'+
-      '</div>';
+      var todayJ=raJobs.filter(function(j){return j.created_date===todayStr;});
+      var weekJ=raJobs.filter(function(j){return j.created_date>=weekAgo;});
+      var monthJ=raJobs.filter(function(j){return j.created_date>=monthAgo;});
+      var dups=raJobs.filter(function(j){return j.is_duplicate;}).length;
+      var assigned=raJobs.filter(function(j){return j.stage!=='Unassigned';}).length;
+      var conv=raJobs.filter(function(j){return j.stage==='Connected'||j.stage==='In Discussion';}).length;
+      var assignPct=raJobs.length?Math.round(assigned/raJobs.length*100):0;
+      var convPct=raJobs.length?Math.round(conv/raJobs.length*100):0;
+      return{ra:ra,total:raJobs.length,today:todayJ.length,week:weekJ.length,month:monthJ.length,dups:dups,assigned:assigned,assignPct:assignPct,conv:conv,convPct:convPct};
+    }).sort(function(a,b){return b.month-a.month;});
+
+    var leader=raStats.find(function(r){return r.month>0;})||null;
+    var leaderBanner=leader?
+      '<div style="background:linear-gradient(135deg,#1a3a6e,#2563eb);border-radius:var(--r2);padding:20px 24px;margin-bottom:16px;display:flex;align-items:center;gap:20px;color:#fff">'+
+        '<div style="font-size:32px">\uD83C\uDFC6</div><div style="flex:1">'+
+          '<div style="font-size:11px;font-weight:700;letter-spacing:.1em;opacity:.75;text-transform:uppercase;margin-bottom:4px">Top Performer this month</div>'+
+          '<div style="font-size:20px;font-weight:700;font-family:var(--display)">'+htmlEsc(leader.ra.name)+'</div>'+
+          '<div style="font-size:12px;opacity:.82;margin-top:2px">'+leader.month+' leads this month \u00b7 '+leader.assignPct+'% assigned</div></div>'+
+        '<div style="text-align:right"><div style="font-size:36px;font-weight:700;font-family:var(--display);line-height:1">'+leader.month+'</div><div style="font-size:11px;opacity:.78">leads</div></div>'+
+      '</div>':'';
+
+    var teamTotal=raStats.reduce(function(s,r){return s+r.total;},0);
+    var teamMonth=raStats.reduce(function(s,r){return s+r.month;},0);
+    var teamAssigned=raStats.reduce(function(s,r){return s+r.assigned;},0);
+    var teamAssignPct=teamTotal?Math.round(teamAssigned/teamTotal*100):0;
+    var teamDups=raStats.reduce(function(s,r){return s+r.dups;},0);
+
+    var lbRows=raStats.map(function(r,i){
+      return '<tr onclick="loadRAInsights(\''+r.ra.id+'\')" style="cursor:pointer" onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'\'">'+
+        '<td style="padding:10px 14px;font-weight:500;font-size:13px"><div style="display:flex;align-items:center;gap:9px"><span style="font-size:11px;font-weight:700;color:var(--text3);min-width:16px">'+(i+1)+'</span>'+av(r.ra,'28')+'<span>'+htmlEsc(r.ra.name)+'</span></div></td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px;font-weight:600;color:var(--accent)">'+r.today+'</td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px">'+r.week+'</td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px;font-weight:600">'+r.month+'</td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px;color:var(--amber)">'+r.dups+'</td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px;color:var(--teal)">'+r.assignPct+'%</td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px;font-weight:600;color:var(--green)">'+r.convPct+'%</td>'+
+      '</tr>';
     }).join('');
+
     return '<div class="page">'+
-      '<div class="ph"><div class="ptitle">Insights</div><div class="psub">Team activity \u00b7 '+ras.length+' RAs</div></div>'+
-      (raCards||'<div style="padding:40px;text-align:center;color:var(--text3)">No RAs in the system yet.</div>')+
-    '</div>';
+      '<div class="ph"><div class="flex jb aic">'+
+        '<div><div class="ptitle">Insights</div><div class="psub">'+ras.length+' Research Analyst'+(ras.length!==1?'s':'')+' \u00b7 '+teamTotal+' leads \u00b7 '+teamAssignPct+'% assigned</div></div>'+
+      '</div></div>'+
+      leaderBanner+
+      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">'+
+        '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;text-align:center"><div style="font-size:28px;font-weight:700;color:var(--accent)">'+teamTotal+'</div><div style="font-size:12px;color:var(--text3);margin-top:3px">Total leads</div></div>'+
+        '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;text-align:center"><div style="font-size:28px;font-weight:700;color:var(--teal)">'+teamMonth+'</div><div style="font-size:12px;color:var(--text3);margin-top:3px">This month</div></div>'+
+        '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;text-align:center"><div style="font-size:28px;font-weight:700;color:var(--green)">'+teamAssignPct+'%</div><div style="font-size:12px;color:var(--text3);margin-top:3px">Assign rate</div></div>'+
+        '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;text-align:center"><div style="font-size:28px;font-weight:700;color:var(--amber)">'+teamDups+'</div><div style="font-size:12px;color:var(--text3);margin-top:3px">Duplicates</div></div>'+
+      '</div>'+
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;margin-bottom:14px">'+
+        '<div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;font-size:13px">RA performance <span style="font-size:11px;font-weight:400;color:var(--text3)">click a row for detail</span></div>'+
+        (ras.length?
+          '<div class="tbl-wrap"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--bg)">'+
+            '<th style="padding:9px 14px;text-align:left;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Research Analyst</th>'+
+            '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Today</th>'+
+            '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Week</th>'+
+            '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Month</th>'+
+            '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Dups</th>'+
+            '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Assign %</th>'+
+            '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Conv %</th>'+
+          '</tr></thead><tbody>'+lbRows+'</tbody></table></div>':
+          '<div style="padding:40px;text-align:center;color:var(--text3);font-size:13px">No Research Analysts in the system yet.</div>')+
+      '</div></div>';
   }
 
   // Show individual RA insights
