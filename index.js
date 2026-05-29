@@ -2118,7 +2118,37 @@ async function runFollowupEngine() {
 }
 
 function toIST(date) { const utc = date.getTime() + date.getTimezoneOffset() * 60000; return new Date(utc + 5.5 * 3600000); }
-const cronState = { lastOutreachRun: null, lastFollowupRun: null };
+
+async function getLastFollowupRun() {
+  try {
+    const { data } = await supabase.from('app_settings').select('value').eq('key', 'last_followup_run').single();
+    return data?.value || null;
+  } catch { return null; }
+}
+async function setLastFollowupRun(dateStr) {
+  try {
+    await supabase.from('app_settings').upsert({ key: 'last_followup_run', value: dateStr }, { onConflict: 'key' });
+  } catch (e) { console.error('[Cron] Failed to persist last_followup_run:', e.message); }
+}
+
+// Run follow-ups on startup if not already run today
+(async () => {
+  try {
+    const now = toIST(new Date());
+    const todayStr = now.toISOString().split('T')[0];
+    const lastRun = await getLastFollowupRun();
+    if (lastRun !== todayStr) {
+      console.log(`[Startup] Follow-ups not yet run today (last: ${lastRun || 'never'}). Running now...`);
+      await setLastFollowupRun(todayStr);
+      const result = await runFollowupEngine();
+      console.log(`[Startup] Follow-up engine result: FU1=${result.fu1_queued}, FU2=${result.fu2_queued}`);
+    } else {
+      console.log(`[Startup] Follow-ups already ran today (${lastRun}). Skipping.`);
+    }
+  } catch (e) { console.error('[Startup] Follow-up check error:', e.message); }
+})();
+
+// Interval cron as backup — persisted to DB instead of in-memory
 setInterval(async () => {
   try {
     const now = toIST(new Date());
@@ -2127,8 +2157,9 @@ setInterval(async () => {
     const { data: settingsRows } = await supabase.from('app_settings').select('key,value');
     const settings = {};
     (settingsRows || []).forEach(r => { settings[r.key] = r.value; });
-    if (hhmm === (settings['followup_send_time'] || '08:30') && cronState.lastFollowupRun !== dateStr) {
-      cronState.lastFollowupRun = dateStr;
+    const lastRun = settings['last_followup_run'];
+    if (hhmm === (settings['followup_send_time'] || '08:30') && lastRun !== dateStr) {
+      await setLastFollowupRun(dateStr);
       console.log(`[Cron] Follow-up engine triggered at ${hhmm} IST`);
       await runFollowupEngine();
     }
