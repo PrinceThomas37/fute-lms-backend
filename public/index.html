@@ -2605,15 +2605,21 @@ window.setEmailTab=function(t){STATE.emailTab=t;STATE.raLeadSelectedBD=null;STAT
 // Polls every 2s when sending is active, every 10s when idle.
 function startProgressPoll(){
   if(STATE._progressPollTimer)return;
+  var _emailRefreshCount=0;
   function pollOnce(){
     if(!STATE.user||!STATE.token||STATE.token==='guest'){STATE._progressPollTimer=null;return;}
     apiGet('/emails/send-progress').then(function(d){
       var newProgress=(d&&(d.active||d.done))?d:null;
       var hadProgress=!!STATE.sendProgress;
       STATE.sendProgress=newProgress;
-      if(d&&d.active){render();}
+      if(d&&d.active){
+        render();
+        _emailRefreshCount++;
+        if(_emailRefreshCount%3===0)loadEmailsForCurrentUser();
+      }
       else if(!!newProgress!==hadProgress){render();}
       if(d&&d.done&&!d.active){
+        _emailRefreshCount=0;
         loadEmailsForCurrentUser();
         setTimeout(function(){STATE.sendProgress=null;render();},30000);
       }
