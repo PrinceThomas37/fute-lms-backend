@@ -746,10 +746,13 @@ function renderApp(){
   // RA Lead + Admin: Assign Leads + Insights (RA team view)
   if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
   if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(navItems.length-1,0,{id:"insights",lbl:"Insights",ic:"dashboard"});
-  // BD Lead (not admin): Insights = BD team view
-  if(userHasRole(u,'bd_lead')&&!userHasRole(u,'admin'))navItems.splice(navItems.length-1,0,{id:"bdleadinsights",lbl:"Insights",ic:"dashboard"});
+  // BD Lead (not admin): Team Insights + My Insights
+  if(userHasRole(u,'bd_lead')&&!userHasRole(u,'admin')){
+    navItems.splice(navItems.length-1,0,{id:"bdleadinsights",lbl:"Team Insights",ic:"dashboard"});
+    navItems.splice(navItems.length-1,0,{id:"bdinsights",lbl:"My Insights",ic:"dashboard"});
+  }
   // BD Manager (not bd_lead/admin): own performance Insights
-  if(userHasRole(u,'bd')&&!userHasAnyRole(u,'bd_lead','admin'))navItems.splice(navItems.length-1,0,{id:"bdinsights",lbl:"Insights",ic:"dashboard"});
+  if(userHasRole(u,'bd')&&!userHasAnyRole(u,'bd_lead','admin'))navItems.splice(navItems.length-1,0,{id:"bdinsights",lbl:"My Insights",ic:"dashboard"});
 
   var nav=navItems.map(function(n){
     var active=STATE.page===n.id?" active":"";
@@ -4555,6 +4558,90 @@ function renderInsights(){
   var selectedRA=STATE.insightsSelectedRA;
   var data=STATE.insightsData;
 
+  // Admin: show RA/BD team switcher
+  var isAdmin=userHasRole(u,'admin');
+  var insightsTeam=STATE.insightsTeam||'ra';
+
+  // Admin BD Team view
+  if(isAdmin&&insightsTeam==='bd'&&!selectedRA){
+    var allBDs=STATE.users.filter(function(x){return userHasRole(x,'bd')||userHasRole(x,'bd_lead');});
+    var allJobs=STATE.jobs;
+    function jAtBD(j){return j.assigned_at?new Date(j.assigned_at).toISOString().slice(0,10):'';}
+    var nowBD=new Date();var todayStrBD=todayIST();
+    function dAgoBD(n){var d=new Date(nowBD.getTime()+5.5*3600000);d.setDate(d.getDate()-n);return d.toISOString().slice(0,10);}
+    var weekAgoBD=dAgoBD(7),monthAgoBD=dAgoBD(30);
+
+    var bdStats=allBDs.map(function(bd){
+      var bdJobs=allJobs.filter(function(j){return j.assigned_to_bd===bd.id;});
+      var convJ=bdJobs.filter(function(j){return j.stage==='Connected'||j.stage==='In Discussion';});
+      var posJ=bdJobs.filter(function(j){return j.stage==='Positive';});
+      var sentE=(STATE.emails||[]).filter(function(e){return e.assigned_to===bd.id&&e.status==='sent';});
+      var todayJ=bdJobs.filter(function(j){return jAtBD(j)===todayStrBD;});
+      var weekJ=bdJobs.filter(function(j){return jAtBD(j)>=weekAgoBD;});
+      var monthJ=bdJobs.filter(function(j){return jAtBD(j)>=monthAgoBD;});
+      var convRate=bdJobs.length?Math.round(convJ.length/bdJobs.length*100):0;
+      return{bd:bd,total:bdJobs.length,today:todayJ.length,week:weekJ.length,month:monthJ.length,conv:convJ.length,pos:posJ.length,sent:sentE.length,convRate:convRate};
+    }).sort(function(a,b){return b.convRate-a.convRate;});
+
+    var leaderBD=bdStats.find(function(r){return r.total>0&&r.convRate>0;})||(bdStats.find(function(r){return r.total>0;})||null);
+    var leaderBannerBD=leaderBD?
+      '<div style="background:linear-gradient(135deg,#1a3a6e,#2563eb);border-radius:var(--r2);padding:20px 24px;margin-bottom:16px;display:flex;align-items:center;gap:20px;color:#fff">'+
+        '<div style="font-size:32px">\uD83C\uDFC6</div><div style="flex:1">'+
+          '<div style="font-size:11px;font-weight:700;letter-spacing:.1em;opacity:.75;text-transform:uppercase;margin-bottom:4px">Top Performer</div>'+
+          '<div style="font-size:20px;font-weight:700;font-family:var(--display)">'+htmlEsc(leaderBD.bd.name)+'</div>'+
+          '<div style="font-size:12px;opacity:.82;margin-top:2px">'+leaderBD.convRate+'% conversion \u00b7 '+leaderBD.month+' leads this month</div></div>'+
+        '<div style="text-align:right"><div style="font-size:36px;font-weight:700;font-family:var(--display);line-height:1">'+leaderBD.convRate+'%</div><div style="font-size:11px;opacity:.78">conversion</div></div>'+
+      '</div>':'';
+
+    var teamTotalBD=bdStats.reduce(function(s,r){return s+r.total;},0);
+    var teamSentBD=bdStats.reduce(function(s,r){return s+r.sent;},0);
+    var teamConvBD=bdStats.reduce(function(s,r){return s+r.conv;},0);
+    var teamConvRateBD=teamTotalBD?Math.round(teamConvBD/teamTotalBD*100):0;
+
+    var lbRowsBD=bdStats.map(function(r,i){
+      return '<tr style="cursor:default" onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'\'">'+
+        '<td style="padding:10px 14px;font-weight:500;font-size:13px"><div style="display:flex;align-items:center;gap:9px"><span style="font-size:11px;font-weight:700;color:var(--text3);min-width:16px">'+(i+1)+'</span>'+av(r.bd,'28')+'<span>'+htmlEsc(r.bd.name)+'</span></div></td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px;font-weight:600;color:var(--accent)">'+r.today+'</td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px">'+r.week+'</td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px;font-weight:600">'+r.month+'</td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px;color:var(--teal)">'+r.sent+'</td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px;color:var(--green)">'+r.pos+'</td>'+
+        '<td style="padding:10px 8px;text-align:center;font-size:13px;font-weight:600;color:var(--green)">'+r.convRate+'%</td>'+
+      '</tr>';
+    }).join('');
+
+    var switcherBD='<div style="display:inline-flex;background:var(--bg);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:16px">'+
+      '<button onclick="STATE.insightsTeam=\'ra\';STATE.insightsSelectedRA=null;render()" style="padding:8px 20px;font-size:13px;font-weight:600;border:0;cursor:pointer;background:transparent;color:var(--text3)">RA Team</button>'+
+      '<button style="padding:8px 20px;font-size:13px;font-weight:600;border:0;cursor:pointer;background:var(--accent);color:#fff;border-radius:6px">BD Team</button>'+
+    '</div>';
+
+    return '<div class="page">'+
+      '<div class="ph"><div class="flex jb aic">'+
+        '<div><div class="ptitle">Insights</div><div class="psub">'+allBDs.length+' BD Manager'+(allBDs.length!==1?'s':'')+' \u00b7 '+teamTotalBD+' leads \u00b7 '+teamSentBD+' emails sent</div></div>'+
+      '</div></div>'+
+      switcherBD+
+      leaderBannerBD+
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">'+
+        '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;text-align:center"><div style="font-size:28px;font-weight:700;color:var(--accent)">'+teamTotalBD+'</div><div style="font-size:12px;color:var(--text3);margin-top:3px">Total leads</div></div>'+
+        '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;text-align:center"><div style="font-size:28px;font-weight:700;color:var(--teal)">'+teamSentBD+'</div><div style="font-size:12px;color:var(--text3);margin-top:3px">Emails sent</div></div>'+
+        '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;text-align:center"><div style="font-size:28px;font-weight:700;color:var(--green)">'+teamConvRateBD+'%</div><div style="font-size:12px;color:var(--text3);margin-top:3px">Team conv. rate</div></div>'+
+      '</div>'+
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;margin-bottom:14px">'+
+        '<div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;font-size:13px">BD Manager performance</div>'+
+        (allBDs.length?
+          '<div class="tbl-wrap"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--bg)">'+
+            '<th style="padding:9px 14px;text-align:left;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">BD Manager</th>'+
+            '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Today</th>'+
+            '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Week</th>'+
+            '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Month</th>'+
+            '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Sent</th>'+
+            '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Positive</th>'+
+            '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Conv %</th>'+
+          '</tr></thead><tbody>'+lbRowsBD+'</tbody></table></div>':
+          '<div style="padding:40px;text-align:center;color:var(--text3);font-size:13px">No BD Managers in the system yet.</div>')+
+      '</div></div>';
+  }
+
   // If RA Lead and no RA selected, show RA team overview (mirrors BD Lead layout)
   if(isRALead&&!selectedRA){
     var ras=STATE.users.filter(function(x){return x.role==='ra';});
@@ -4604,10 +4691,16 @@ function renderInsights(){
       '</tr>';
     }).join('');
 
+    var switcherRA=isAdmin?'<div style="display:inline-flex;background:var(--bg);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:16px">'+
+      '<button style="padding:8px 20px;font-size:13px;font-weight:600;border:0;cursor:pointer;background:var(--accent);color:#fff;border-radius:6px">RA Team</button>'+
+      '<button onclick="STATE.insightsTeam=\'bd\';STATE.insightsSelectedRA=null;render()" style="padding:8px 20px;font-size:13px;font-weight:600;border:0;cursor:pointer;background:transparent;color:var(--text3)">BD Team</button>'+
+    '</div>':'';
+
     return '<div class="page">'+
       '<div class="ph"><div class="flex jb aic">'+
         '<div><div class="ptitle">Insights</div><div class="psub">'+ras.length+' Research Analyst'+(ras.length!==1?'s':'')+' \u00b7 '+teamTotal+' leads \u00b7 '+teamAssignPct+'% assigned</div></div>'+
       '</div></div>'+
+      switcherRA+
       leaderBanner+
       '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">'+
         '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;text-align:center"><div style="font-size:28px;font-weight:700;color:var(--accent)">'+teamTotal+'</div><div style="font-size:12px;color:var(--text3);margin-top:3px">Total leads</div></div>'+
