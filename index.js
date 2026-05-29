@@ -62,6 +62,59 @@ async function logActivity(job_id, contact_id, user_id, action_type, description
   } catch (e) { console.error('activity_log insert failed:', e.message); }
 }
 
+// ── INDUSTRY NORMALIZATION (shared across routes) ──────────────
+const INDUSTRIES = ["Accounting & Finance","Advertising & Public Relations","Agriculture","Airline, Aviation & Transportation","Architecture, Construction & Building Materials","Art, Photography & Journalism","Automotive & Motor Vehicles","Banking & Financial Services","Biotechnology & Pharmaceutical","Broadcasting, Media & Printing","Chemical & Industrial","Computer Hardware & Software","Consulting & Consulting Engineering","Consumer Products & Retail","Credit, Loan, Mortgage & Collections","Defense, Military & Aerospace","Education, Training & Library Science","Electronics & Semiconductor","Employment, Recruiting & Staffing","Energy, Utilities, Oil & Petroleum","Entertainment & Recreation","Environmental","Fashion, Apparel & Textile","Food & Restaurant","Funeral & Cemetery","Government & Civil Service","Healthcare & Health Services","Homebuilding & Real Estate","Hospitality, Hotel & Resort","HVAC","Import & Export","Insurance & Managed Care","Internet & ECommerce","Landscaping","Law Enforcement, Legal & Security","Manufacturing & Manufacturing Engineering","Medical Equipment","Not for Profit & Social Services","Office Supplies & Equipment","Packaging","Sales & Marketing","Securities","Social Media & Wireless Telecommunications","Travel"];
+function normInd(raw) {
+  if (!raw) return 'Unknown';
+  if (INDUSTRIES.includes(raw)) return raw;
+  const r = raw.toLowerCase();
+  if (r.includes('account')||r.includes('cpa')||r.includes('bookkeep')) return 'Accounting & Finance';
+  if (r.includes('advertis')||r.includes('public relation')) return 'Advertising & Public Relations';
+  if (r.includes('agricultur')||r.includes('farm')) return 'Agriculture';
+  if (r.includes('airline')||r.includes('aviation')||r.includes('transport')||r.includes('logistics')||r.includes('freight')) return 'Airline, Aviation & Transportation';
+  if (r.includes('architect')||r.includes('construction')||r.includes('building material')) return 'Architecture, Construction & Building Materials';
+  if (r.includes('photo')||r.includes('journalism')||r.includes('creative')) return 'Art, Photography & Journalism';
+  if (r.includes('automotive')||r.includes('motor vehicle')||r.includes('automobile')) return 'Automotive & Motor Vehicles';
+  if (r.includes('banking')||r.includes('bank ')||r.includes('financial service')) return 'Banking & Financial Services';
+  if (r.includes('biotech')||r.includes('pharma')||r.includes('life science')) return 'Biotechnology & Pharmaceutical';
+  if (r.includes('broadcast')||r.includes('media')||r.includes('print')||r.includes('publish')||r.includes('television')) return 'Broadcasting, Media & Printing';
+  if (r.includes('chemical')||r.includes('industrial')||r.includes('petrochemical')) return 'Chemical & Industrial';
+  if (r.includes('software')||r.includes('computer')||r.includes('hardware')||r.includes('technology')||r.includes(' tech')||r.includes(' it ')||r.includes('information tech')||r.includes('saas')||r.includes('cloud')) return 'Computer Hardware & Software';
+  if (r.includes('consult')||r.includes('advisory')) return 'Consulting & Consulting Engineering';
+  if (r.includes('consumer')||r.includes('retail')||r.includes('ecommerce')) return 'Consumer Products & Retail';
+  if (r.includes('credit')||r.includes('loan')||r.includes('mortgage')||r.includes('collection')) return 'Credit, Loan, Mortgage & Collections';
+  if (r.includes('defense')||r.includes('military')||r.includes('aerospace')) return 'Defense, Military & Aerospace';
+  if (r.includes('educat')||r.includes('school')||r.includes('university')||r.includes('training')||r.includes('library')) return 'Education, Training & Library Science';
+  if (r.includes('electron')||r.includes('semiconductor')) return 'Electronics & Semiconductor';
+  if (r.includes('staffing')||r.includes('recruiting')||r.includes('employment')) return 'Employment, Recruiting & Staffing';
+  if (r.includes('energy')||r.includes('utilit')||r.includes('oil')||r.includes('gas')||r.includes('petroleum')||r.includes('solar')||r.includes('renewable')) return 'Energy, Utilities, Oil & Petroleum';
+  if (r.includes('entertain')||r.includes('recreation')||r.includes('gaming')||r.includes('casino')) return 'Entertainment & Recreation';
+  if (r.includes('environ')) return 'Environmental';
+  if (r.includes('fashion')||r.includes('apparel')||r.includes('textile')||r.includes('clothing')) return 'Fashion, Apparel & Textile';
+  if (r.includes('food')||r.includes('restaurant')||r.includes('beverage')||r.includes('catering')) return 'Food & Restaurant';
+  if (r.includes('funeral')||r.includes('cemetery')) return 'Funeral & Cemetery';
+  if (r.includes('government')||r.includes('civil service')||r.includes('public sector')) return 'Government & Civil Service';
+  if (r.includes('health')||r.includes('medical')||r.includes('hospital')||r.includes('dental')||r.includes('clinic')||r.includes('nurs')) return 'Healthcare & Health Services';
+  if (r.includes('real estate')||r.includes('homebuilding')||r.includes('property')) return 'Homebuilding & Real Estate';
+  if (r.includes('hotel')||r.includes('hospitality')||r.includes('resort')) return 'Hospitality, Hotel & Resort';
+  if (r.includes('hvac')||r.includes('heating')||r.includes('ventilat')) return 'HVAC';
+  if (r.includes('import')||r.includes('export')) return 'Import & Export';
+  if (r.includes('insurance')||r.includes('managed care')) return 'Insurance & Managed Care';
+  if (r.includes('internet')||r.includes('ecommerce')||r.includes('e-commerce')) return 'Internet & ECommerce';
+  if (r.includes('landscap')) return 'Landscaping';
+  if (r.includes('law')||r.includes('legal')||r.includes('security')||r.includes('enforce')) return 'Law Enforcement, Legal & Security';
+  if (r.includes('manufactur')||r.includes('engineering')) return 'Manufacturing & Manufacturing Engineering';
+  if (r.includes('medical equip')||r.includes('medical device')) return 'Medical Equipment';
+  if (r.includes('non-profit')||r.includes('nonprofit')||r.includes('not for profit')||r.includes('social service')||r.includes('charity')) return 'Not for Profit & Social Services';
+  if (r.includes('office suppli')||r.includes('office equip')) return 'Office Supplies & Equipment';
+  if (r.includes('packag')) return 'Packaging';
+  if (r.includes('sales')||r.includes('marketing')) return 'Sales & Marketing';
+  if (r.includes('securit')||r.includes('investment')) return 'Securities';
+  if (r.includes('telecom')||r.includes('wireless')||r.includes('social media')) return 'Social Media & Wireless Telecommunications';
+  if (r.includes('travel')||r.includes('tourism')) return 'Travel';
+  return raw || 'Unknown';
+}
+
 // ── HEALTH ─────────────────────────────────────────────────────
 app.use(express.static('public'));
 // Block all write operations for guest users
@@ -714,12 +767,21 @@ app.patch('/contacts/:id/email-status', auth, async (req, res) => {
 app.get('/emails', auth, async (req, res) => {
   try {
     const { status } = req.query;
-    let query = supabase.from('emails').select(`*, contact:contacts(id,first_name,last_name,email,designation), job:jobs(id,position,company_id,company:companies(name,industry,location),sending_email:user_emails!sending_email_id(id,email_address,display_name)), sender:users!sent_by(id,name,email)`).order('created_at', { ascending: false });
-    if (!hasRole(req, 'admin', 'ra_lead')) query = query.eq('sent_by', req.user.id);
-    if (status) query = query.eq('status', status);
-    const { data, error } = await query;
-    if (error) throw error;
-    res.json(data);
+    // Paginate to avoid Supabase 1000-row silent cap
+    let allData = [], from = 0;
+    while (true) {
+      let query = supabase.from('emails').select(`*, contact:contacts(id,first_name,last_name,email,designation), job:jobs(id,position,company_id,company:companies(name,industry,location),sending_email:user_emails!sending_email_id(id,email_address,display_name)), sender:users!sent_by(id,name,email)`).order('created_at', { ascending: false });
+      if (!hasRole(req, 'admin', 'ra_lead')) query = query.eq('sent_by', req.user.id);
+      if (status) query = query.eq('status', status);
+      query = query.range(from, from + 999);
+      const { data, error } = await query;
+      if (error) throw error;
+      if (!data || !data.length) break;
+      allData = allData.concat(data);
+      if (data.length < 1000) break;
+      from += 1000;
+    }
+    res.json(allData);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -745,8 +807,23 @@ app.post('/emails', auth, async (req, res) => {
 
 // Standalone generation function — called directly by autoSendForManager (no HTTP)
 async function generateEmailsForJobs(job_ids, callerUserId) {
-  const { data: jobs, error: jErr } = await supabase.from('jobs').select('id, position, assigned_to_bd, sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name), company:companies(name,industry,location), contacts(*)').in('id', job_ids);
-  if (jErr) throw jErr;
+  // Batch fetch jobs in chunks to avoid Supabase URL length limits on .in()
+  const BATCH_SIZE = 50;
+  let jobs = [];
+  for (let i = 0; i < job_ids.length; i += BATCH_SIZE) {
+    const chunk = job_ids.slice(i, i + BATCH_SIZE);
+    const { data, error } = await supabase.from('jobs').select('id, position, assigned_to_bd, sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name), company:companies(name,industry,location), contacts(*)').in('id', chunk);
+    if (error) {
+      console.error(`[GenerateEmails] Failed to fetch jobs batch ${i}-${i + chunk.length}:`, error.message);
+      throw error;
+    }
+    jobs = jobs.concat(data || []);
+  }
+  if (!jobs.length) {
+    console.log(`[GenerateEmails] No jobs found for IDs: ${job_ids.slice(0, 5).join(',')}...`);
+    return 0;
+  }
+  console.log(`[GenerateEmails] Fetched ${jobs.length} jobs (requested ${job_ids.length})`);
   const bdIds = [...new Set(jobs.map(j => j.assigned_to_bd).filter(Boolean))];
   const { data: bdUsers } = bdIds.length ? await supabase.from('users').select('id,name,email').in('id', bdIds) : { data: [] };
   const bdMap = {};
@@ -763,9 +840,14 @@ async function generateEmailsForJobs(job_ids, callerUserId) {
   (tmplRows || []).forEach(r => { tmplSettings[r.key] = r.value; });
   function fillTmpl(tmpl, vars) { return (tmpl || '').replace(/{{(\w+)}}/g, (m, k) => vars[k] !== undefined ? vars[k] : m); }
   const emailsToInsert = [];
+  let contactsSkipped = 0;
   for (const job of jobs) {
     const bd = bdMap[job.assigned_to_bd] || { id: callerUserId, name: '', email: '' };
     const contacts = (job.contacts || []).filter(c => isValidEmail(c.email));
+    if (!contacts.length) {
+      contactsSkipped++;
+      continue;
+    }
     const savedSubj = tmplSettings[`u_${bd.id}_tmpl_o1_subject`] || '';
     const savedBody = tmplSettings[`u_${bd.id}_tmpl_o1_body`] || '';
     for (const contact of contacts) {
@@ -787,11 +869,17 @@ Subject: [subject line]
 
 [email body]`;
           const aiResp = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 500, messages: [{ role: 'user', content: prompt }] }) });
-          const aiData = await aiResp.json();
-          const text = aiData.content?.[0]?.text || '';
-          const subjectMatch = text.match(/Subject:\s*(.+)/i);
-          subject = subjectMatch ? subjectMatch[1].trim() : `Staffing Partnership — ${job.company?.name}`;
-          body = text.replace(/^Subject:.+\n*/im, '').trim();
+          if (!aiResp.ok) {
+            console.error(`[GenerateEmails] Claude API error for contact ${contact.email}: HTTP ${aiResp.status}`);
+            subject = fillTmpl('Staffing Partnership — {{company}}', vars);
+            body = fillTmpl(`Hi {{fn}},\n\nI came across {{company}} and noticed you're hiring for {{pos}}. At Fute Global, we specialize in placing top-tier talent for roles exactly like this.\n\nWould you be open to a quick 15-minute call this week?\n\nBest regards,\n{{sender}}\nFute Global LLC`, vars);
+          } else {
+            const aiData = await aiResp.json();
+            const text = aiData.content?.[0]?.text || '';
+            const subjectMatch = text.match(/Subject:\s*(.+)/i);
+            subject = subjectMatch ? subjectMatch[1].trim() : `Staffing Partnership — ${job.company?.name}`;
+            body = text.replace(/^Subject:.+\n*/im, '').trim();
+          }
         } else {
           subject = fillTmpl(savedSubj || 'Staffing Partnership — {{company}}', vars);
           body = fillTmpl(savedBody || `Hi {{fn}},
@@ -809,15 +897,24 @@ Fute Global LLC`, vars);
         const resolvedSendingEmail = jobSendingEmail || bdPrimaryEmail;
         const sendingEmailAddress = resolvedSendingEmail?.email_address || '';
         emailsToInsert.push({ contact_id: contact.id, job_id: job.id, to_email: contact.email, subject, body, platform: 'Outlook', sent_by: bd.id, from_email: sendingEmailAddress, status: 'pending' });
-      } catch(e) { console.error('[GenerateEmails] contact error:', e.message); }
+      } catch(e) { console.error(`[GenerateEmails] contact error (${contact.email}):`, e.message); }
     }
   }
-  if (emailsToInsert.length) {
-    const { error: insErr } = await supabase.from('emails').insert(emailsToInsert);
-    if (insErr) throw insErr;
+  if (contactsSkipped) console.log(`[GenerateEmails] ${contactsSkipped} jobs had no valid contacts — skipped`);
+  // Insert emails in batches of 500 to avoid Supabase payload limits
+  const INSERT_BATCH = 500;
+  let totalInserted = 0;
+  for (let i = 0; i < emailsToInsert.length; i += INSERT_BATCH) {
+    const batch = emailsToInsert.slice(i, i + INSERT_BATCH);
+    const { error: insErr } = await supabase.from('emails').insert(batch);
+    if (insErr) {
+      console.error(`[GenerateEmails] Insert batch ${i}-${i + batch.length} failed:`, insErr.message);
+      throw insErr;
+    }
+    totalInserted += batch.length;
   }
-  console.log(`[GenerateEmails] Inserted ${emailsToInsert.length} emails for jobs: ${job_ids.join(',')}`);
-  return emailsToInsert.length;
+  console.log(`[GenerateEmails] Inserted ${totalInserted} emails for ${jobs.length} jobs (${job_ids.length} requested)`);
+  return totalInserted;
 }
 
 app.post('/emails/generate', auth, async (req, res) => {
@@ -1429,29 +1526,45 @@ app.post('/distribute/generate-ratio', auth, async (req, res) => {
 // Auto-send all pending emails for a specific BD manager (called after assignment)
 async function autoSendForManager(managerId, host, authHeader) {
   try {
-    const { data: pendingEmails, error } = await supabase
-      .from('emails')
-      .select('id, to_email, subject, body, contact_id, job_id, from_email, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
-      .eq('sent_by', managerId)
-      .eq('status', 'pending');
-    if (error) {
-      console.log(`[AutoSend] DB error for manager ${managerId}:`, error.message);
-      return;
-    }
-    if (!pendingEmails?.length) {
-      // Emails may not be written yet — wait 3s and retry once
-      console.log(`[AutoSend] No pending emails yet for manager ${managerId}, retrying in 3s...`);
-      await new Promise(r => setTimeout(r, 3000));
-      const { data: retryEmails } = await supabase
+    // Fetch ALL pending emails using pagination to avoid Supabase 1000-row cap
+    let pendingEmails = [], from = 0;
+    while (true) {
+      const { data, error } = await supabase
         .from('emails')
         .select('id, to_email, subject, body, contact_id, job_id, from_email, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
         .eq('sent_by', managerId)
-        .eq('status', 'pending');
-      if (!retryEmails?.length) {
+        .eq('status', 'pending')
+        .range(from, from + 999);
+      if (error) {
+        console.error(`[AutoSend] DB error for manager ${managerId}:`, error.message);
+        return;
+      }
+      if (!data || !data.length) break;
+      pendingEmails = pendingEmails.concat(data);
+      if (data.length < 1000) break;
+      from += 1000;
+    }
+    if (!pendingEmails.length) {
+      // Emails may not be written yet — wait 5s and retry once
+      console.log(`[AutoSend] No pending emails yet for manager ${managerId}, retrying in 5s...`);
+      await new Promise(r => setTimeout(r, 5000));
+      from = 0;
+      while (true) {
+        const { data, error: retryErr } = await supabase
+          .from('emails')
+          .select('id, to_email, subject, body, contact_id, job_id, from_email, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
+          .eq('sent_by', managerId)
+          .eq('status', 'pending')
+          .range(from, from + 999);
+        if (retryErr || !data || !data.length) break;
+        pendingEmails = pendingEmails.concat(data);
+        if (data.length < 1000) break;
+        from += 1000;
+      }
+      if (!pendingEmails.length) {
         console.log(`[AutoSend] Still no pending emails for manager ${managerId} after retry — aborting`);
         return;
       }
-      pendingEmails.push(...retryEmails);
     }
     const totalCount = pendingEmails.length;
     console.log(`[AutoSend] Starting auto-send of ${totalCount} emails for manager ${managerId}`);
@@ -1642,11 +1755,20 @@ app.post('/distribute/execute', auth, async (req, res) => {
     setImmediate(async () => {
       try {
         console.log(`[AutoSend] Starting background generate+send for manager ${manager_id}, ${jobIds.length} jobs`);
+        await setSendProgress(manager_id, { active: true, total: 0, sent: 0, failed: 0, current: 'Generating emails...', failDetails: [], startedAt: new Date().toISOString(), autoSend: true });
         const generated = await generateEmailsForJobs(jobIds, manager_id);
         console.log(`[AutoSend] Generated ${generated} emails, now sending...`);
+        if (generated === 0) {
+          console.log(`[AutoSend] No emails generated for manager ${manager_id} — check contacts/templates`);
+          await setSendProgress(manager_id, { active: false, done: true, total: 0, sent: 0, failed: 0, failDetails: [{ error: 'No emails generated — jobs may have no valid contact emails' }], completedAt: new Date().toISOString(), autoSend: true });
+          setTimeout(() => clearSendProgress(manager_id), 300000);
+          return;
+        }
         await autoSendForManager(manager_id);
       } catch(e) {
-        console.error('[AutoSend] Background error:', e.message);
+        console.error('[AutoSend] Background error:', e.message, e.stack);
+        await setSendProgress(manager_id, { active: false, done: true, total: 0, sent: 0, failed: 1, failDetails: [{ error: `Pipeline error: ${e.message}` }], completedAt: new Date().toISOString(), autoSend: true });
+        setTimeout(() => clearSendProgress(manager_id), 300000);
       }
     });
 
