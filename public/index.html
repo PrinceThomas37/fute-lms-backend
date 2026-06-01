@@ -1671,8 +1671,8 @@ function renderEmail(){
   }
   var tmplDefs=[
     {key:'outreach',label:'Outreach 1',sublabel:'Sent immediately on assignment',color:'var(--accent)',subjVal:myPlan['tmpl_o1_subject']||STATE.emailSubj,bodyVal:myPlan['tmpl_o1_body']||STATE.emailBody,subjId:'tmpl-o1-subj',bodyId:'tmpl-o1-body'},
-    {key:'fu1',label:'Follow-up 1',sublabel:'Day '+fu1Day+' after outreach · replies in same thread',color:'#ca8a04',subjVal:myPlan['tmpl_fu1_subject']||STATE.fu1Subj,bodyVal:myPlan['tmpl_fu1_body']||STATE.fu1Body,subjId:'tmpl-fu1-subj',bodyId:'tmpl-fu1-body'},
-    {key:'fu2',label:'Follow-up 2',sublabel:'Day '+fu2Day+' after outreach · replies in FU1 thread',color:'#ea580c',subjVal:myPlan['tmpl_fu2_subject']||STATE.fu2Subj,bodyVal:myPlan['tmpl_fu2_body']||STATE.fu2Body,subjId:'tmpl-fu2-subj',bodyId:'tmpl-fu2-body'}
+    {key:'fu1',label:'Follow-up 1',sublabel:'Day '+fu1Day+' after outreach',color:'#ca8a04',subjVal:myPlan['tmpl_fu1_subject']||STATE.fu1Subj,bodyVal:myPlan['tmpl_fu1_body']||STATE.fu1Body,subjId:'tmpl-fu1-subj',bodyId:'tmpl-fu1-body'},
+    {key:'fu2',label:'Follow-up 2',sublabel:'Day '+fu2Day+' after outreach',color:'#ea580c',subjVal:myPlan['tmpl_fu2_subject']||STATE.fu2Subj,bodyVal:myPlan['tmpl_fu2_body']||STATE.fu2Body,subjId:'tmpl-fu2-subj',bodyId:'tmpl-fu2-body'}
   ];
   var activeTmpl=tmplDefs.find(function(t){return t.key===STATE.activeTmpl;})||tmplDefs[0];
   var tmplTabBtns=tmplDefs.map(function(t){
@@ -2918,7 +2918,8 @@ window.openEmailEngineModal=function(){
       '</div>'+
     '</div>'+
     '<div class="mf">'+
-      '<button class="btn btn-outline btn-sm" onclick="runFollowupEngineNow()" style="color:var(--amber);border-color:var(--amber);margin-right:auto">▶ Run now</button>'+
+      '<button class="btn btn-outline btn-sm" onclick="clearPendingFollowupQueue()" style="color:var(--red);border-color:var(--red);margin-right:auto">Clear stuck follow-up queue</button>'+
+      '<button class="btn btn-outline btn-sm" onclick="runFollowupEngineNow()" style="color:var(--amber);border-color:var(--amber)">▶ Run now</button>'+
       '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
       '<button class="btn btn-primary" onclick="saveAdminSendTimes()">Save schedule</button>'+
     '</div>'+
