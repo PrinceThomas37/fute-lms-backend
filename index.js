@@ -56,6 +56,21 @@ function isValidEmail(addr) {
   return typeof addr === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr.trim());
 }
 
+function randomDelay(minSec = 1, maxSec = 120) {
+  const ms = Math.floor(Math.random() * (maxSec - minSec + 1) + minSec) * 1000;
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function setSendProgress(userId, data) {
+  const key = `send_progress_${userId}`;
+  try { await supabase.from('app_settings').upsert({ key, value: JSON.stringify(data) }, { onConflict: 'key' }); } catch (_) {}
+}
+
+async function clearSendProgress(userId) {
+  const key = `send_progress_${userId}`;
+  try { await supabase.from('app_settings').delete().eq('key', key); } catch (_) {}
+}
+
 async function logActivity(job_id, contact_id, user_id, action_type, description, old_value, new_value) {
   try {
     await supabase.from('activity_log').insert({
