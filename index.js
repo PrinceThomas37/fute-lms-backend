@@ -52,10 +52,6 @@ function notGuest(req, res) {
 
 const today = () => new Date().toISOString().split('T')[0];
 
-function isValidEmail(addr) {
-  return typeof addr === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr.trim());
-}
-
 async function logActivity(job_id, contact_id, user_id, action_type, description, old_value, new_value) {
   try {
     await supabase.from('activity_log').insert({
@@ -2029,7 +2025,7 @@ app.get('/follow-ups', auth, async (req, res) => {
 
 app.post('/follow-ups/run', auth, async (req, res) => {
   try {
-    if (!hasRole(req, 'admin', 'bd_lead')) return res.status(403).json({ error: 'Admin only' });
+    if (!hasRole(req, 'admin', 'ra_lead', 'bd_lead')) return res.status(403).json({ error: 'Admin or RA Lead only' });
     const result = await runFollowupEngine();
     res.json({ success: true, ...result });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -2235,6 +2231,11 @@ app.get('/auth/microsoft/callback', async (req, res) => {
 });
 
 // Random delay between emails to avoid domain flagging (1–120 seconds)
+// Validate recipient email before sending — prevents Microsoft Graph 'not resolved' errors
+function isValidEmail(addr) {
+  return typeof addr === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr.trim());
+}
+
 function randomDelay(minSec = 1, maxSec = 120) {
   const ms = Math.floor(Math.random() * (maxSec - minSec + 1) + minSec) * 1000;
   return new Promise(resolve => setTimeout(resolve, ms));
