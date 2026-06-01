@@ -139,7 +139,7 @@ const MS_TENANT   = process.env.MICROSOFT_TENANT_ID;
 const MS_CLIENT   = process.env.MICROSOFT_CLIENT_ID;
 const MS_SECRET   = process.env.MICROSOFT_CLIENT_SECRET;
 const MS_REDIRECT = process.env.MICROSOFT_REDIRECT_URI || 'https://fute-lms-backend.onrender.com/auth/microsoft/callback';
-const MS_SCOPES   = 'Mail.Send offline_access User.Read';
+const MS_SCOPES   = 'Mail.Send Mail.ReadWrite offline_access User.Read';
 
 async function getMicrosoftToken(userEmailId) {
   const { data: tokenRow, error } = await supabase.from('microsoft_tokens').select('*').eq('user_email_id', userEmailId).single();
@@ -168,22 +168,44 @@ async function graphMailRequest(accessToken, path, options = {}) {
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', ...(options.headers || {}) }
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error?.message || `Graph API ${res.status}`);
+  if (!res.ok) {
+    const err = data?.error;
+    const msg = err?.message || `Graph API ${res.status}`;
+    throw new Error(err?.code ? `${msg} (${err.code})` : msg);
+  }
   return data;
 }
 
 async function sendMicrosoftNewMessage(userEmailId, { to, subject, body }) {
   const accessToken = await getMicrosoftToken(userEmailId);
-  const msg = await graphMailRequest(accessToken, '/me/messages', {
+  // Use sendMail — works with Mail.Send only. Draft+send via /me/messages requires Mail.ReadWrite.
+  const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
     method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      subject,
-      body: { contentType: 'Text', content: body },
-      toRecipients: [{ emailAddress: { address: to } }]
+      message: { subject, body: { contentType: 'Text', content: body }, toRecipients: [{ emailAddress: { address: to } }] },
+      saveToSentItems: true
     })
   });
-  await graphMailRequest(accessToken, `/me/messages/${msg.id}/send`, { method: 'POST' });
-  return { graphMessageId: msg.id, conversationId: msg.conversationId || null, inReplyTo: null };
+  const errBody = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = errBody?.error;
+    const msg = err?.message || `Graph API ${res.status}`;
+    throw new Error(err?.code ? `${msg} (${err.code})` : msg);
+  }
+  let graphMessageId = null;
+  let conversationId = null;
+  try {
+    await new Promise(r => setTimeout(r, 2000));
+    graphMessageId = await findSentMessageInMailbox(accessToken, { toEmail: to, subjectHint: subject, minDate: today() });
+    if (graphMessageId) {
+      const details = await graphMailRequest(accessToken, `/me/messages/${graphMessageId}?$select=conversationId`);
+      conversationId = details.conversationId || null;
+    }
+  } catch (lookupErr) {
+    console.warn('[GraphMail] sendMail ok; threading lookup skipped:', lookupErr.message);
+  }
+  return { graphMessageId, conversationId, inReplyTo: null };
 }
 
 async function sendMicrosoftThreadReply(userEmailId, parentGraphMessageId, { body, subject }) {
