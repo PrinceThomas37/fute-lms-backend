@@ -266,6 +266,35 @@ async function persistGraphIds(emailId, graph) {
   }
 }
 
+async function incrementEmailSendLog(userEmailId) {
+  const todayDate = today();
+  const { data: logRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', userEmailId).eq('send_date', todayDate).single();
+  await supabase.from('email_send_log').upsert({ user_email_id: userEmailId, send_date: todayDate, emails_sent: (logRow?.emails_sent || 0) + 1 }, { onConflict: 'user_email_id,send_date' });
+}
+
+/** Set follow-up schedule when initial outreach is actually sent (not at assign time). */
+async function scheduleFollowUpOnOutreachSent(jobId, contactId, bdManagerId) {
+  if (!jobId || !contactId || !bdManagerId) return;
+  const outreachDateStr = today();
+  const { data: bdSettings } = await supabase.from('app_settings').select('key,value').in('key', [`u_${bdManagerId}_fu1_day`, `u_${bdManagerId}_fu2_day`, 'followup_fu1_days', 'followup_fu2_days']);
+  const map = {};
+  (bdSettings || []).forEach(r => { map[r.key] = r.value; });
+  const fu1Day = parseInt(map[`u_${bdManagerId}_fu1_day`] || map.followup_fu1_days || '3', 10);
+  const fu2Day = parseInt(map[`u_${bdManagerId}_fu2_day`] || map.followup_fu2_days || '7', 10);
+  const base = new Date();
+  const fu1Date = new Date(base); fu1Date.setDate(fu1Date.getDate() + fu1Day);
+  const fu2Date = new Date(base); fu2Date.setDate(fu2Date.getDate() + fu2Day);
+  const updates = {
+    outreach_sent_at: outreachDateStr,
+    followup1_due_date: fu1Date.toISOString().split('T')[0],
+    followup2_due_date: fu2Date.toISOString().split('T')[0],
+    status: 'active'
+  };
+  const { data: rows } = await supabase.from('follow_ups').select('id,followup1_sent_at').eq('job_id', jobId).eq('contact_id', contactId).eq('status', 'active');
+  const row = (rows || []).find(r => !r.followup1_sent_at);
+  if (row?.id) await supabase.from('follow_ups').update(updates).eq('id', row.id);
+}
+
 async function deliverOutboundEmail(email, userEmailId) {
   const isFollowup = email.followup_type === 'fu1' || email.followup_type === 'fu2';
   if (!isFollowup) {
@@ -1231,9 +1260,10 @@ app.post('/emails/send-selected', auth, async (req, res) => {
         const graph = await deliverOutboundEmail(email, userEmailId);
         await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email.id);
         await persistGraphIds(email.id, graph);
-        const todayDate = today();
-        const { data: logRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', userEmailId).eq('send_date', todayDate).single();
-        await supabase.from('email_send_log').upsert({ user_email_id: userEmailId, send_date: todayDate, emails_sent: (logRow?.emails_sent || 0) + 1 }, { onConflict: 'user_email_id,send_date' });
+        await incrementEmailSendLog(userEmailId);
+        if ((!email.followup_type || email.followup_type === 'initial') && email.job_id && email.contact_id) {
+          await scheduleFollowUpOnOutreachSent(email.job_id, email.contact_id, userId);
+        }
         if (email.contact_id) sentContactIds.push(email.contact_id);
         if (email.job_id) sentJobIds.push(email.job_id);
         sent++;
@@ -1329,10 +1359,10 @@ app.post('/emails/queue-all', auth, async (req, res) => {
         const graph = await deliverOutboundEmail(email, userEmailId);
         await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email.id);
         await persistGraphIds(email.id, graph);
-        // Update send log
-        const todayDate = today();
-        const { data: logRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', userEmailId).eq('send_date', todayDate).single();
-        await supabase.from('email_send_log').upsert({ user_email_id: userEmailId, send_date: todayDate, emails_sent: (logRow?.emails_sent || 0) + 1 }, { onConflict: 'user_email_id,send_date' });
+        await incrementEmailSendLog(userEmailId);
+        if ((!email.followup_type || email.followup_type === 'initial') && email.job_id && email.contact_id) {
+          await scheduleFollowUpOnOutreachSent(email.job_id, email.contact_id, userId);
+        }
         if (email.contact_id) sentContactIds.push(email.contact_id);
         if (email.job_id) sentJobIds.push(email.job_id);
         sent++;
@@ -1599,7 +1629,7 @@ app.get('/insights/bd/:userId', auth, async (req, res) => {
     // Emails
     const { data: emails } = await supabase.from('emails')
       .select('id,status,created_at,sent_at')
-      .eq('assigned_to', targetId)
+      .eq('sent_by', targetId)
       .gte('created_at', monthAgo.toISOString());
 
     const allEmails   = emails || [];
@@ -1812,9 +1842,10 @@ async function autoSendForManager(managerId, host, authHeader) {
         const graph = await deliverOutboundEmail(email, userEmailId);
         await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email.id);
         await persistGraphIds(email.id, graph);
-        const todayDate = today();
-        const { data: logRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', userEmailId).eq('send_date', todayDate).single();
-        await supabase.from('email_send_log').upsert({ user_email_id: userEmailId, send_date: todayDate, emails_sent: (logRow?.emails_sent || 0) + 1 }, { onConflict: 'user_email_id,send_date' });
+        await incrementEmailSendLog(userEmailId);
+        if ((!email.followup_type || email.followup_type === 'initial') && email.job_id && email.contact_id) {
+          await scheduleFollowUpOnOutreachSent(email.job_id, email.contact_id, managerId);
+        }
         if (email.contact_id) sentContactIds.push(email.contact_id);
         if (email.job_id) sentJobIds.push(email.job_id);
         sent++;
@@ -1927,28 +1958,18 @@ app.post('/distribute/execute', auth, async (req, res) => {
 
     const countPerAccount = {};
     assignedLeads.forEach(l => { countPerAccount[l.user_email_id] = (countPerAccount[l.user_email_id] || 0) + 1; });
-    for (const [eid, cnt] of Object.entries(countPerAccount)) {
-      await supabase.from('email_send_log').upsert({ user_email_id: eid, send_date: todayDate, emails_sent: (sentToday[eid] || 0) + cnt }, { onConflict: 'user_email_id,send_date' });
-    }
+    // Quota is incremented only when emails are successfully sent (not at assign time).
 
     // Create follow-up rows
     const jobIds = selected.map(j => j.id);
-    const outreachDateStr = now.toISOString().split('T')[0];
-    const { data: bdSettings } = await supabase.from('app_settings').select('key,value').in('key', [`u_${manager_id}_fu1_day`, `u_${manager_id}_fu2_day`]);
-    const bdSettingsMap = {};
-    (bdSettings || []).forEach(r => { bdSettingsMap[r.key] = r.value; });
-    const fu1Day = parseInt(bdSettingsMap[`u_${manager_id}_fu1_day`] || '3', 10);
-    const fu2Day = parseInt(bdSettingsMap[`u_${manager_id}_fu2_day`] || '7', 10);
-    const fu1Date = new Date(now); fu1Date.setDate(fu1Date.getDate() + fu1Day);
-    const fu2Date = new Date(now); fu2Date.setDate(fu2Date.getDate() + fu2Day);
-    const fu1Str = fu1Date.toISOString().split('T')[0];
-    const fu2Str = fu2Date.toISOString().split('T')[0];
     const { data: assignedJobs } = await supabase.from('jobs').select('id,sending_email_id,contacts(id,email)').in('id', jobIds);
     const followUpRows = [];
     for (const aj of (assignedJobs || [])) {
       const contacts = (aj.contacts || []).filter(c => isValidEmail(c.email));
       for (const c of contacts) {
-        followUpRows.push({ job_id: aj.id, contact_id: c.id, user_email_id: aj.sending_email_id, outreach_sent_at: outreachDateStr, followup1_due_date: fu1Str, followup2_due_date: fu2Str, status: 'active' });
+        const { data: existingFu } = await supabase.from('follow_ups').select('id').eq('job_id', aj.id).eq('contact_id', c.id).eq('status', 'active').limit(1);
+        if (existingFu?.length) continue;
+        followUpRows.push({ job_id: aj.id, contact_id: c.id, user_email_id: aj.sending_email_id, outreach_sent_at: null, followup1_due_date: null, followup2_due_date: null, status: 'active' });
       }
     }
     if (followUpRows.length) await supabase.from('follow_ups').insert(followUpRows);
@@ -2267,8 +2288,8 @@ async function runFollowupEngine() {
       (bdUsers || []).forEach(u => { bdMap[u.id] = u.name; });
     }
 
-    const fu1Due = (dueFu || []).filter(f => !f.followup1_sent_at && f.followup1_due_date <= todayDate);
-    const fu2Due = (dueFu || []).filter(f => f.followup1_sent_at && !f.followup2_sent_at && f.followup2_due_date <= todayDate);
+    const fu1Due = (dueFu || []).filter(f => !f.followup1_sent_at && f.outreach_sent_at && f.followup1_due_date && f.followup1_due_date <= todayDate);
+    const fu2Due = (dueFu || []).filter(f => f.followup1_sent_at && !f.followup2_sent_at && f.outreach_sent_at && f.followup2_due_date && f.followup2_due_date <= todayDate);
     const acCountDelta = {};
 
     for (const fuList of [fu1Due, fu2Due]) {
@@ -2353,8 +2374,8 @@ async function countDueFollowUps() {
     return 0;
   }
   return (data || []).filter(f =>
-    (!f.followup1_sent_at && f.followup1_due_date <= todayDate) ||
-    (f.followup1_sent_at && !f.followup2_sent_at && f.followup2_due_date <= todayDate)
+    (!f.followup1_sent_at && f.outreach_sent_at && f.followup1_due_date && f.followup1_due_date <= todayDate) ||
+    (f.followup1_sent_at && !f.followup2_sent_at && f.outreach_sent_at && f.followup2_due_date && f.followup2_due_date <= todayDate)
   ).length;
 }
 
@@ -2417,9 +2438,10 @@ app.post('/emails/send-microsoft', auth, async (req, res) => {
       await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email_id);
       await persistGraphIds(email_id, graph);
     }
-    const todayDate = today();
-    const { data: logRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', user_email_id).eq('send_date', todayDate).single();
-    await supabase.from('email_send_log').upsert({ user_email_id, send_date: todayDate, emails_sent: (logRow?.emails_sent || 0) + 1 }, { onConflict: 'user_email_id,send_date' });
+    await incrementEmailSendLog(user_email_id);
+    if ((!followup_type || followup_type === 'initial') && job_id && contact_id) {
+      await scheduleFollowUpOnOutreachSent(job_id, contact_id, req.user.id);
+    }
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2474,5 +2496,14 @@ app.delete('/auth/microsoft/:userEmailId', auth, async (req, res) => {
 });
 
 // ── START ──────────────────────────────────────────────────────
+const REQUIRED_ENV = ['SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'JWT_SECRET'];
+const RECOMMENDED_ENV = ['MICROSOFT_TENANT_ID', 'MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET'];
+for (const key of REQUIRED_ENV) {
+  if (!process.env[key]) console.error(`[Startup] Missing required env: ${key}`);
+}
+for (const key of RECOMMENDED_ENV) {
+  if (!process.env[key]) console.warn(`[Startup] Missing recommended env: ${key} — Microsoft send/OAuth will fail`);
+}
+
 app.listen(PORT, () => console.log(`Fute Global LMS API v3.0.0 running on port ${PORT}`));
 module.exports = app;
