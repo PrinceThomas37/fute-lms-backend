@@ -2957,6 +2957,17 @@ window.generatePendingEmails=function(){
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
+
+window.clearPendingFollowupQueue=function(){
+  if(!confirm('Remove all pending Follow-up 1 and Follow-up 2 emails from the queue? Outreach drafts are not deleted.'))return;
+  showToast('Clearing stuck follow-up queue...','info');
+  apiPost('/emails/clear-pending-queue',{scope:'followups_only',reset_followups:true}).then(function(r){
+    var msg='Cleared '+r.deleted+' pending (FU1: '+(r.breakdown&&r.breakdown.fu1||0)+', FU2: '+(r.breakdown&&r.breakdown.fu2||0)+')';
+    showToast(msg,'success');
+    apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];render();});
+  }).catch(function(e){showToast('Clear failed: '+e.message,'error');});
+};
+
 window.runFollowupEngineNow=function(){
   showToast('Running follow-up engine...','info');
   apiPost('/follow-ups/run',{}).then(function(r){
