@@ -1228,6 +1228,71 @@ app.delete('/emails/:id', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Clear stuck pending emails from queue (admin) — e.g. after deploy interrupted follow-up send
+app.post('/emails/clear-pending-queue', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
+    const { scope = 'followups_only', reset_followups = true, manager_id } = req.body || {};
+    let query = supabase.from('emails').select('id,followup_type,follow_up_id,job_id,contact_id,sent_by').eq('status', 'pending');
+    if (scope === 'followups_only') query = query.in('followup_type', ['fu1', 'fu2']);
+    else if (scope === 'outreach_only') query = query.or('followup_type.is.null,followup_type.eq.initial');
+    if (manager_id) query = query.eq('sent_by', manager_id);
+    const { data: pending, error: fetchErr } = await query;
+    if (fetchErr) throw fetchErr;
+    const rows = pending || [];
+    const breakdown = { fu1: 0, fu2: 0, initial: 0, other: 0 };
+    rows.forEach(r => {
+      if (r.followup_type === 'fu1') breakdown.fu1++;
+      else if (r.followup_type === 'fu2') breakdown.fu2++;
+      else if (!r.followup_type || r.followup_type === 'initial') breakdown.initial++;
+      else breakdown.other++;
+    });
+
+    if (reset_followups) {
+      for (const row of rows) {
+        if (row.follow_up_id && row.followup_type === 'fu1') {
+          await supabase.from('follow_ups').update({ followup1_sent_at: null }).eq('id', row.follow_up_id);
+        }
+        if (row.follow_up_id && row.followup_type === 'fu2') {
+          await supabase.from('follow_ups').update({ followup2_sent_at: null, status: 'active' }).eq('id', row.follow_up_id);
+        }
+      }
+      const { data: activeFu } = await supabase.from('follow_ups').select('id,job_id,contact_id,followup1_sent_at,followup2_sent_at,status').eq('status', 'active');
+      for (const fu of (activeFu || [])) {
+        const { count: fu1Sent } = await supabase.from('emails').select('id', { count: 'exact', head: true })
+          .eq('job_id', fu.job_id).eq('contact_id', fu.contact_id).eq('followup_type', 'fu1').eq('status', 'sent');
+        if (fu.followup1_sent_at && !fu1Sent) {
+          await supabase.from('follow_ups').update({ followup1_sent_at: null }).eq('id', fu.id);
+        }
+        const { count: fu2Sent } = await supabase.from('emails').select('id', { count: 'exact', head: true })
+          .eq('job_id', fu.job_id).eq('contact_id', fu.contact_id).eq('followup_type', 'fu2').eq('status', 'sent');
+        if (fu.followup2_sent_at && !fu2Sent) {
+          await supabase.from('follow_ups').update({ followup2_sent_at: null, status: 'active' }).eq('id', fu.id);
+        }
+      }
+    }
+
+    const ids = rows.map(r => r.id);
+    let deleted = 0;
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      const { error: delErr } = await supabase.from('emails').delete().in('id', chunk);
+      if (delErr) throw delErr;
+      deleted += chunk.length;
+    }
+
+    const { data: progressKeys } = await supabase.from('app_settings').select('key').like('key', 'send_progress_%');
+    if (progressKeys?.length) {
+      await supabase.from('app_settings').delete().in('key', progressKeys.map(r => r.key));
+    }
+
+    console.log(`[ClearQueue] Deleted ${deleted} pending emails (scope=${scope})`);
+    res.json({ success: true, deleted, scope, breakdown, reset_followups: !!reset_followups, progress_cleared: (progressKeys || []).length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/emails/:id', auth, async (req, res) => {
+
 app.patch('/emails/:id', auth, async (req, res) => {
   try {
     const { subject, body } = req.body;
@@ -1656,7 +1721,12 @@ app.post('/distribute/execute', auth, async (req, res) => {
       .select('user_email_id').in('user_email_id', allUserEmails.map(e => e.id));
     const connectedIds = new Set((connectedTokens || []).map(t => t.user_email_id));
     const userEmails = allUserEmails.filter(e => connectedIds.has(e.id));
-    if (!userEmails?.length) return res.status(400).json({ error: 'Manager has no connected Microsoft email accounts — please connect via Manage Users' });
+    if (!userEmails?.length) {
+      const unconnected = allUserEmails.map(e => e.email_address).join(', ') || '(none configured)';
+      return res.status(400).json({
+        error: `Manager has no connected Microsoft email accounts. Connect Microsoft for: ${unconnected}. Open Manager Users → select manager → Connect Microsoft on each email ID.`
+      });
+    }
 
     const todayDate = today();
     const { data: sendLogs } = await supabase.from('email_send_log').select('user_email_id,emails_sent').eq('send_date', todayDate);
@@ -1723,7 +1793,9 @@ app.post('/distribute/execute', auth, async (req, res) => {
     for (let i = 0; i < selected.length; i++) {
       const job = selected[i];
       const emailId = assignmentQueue[i];
-      await supabase.from('jobs').update({ assigned_to_bd: manager_id, sending_email_id: emailId, stage: 'Assigned', assigned_at: now, updated_at: now }).eq('id', job.id);
+      if (!emailId) return res.status(500).json({ error: 'Internal error: no sending email slot for assignment' });
+      const { error: assignErr } = await supabase.from('jobs').update({ assigned_to_bd: manager_id, sending_email_id: emailId, stage: 'Assigned', assigned_at: now, updated_at: now }).eq('id', job.id);
+      if (assignErr) return res.status(500).json({ error: `Failed to assign lead: ${assignErr.message}` });
       assignedLeads.push({ job_id: job.id, user_email_id: emailId });
     }
 
@@ -1849,9 +1921,10 @@ app.post('/jobs/bulk-stage', auth, async (req, res) => {
 
     for (const jid of job_ids) await logActivity(jid, null, req.user.id, 'stage_changed', `Stage changed to ${stage}`, null, { stage });
 
-    // If resetting to Unassigned, also delete any pending emails for these jobs
+    // If resetting to Unassigned, clear pending outreach and skip active follow-up schedules
     if (stage === 'Unassigned') {
       await supabase.from('emails').delete().in('job_id', job_ids).eq('status', 'pending');
+      await supabase.from('follow_ups').update({ status: 'skipped' }).in('job_id', job_ids).eq('status', 'active');
     }
 
     res.json({ success: true, updated: job_ids.length, stage });
