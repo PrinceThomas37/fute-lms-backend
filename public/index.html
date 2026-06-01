@@ -469,10 +469,10 @@ var STATE = {
   aiPromptDefault: "Write a concise, professional cold outreach email (3-4 short paragraphs). Open with a personalised hook referencing their company or role. Briefly introduce Fute Global as a specialist staffing firm. Include a soft CTA asking for a 15-min call. Be warm but direct — no fluff.",
   emailSubj: "Opportunity regarding {{pos}} at {{company}}",
   emailBody: "Hi {{fn}},\n\nI came across {{company}} and was really impressed by what you're building in the {{ind}} space.\n\nAt Fute Global, we specialize in connecting organizations with top-tier talent. Given your role as {{desig}}, I believe we could be genuinely helpful with your {{pos}} search.\n\nWould you be open to a quick 15-minute call this week?\n\nWarm regards,\n{{sender}}\nFute Global LLC",
-  fu1Subj: "Follow-up: Re: Opportunity regarding {{pos}} at {{company}}",
-  fu1Body: "Hi {{fn}},\n\nI wanted to follow up on my earlier email regarding the {{pos}} role at {{company}}. I know inboxes get busy, so I wanted to make sure my note didn't slip through.\n\nAt Fute Global, we help companies fill roles like {{pos}} with strong candidates quickly. Would you be open to a brief 15-minute call this week?\n\nBest regards,\n{{sender}}\nFute Global LLC",
-  fu2Subj: "Follow-up: Re: Opportunity regarding {{pos}} at {{company}}",
-  fu2Body: "Hi {{fn}},\n\nI'm following up one last time regarding {{pos}} at {{company}}. If the timing isn't right, no worries — happy to reconnect whenever it makes sense.\n\nThank you for your time.\n\nBest,\n{{sender}}\nFute Global LLC",
+  fu1Subj: "Re: Opportunity regarding {{pos}} at {{company}}",
+  fu1Body: "Hi {{fn}},\n\nJust following up on my previous email regarding {{pos}} at {{company}}. I wanted to make sure it didn't get buried.\n\nWe've helped similar companies fill roles like this quickly — happy to share some examples if useful.\n\nWould love to connect briefly this week.\n\nBest,\n{{sender}}\nFute Global LLC",
+  fu2Subj: "Re: Opportunity regarding {{pos}} at {{company}}",
+  fu2Body: "Hi {{fn}},\n\nI wanted to reach out one last time regarding {{pos}} at {{company}}. If the timing isn't right, no worries at all — happy to reconnect whenever it makes sense.\n\nBest,\n{{sender}}\nFute Global LLC",
   appSettings: {},
   teamAssignments: [],
   userEmailsCache: {},      // userId -> array of user_emails
@@ -1671,8 +1671,8 @@ function renderEmail(){
   }
   var tmplDefs=[
     {key:'outreach',label:'Outreach 1',sublabel:'Sent immediately on assignment',color:'var(--accent)',subjVal:myPlan['tmpl_o1_subject']||STATE.emailSubj,bodyVal:myPlan['tmpl_o1_body']||STATE.emailBody,subjId:'tmpl-o1-subj',bodyId:'tmpl-o1-body'},
-    {key:'fu1',label:'Follow-up 1',sublabel:'Day '+fu1Day+' after outreach',color:'#ca8a04',subjVal:myPlan['tmpl_fu1_subject']||STATE.fu1Subj,bodyVal:myPlan['tmpl_fu1_body']||STATE.fu1Body,subjId:'tmpl-fu1-subj',bodyId:'tmpl-fu1-body'},
-    {key:'fu2',label:'Follow-up 2',sublabel:'Day '+fu2Day+' after outreach',color:'#ea580c',subjVal:myPlan['tmpl_fu2_subject']||STATE.fu2Subj,bodyVal:myPlan['tmpl_fu2_body']||STATE.fu2Body,subjId:'tmpl-fu2-subj',bodyId:'tmpl-fu2-body'}
+    {key:'fu1',label:'Follow-up 1',sublabel:'Day '+fu1Day+' after outreach · replies in same thread',color:'#ca8a04',subjVal:myPlan['tmpl_fu1_subject']||STATE.fu1Subj,bodyVal:myPlan['tmpl_fu1_body']||STATE.fu1Body,subjId:'tmpl-fu1-subj',bodyId:'tmpl-fu1-body'},
+    {key:'fu2',label:'Follow-up 2',sublabel:'Day '+fu2Day+' after outreach · replies in FU1 thread',color:'#ea580c',subjVal:myPlan['tmpl_fu2_subject']||STATE.fu2Subj,bodyVal:myPlan['tmpl_fu2_body']||STATE.fu2Body,subjId:'tmpl-fu2-subj',bodyId:'tmpl-fu2-body'}
   ];
   var activeTmpl=tmplDefs.find(function(t){return t.key===STATE.activeTmpl;})||tmplDefs[0];
   var tmplTabBtns=tmplDefs.map(function(t){
