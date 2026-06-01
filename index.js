@@ -115,169 +115,6 @@ function normInd(raw) {
   return raw || 'Unknown';
 }
 
-// ── MICROSOFT GRAPH MAIL (threading + send) ────────────────────
-const MS_TENANT   = process.env.MICROSOFT_TENANT_ID;
-const MS_CLIENT   = process.env.MICROSOFT_CLIENT_ID;
-const MS_SECRET   = process.env.MICROSOFT_CLIENT_SECRET;
-const MS_REDIRECT = process.env.MICROSOFT_REDIRECT_URI || 'https://fute-lms-backend.onrender.com/auth/microsoft/callback';
-const MS_SCOPES   = 'Mail.Send offline_access User.Read';
-
-async function getMicrosoftToken(userEmailId) {
-  const { data: tokenRow, error } = await supabase.from('microsoft_tokens').select('*').eq('user_email_id', userEmailId).single();
-  if (error || !tokenRow) throw new Error('No Microsoft token found. Please reconnect.');
-  const now = new Date();
-  if (new Date(tokenRow.expires_at).getTime() - now.getTime() > 5 * 60 * 1000) return tokenRow.access_token;
-  const refreshRes = await fetch(`https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ client_id: MS_CLIENT, client_secret: MS_SECRET, refresh_token: tokenRow.refresh_token, grant_type: 'refresh_token', scope: MS_SCOPES })
-  });
-  const refreshed = await refreshRes.json();
-  if (refreshed.error) throw new Error('Token refresh failed: ' + refreshed.error_description);
-  await supabase.from('microsoft_tokens').update({
-    access_token: refreshed.access_token,
-    refresh_token: refreshed.refresh_token || tokenRow.refresh_token,
-    expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(),
-    updated_at: new Date()
-  }).eq('user_email_id', userEmailId);
-  return refreshed.access_token;
-}
-
-async function graphMailRequest(accessToken, path, options = {}) {
-  const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
-    ...options,
-    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', ...(options.headers || {}) }
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error?.message || `Graph API ${res.status}`);
-  return data;
-}
-
-async function sendMicrosoftNewMessage(userEmailId, { to, subject, body }) {
-  const accessToken = await getMicrosoftToken(userEmailId);
-  const msg = await graphMailRequest(accessToken, '/me/messages', {
-    method: 'POST',
-    body: JSON.stringify({
-      subject,
-      body: { contentType: 'Text', content: body },
-      toRecipients: [{ emailAddress: { address: to } }]
-    })
-  });
-  await graphMailRequest(accessToken, `/me/messages/${msg.id}/send`, { method: 'POST' });
-  return { graphMessageId: msg.id, conversationId: msg.conversationId || null, inReplyTo: null };
-}
-
-async function sendMicrosoftThreadReply(userEmailId, parentGraphMessageId, { body, subject }) {
-  const accessToken = await getMicrosoftToken(userEmailId);
-  const draft = await graphMailRequest(accessToken, `/me/messages/${parentGraphMessageId}/createReply`, {
-    method: 'POST',
-    body: JSON.stringify({})
-  });
-  const full = await graphMailRequest(accessToken, `/me/messages/${draft.id}?$select=body,subject,conversationId`);
-  const quoted = (full.body?.content || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-  const combinedBody = quoted ? `${body}\n\n${quoted}` : body;
-  const patch = { body: { contentType: 'Text', content: combinedBody } };
-  if (subject) patch.subject = subject;
-  else if (full.subject && !/^follow-up:/i.test(full.subject)) patch.subject = `Follow-up: ${full.subject}`;
-  await graphMailRequest(accessToken, `/me/messages/${draft.id}`, { method: 'PATCH', body: JSON.stringify(patch) });
-  await graphMailRequest(accessToken, `/me/messages/${draft.id}/send`, { method: 'POST' });
-  return { graphMessageId: draft.id, conversationId: full.conversationId || draft.conversationId || null, inReplyTo: parentGraphMessageId };
-}
-
-async function findSentMessageInMailbox(accessToken, { toEmail, subjectHint, minDate, conversationId }) {
-  const params = new URLSearchParams({ '$select': 'id,subject,toRecipients,sentDateTime,conversationId', '$orderby': 'sentDateTime desc', '$top': '75' });
-  if (minDate) params.set('$filter', `sentDateTime ge ${minDate}T00:00:00Z`);
-  const data = await graphMailRequest(accessToken, `/me/mailFolders/sentitems/messages?${params}`);
-  const to = toEmail.toLowerCase().trim();
-  const hint = (subjectHint || '').toLowerCase().replace(/^re:\s*/i, '').replace(/^follow-up:\s*/i, '').trim();
-  for (const m of (data.value || [])) {
-    const recipients = (m.toRecipients || []).map(r => (r.emailAddress?.address || '').toLowerCase());
-    if (!recipients.includes(to)) continue;
-    if (conversationId && m.conversationId && m.conversationId !== conversationId) continue;
-    if (hint && m.subject) {
-      const sub = m.subject.toLowerCase().replace(/^follow-up:\s*/i, '').replace(/^re:\s*/i, '').trim();
-      if (!sub.includes(hint) && !hint.includes(sub.slice(0, 20))) continue;
-    }
-    return m.id;
-  }
-  return null;
-}
-
-async function loadSentEmailRecord({ jobId, contactId, followupType }) {
-  if (followupType === 'fu2') {
-    const { data: fu1 } = await supabase.from('emails').select('id,graph_message_id,conversation_id,subject,sent_at')
-      .eq('job_id', jobId).eq('contact_id', contactId).eq('status', 'sent').eq('followup_type', 'fu1')
-      .order('sent_at', { ascending: false }).limit(1);
-    if (fu1?.[0]) return fu1[0];
-  }
-  const { data } = await supabase.from('emails').select('id,graph_message_id,conversation_id,subject,sent_at,followup_type')
-    .eq('job_id', jobId).eq('contact_id', contactId).eq('status', 'sent').order('sent_at', { ascending: true });
-  const rows = data || [];
-  return rows.find(r => !r.followup_type || r.followup_type === 'initial') || rows[0] || null;
-}
-
-async function resolveThreadParentMessageId({ jobId, contactId, followupType, userEmailId, toEmail, subjectHint, minDate }) {
-  const prior = await loadSentEmailRecord({ jobId, contactId, followupType });
-  if (prior?.graph_message_id) return { parentId: prior.graph_message_id, priorSubject: prior.subject, conversationId: prior.conversation_id };
-  const accessToken = await getMicrosoftToken(userEmailId);
-  const parentId = await findSentMessageInMailbox(accessToken, { toEmail, subjectHint: subjectHint || prior?.subject, minDate: minDate || prior?.sent_at, conversationId: prior?.conversation_id });
-  if (!parentId) return null;
-  return { parentId, priorSubject: prior?.subject || subjectHint, conversationId: prior?.conversation_id };
-}
-
-function buildFollowupSubject(priorSubject, templateSubject) {
-  const base = (templateSubject || priorSubject || 'Your recent email').replace(/^Follow-up:\s*/i, '').replace(/^Re:\s*/i, '').trim();
-  return `Follow-up: Re: ${base}`;
-}
-
-const FU1_BODY_DEFAULT = `Hi {{fn}},
-
-I wanted to follow up on my earlier email regarding the {{pos}} role at {{company}}. I know inboxes get busy, so I wanted to make sure my note didn't slip through.
-
-At Fute Global, we help companies fill roles like {{pos}} with strong candidates quickly. Would you be open to a brief 15-minute call this week?
-
-Best regards,
-{{sender}}
-Fute Global LLC`;
-
-const FU2_BODY_DEFAULT = `Hi {{fn}},
-
-I'm following up one last time regarding {{pos}} at {{company}}. If the timing isn't right, no worries — happy to reconnect whenever it makes sense.
-
-Thank you for your time.
-
-Best,
-{{sender}}
-Fute Global LLC`;
-
-async function persistGraphIds(emailId, graph) {
-  if (!emailId || !graph?.graphMessageId) return;
-  const { error } = await supabase.from('emails').update({
-    graph_message_id: graph.graphMessageId,
-    conversation_id: graph.conversationId || null,
-    in_reply_to_graph_message_id: graph.inReplyTo || null
-  }).eq('id', emailId);
-  if (error?.message?.includes('column') || error?.code === '42703') {
-    console.warn('[GraphMail] Run migrations/001_email_threading.sql to store message ids for threading');
-  }
-}
-
-async function deliverOutboundEmail(email, userEmailId) {
-  const isFollowup = email.followup_type === 'fu1' || email.followup_type === 'fu2';
-  if (!isFollowup) {
-    return sendMicrosoftNewMessage(userEmailId, { to: email.to_email, subject: email.subject, body: email.body });
-  }
-  const thread = await resolveThreadParentMessageId({
-    jobId: email.job_id, contactId: email.contact_id, followupType: email.followup_type,
-    userEmailId, toEmail: email.to_email, subjectHint: email.subject, minDate: email.outreach_sent_at || null
-  });
-  if (!thread?.parentId) throw new Error('Could not find the original outreach email — follow-up must reply in-thread.');
-  return sendMicrosoftThreadReply(userEmailId, thread.parentId, {
-    body: email.body,
-    subject: buildFollowupSubject(thread.priorSubject, email.subject)
-  });
-}
-
 // ── HEALTH ─────────────────────────────────────────────────────
 app.use(express.static('public'));
 // Block all write operations for guest users
@@ -1059,7 +896,7 @@ Fute Global LLC`, vars);
         const bdPrimaryEmail = bdPrimaryEmailMap[bd.id];
         const resolvedSendingEmail = jobSendingEmail || bdPrimaryEmail;
         const sendingEmailAddress = resolvedSendingEmail?.email_address || '';
-        emailsToInsert.push({ contact_id: contact.id, job_id: job.id, to_email: contact.email, subject, body, platform: 'Outlook', sent_by: bd.id, from_email: sendingEmailAddress, status: 'pending', followup_type: 'initial' });
+        emailsToInsert.push({ contact_id: contact.id, job_id: job.id, to_email: contact.email, subject, body, platform: 'Outlook', sent_by: bd.id, from_email: sendingEmailAddress, status: 'pending' });
       } catch(e) { console.error(`[GenerateEmails] contact error (${contact.email}):`, e.message); }
     }
   }
@@ -1168,7 +1005,7 @@ app.post('/emails/generate', auth, async (req, res) => {
           const sendingDisplayName = resolvedSendingEmail?.display_name || bd.name || '';
           // Note: if job has no sending_email_id, we use bdPrimaryEmail as fallback for generation only
           // We do NOT silently overwrite sending_email_id — that must only be set during distribution
-          emailsToInsert.push({ contact_id: contact.id, job_id: job.id, to_email: contact.email, subject, body, platform: 'Outlook', sent_by: bd.id, from_email: sendingEmailAddress, status: 'pending', followup_type: 'initial' });
+          emailsToInsert.push({ contact_id: contact.id, job_id: job.id, to_email: contact.email, subject, body, platform: 'Outlook', sent_by: bd.id, from_email: sendingEmailAddress, status: 'pending' });
           generated.push({ contact_id: contact.id, email: contact.email });
         } catch(e) { failed.push({ contact_id: contact.id, email: contact.email, error: e.message }); }
       }
@@ -1185,7 +1022,7 @@ app.post('/emails/send-selected', auth, async (req, res) => {
 
     const { data: pendingEmails, error: fetchErr } = await supabase
       .from('emails')
-      .select('id, to_email, subject, body, contact_id, job_id, from_email, followup_type, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
+      .select('id, to_email, subject, body, contact_id, job_id, from_email, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
       .eq('sent_by', req.user.id)
       .eq('status', 'pending')
       .in('id', email_ids);
@@ -1223,10 +1060,16 @@ app.post('/emails/send-selected', auth, async (req, res) => {
       }
       await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
       try {
-        console.log(`[Send] Sending to ${email.to_email} (${email.followup_type || 'initial'})`);
-        const graph = await deliverOutboundEmail(email, userEmailId);
+        console.log(`[SendAll] Getting token for userEmailId=${userEmailId}`);
+        const accessToken = await getMicrosoftToken(userEmailId);
+        console.log(`[SendAll] Token obtained, sending to ${email.to_email}`);
+        const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: { subject: email.subject, body: { contentType: 'Text', content: email.body }, toRecipients: [{ emailAddress: { address: email.to_email } }] }, saveToSentItems: true })
+        });
+        if (!sendRes.ok) { const e = await sendRes.json().catch(() => ({})); throw new Error(e?.error?.message || `HTTP ${sendRes.status}`); }
         await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email.id);
-        await persistGraphIds(email.id, graph);
         const todayDate = today();
         const { data: logRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', userEmailId).eq('send_date', todayDate).single();
         await supabase.from('email_send_log').upsert({ user_email_id: userEmailId, send_date: todayDate, emails_sent: (logRow?.emails_sent || 0) + 1 }, { onConflict: 'user_email_id,send_date' });
@@ -1268,7 +1111,7 @@ app.post('/emails/queue-all', auth, async (req, res) => {
     // Fetch all pending emails for this user, joining job -> sending_email_id + platform
     const { data: pendingEmails, error: fetchErr } = await supabase
       .from('emails')
-      .select('id, to_email, subject, body, contact_id, job_id, from_email, followup_type, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
+      .select('id, to_email, subject, body, contact_id, job_id, from_email, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
       .eq('sent_by', req.user.id)
       .eq('status', 'pending');
     if (fetchErr) throw fetchErr;
@@ -1321,10 +1164,27 @@ app.post('/emails/queue-all', auth, async (req, res) => {
       await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
 
       try {
-        console.log(`[SendAll] Sending to ${email.to_email} (${email.followup_type || 'initial'})`);
-        const graph = await deliverOutboundEmail(email, userEmailId);
+        console.log(`[SendAll] Getting token for userEmailId=${userEmailId}`);
+        const accessToken = await getMicrosoftToken(userEmailId);
+        console.log(`[SendAll] Token obtained, sending to ${email.to_email}`);
+        const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: {
+              subject: email.subject,
+              body: { contentType: 'Text', content: email.body },
+              toRecipients: [{ emailAddress: { address: email.to_email } }]
+            },
+            saveToSentItems: true
+          })
+        });
+        if (!sendRes.ok) {
+          const errData = await sendRes.json().catch(() => ({}));
+          throw new Error(errData?.error?.message || `HTTP ${sendRes.status}`);
+        }
+        // Mark as sent
         await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email.id);
-        await persistGraphIds(email.id, graph);
         // Update send log
         const todayDate = today();
         const { data: logRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', userEmailId).eq('send_date', todayDate).single();
@@ -1361,6 +1221,69 @@ app.delete('/emails/:id', auth, async (req, res) => {
     const { error: delErr } = await supabase.from('emails').delete().eq('id', req.params.id);
     if (delErr) throw delErr;
     res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Clear stuck pending emails from queue (admin) — e.g. after deploy interrupted follow-up send
+app.post('/emails/clear-pending-queue', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
+    const { scope = 'followups_only', reset_followups = true, manager_id } = req.body || {};
+    let query = supabase.from('emails').select('id,followup_type,follow_up_id,job_id,contact_id,sent_by').eq('status', 'pending');
+    if (scope === 'followups_only') query = query.in('followup_type', ['fu1', 'fu2']);
+    else if (scope === 'outreach_only') query = query.or('followup_type.is.null,followup_type.eq.initial');
+    if (manager_id) query = query.eq('sent_by', manager_id);
+    const { data: pending, error: fetchErr } = await query;
+    if (fetchErr) throw fetchErr;
+    const rows = pending || [];
+    const breakdown = { fu1: 0, fu2: 0, initial: 0, other: 0 };
+    rows.forEach(r => {
+      if (r.followup_type === 'fu1') breakdown.fu1++;
+      else if (r.followup_type === 'fu2') breakdown.fu2++;
+      else if (!r.followup_type || r.followup_type === 'initial') breakdown.initial++;
+      else breakdown.other++;
+    });
+
+    if (reset_followups) {
+      for (const row of rows) {
+        if (row.follow_up_id && row.followup_type === 'fu1') {
+          await supabase.from('follow_ups').update({ followup1_sent_at: null }).eq('id', row.follow_up_id);
+        }
+        if (row.follow_up_id && row.followup_type === 'fu2') {
+          await supabase.from('follow_ups').update({ followup2_sent_at: null, status: 'active' }).eq('id', row.follow_up_id);
+        }
+      }
+      const { data: activeFu } = await supabase.from('follow_ups').select('id,job_id,contact_id,followup1_sent_at,followup2_sent_at,status').eq('status', 'active');
+      for (const fu of (activeFu || [])) {
+        const { count: fu1Sent } = await supabase.from('emails').select('id', { count: 'exact', head: true })
+          .eq('job_id', fu.job_id).eq('contact_id', fu.contact_id).eq('followup_type', 'fu1').eq('status', 'sent');
+        if (fu.followup1_sent_at && !fu1Sent) {
+          await supabase.from('follow_ups').update({ followup1_sent_at: null }).eq('id', fu.id);
+        }
+        const { count: fu2Sent } = await supabase.from('emails').select('id', { count: 'exact', head: true })
+          .eq('job_id', fu.job_id).eq('contact_id', fu.contact_id).eq('followup_type', 'fu2').eq('status', 'sent');
+        if (fu.followup2_sent_at && !fu2Sent) {
+          await supabase.from('follow_ups').update({ followup2_sent_at: null, status: 'active' }).eq('id', fu.id);
+        }
+      }
+    }
+
+    const ids = rows.map(r => r.id);
+    let deleted = 0;
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      const { error: delErr } = await supabase.from('emails').delete().in('id', chunk);
+      if (delErr) throw delErr;
+      deleted += chunk.length;
+    }
+
+    const { data: progressKeys } = await supabase.from('app_settings').select('key').like('key', 'send_progress_%');
+    if (progressKeys?.length) {
+      await supabase.from('app_settings').delete().in('key', progressKeys.map(r => r.key));
+    }
+
+    console.log(`[ClearQueue] Deleted ${deleted} pending emails (scope=${scope})`);
+    res.json({ success: true, deleted, scope, breakdown, reset_followups: !!reset_followups, progress_cleared: (progressKeys || []).length });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1671,7 +1594,7 @@ async function autoSendForManager(managerId, host, authHeader) {
     while (true) {
       const { data, error } = await supabase
         .from('emails')
-        .select('id, to_email, subject, body, contact_id, job_id, from_email, followup_type, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
+        .select('id, to_email, subject, body, contact_id, job_id, from_email, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
         .eq('sent_by', managerId)
         .eq('status', 'pending')
         .range(from, from + 999);
@@ -1692,7 +1615,7 @@ async function autoSendForManager(managerId, host, authHeader) {
       while (true) {
         const { data, error: retryErr } = await supabase
           .from('emails')
-          .select('id, to_email, subject, body, contact_id, job_id, from_email, followup_type, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
+          .select('id, to_email, subject, body, contact_id, job_id, from_email, job:jobs(sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform))')
           .eq('sent_by', managerId)
           .eq('status', 'pending')
           .range(from, from + 999);
@@ -1741,10 +1664,15 @@ async function autoSendForManager(managerId, host, authHeader) {
       }
       await setSendProgress(managerId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString(), autoSend: true });
       try {
-        console.log(`[AutoSend] Sending to ${email.to_email} (${email.followup_type || 'initial'})`);
-        const graph = await deliverOutboundEmail(email, userEmailId);
+        console.log(`[AutoSend] Getting token for userEmailId=${userEmailId}`);
+        const accessToken = await getMicrosoftToken(userEmailId);
+        const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: { subject: email.subject, body: { contentType: 'Text', content: email.body }, toRecipients: [{ emailAddress: { address: email.to_email } }] }, saveToSentItems: true })
+        });
+        if (!sendRes.ok) { const e = await sendRes.json().catch(() => ({})); throw new Error(e?.error?.message || `HTTP ${sendRes.status}`); }
         await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email.id);
-        await persistGraphIds(email.id, graph);
         const todayDate = today();
         const { data: logRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', userEmailId).eq('send_date', todayDate).single();
         await supabase.from('email_send_log').upsert({ user_email_id: userEmailId, send_date: todayDate, emails_sent: (logRow?.emails_sent || 0) + 1 }, { onConflict: 'user_email_id,send_date' });
@@ -2168,7 +2096,7 @@ app.post('/follow-ups/run', auth, async (req, res) => {
 
 async function runFollowupEngine() {
   const todayDate = today();
-  const log = { checked: 0, fu1_sent: 0, fu2_sent: 0, fu1_failed: 0, fu2_failed: 0, skipped_quota: 0, skipped_stage: 0 };
+  const log = { checked: 0, fu1_queued: 0, fu2_queued: 0, skipped_quota: 0, skipped_stage: 0 };
   try {
     const { data: dueFu, error: fuErr } = await supabase.from('follow_ups')
       .select(`*, contact:contacts(id,first_name,last_name,email,designation), job:jobs(id,position,stage,assigned_to_bd,company:companies(name,industry,location),sending_email:user_emails!sending_email_id(id,email_address,display_name))`)
@@ -2179,6 +2107,7 @@ async function runFollowupEngine() {
     const { data: settingsRows } = await supabase.from('app_settings').select('key,value');
     const settings = {};
     (settingsRows || []).forEach(r => { settings[r.key] = r.value; });
+
     function getBDTemplate(bdId, key, globalKey, fallback) {
       return settings[`u_${bdId}_${key}`] || settings[globalKey] || fallback;
     }
@@ -2189,6 +2118,7 @@ async function runFollowupEngine() {
     const { data: sendLogs } = await supabase.from('email_send_log').select('user_email_id,emails_sent').eq('send_date', todayDate);
     const sentToday = {};
     (sendLogs || []).forEach(l => { sentToday[l.user_email_id] = l.emails_sent || 0; });
+
     const { data: allEmails } = await supabase.from('user_emails').select('id,daily_send_limit').eq('is_active', true);
     const limitMap = {};
     (allEmails || []).forEach(a => { limitMap[a.id] = a.daily_send_limit || 150; });
@@ -2200,9 +2130,13 @@ async function runFollowupEngine() {
       (bdUsers || []).forEach(u => { bdMap[u.id] = u.name; });
     }
 
+    const emailsToInsert = [];
+    const fu1Updates = [];
+    const fu2Updates = [];
+    const acCountDelta = {};
+
     const fu1Due = (dueFu || []).filter(f => !f.followup1_sent_at && f.followup1_due_date <= todayDate);
     const fu2Due = (dueFu || []).filter(f => f.followup1_sent_at && !f.followup2_sent_at && f.followup2_due_date <= todayDate);
-    const acCountDelta = {};
 
     for (const fuList of [fu1Due, fu2Due]) {
       const isFu2 = fuList === fu2Due;
@@ -2217,59 +2151,31 @@ async function runFollowupEngine() {
         const rem = (limitMap[acId] || 150) - (sentToday[acId] || 0) - (acCountDelta[acId] || 0);
         if (rem <= 0) { log.skipped_quota++; continue; }
         const contact = fu.contact;
-        if (!contact?.email || !isValidEmail(contact.email)) continue;
+        if (!contact?.email) continue;
         const bdId = job.assigned_to_bd;
+        // Use sending email display_name so signature matches the From address
         const senderName = job.sending_email?.display_name || bdMap[bdId] || 'Fute Global';
         const vars = { fn: contact.first_name || '', ln: contact.last_name || '', company: job.company?.name || '', pos: job.position || '', desig: contact.designation || '', ind: job.company?.industry || '', loc: job.company?.location || '', sender: senderName };
+        const subjTmpl = isFu2
+          ? getBDTemplate(bdId, 'tmpl_fu2_subject', 'template_fu2_subject', 'Re: Staffing Partnership — {{company}}')
+          : getBDTemplate(bdId, 'tmpl_fu1_subject', 'template_fu1_subject', 'Re: Staffing Partnership — {{company}}');
         const bodyTmpl = isFu2
-          ? getBDTemplate(bdId, 'tmpl_fu2_body', 'template_fu2_body', FU2_BODY_DEFAULT)
-          : getBDTemplate(bdId, 'tmpl_fu1_body', 'template_fu1_body', FU1_BODY_DEFAULT);
-        const body = fillTemplate(bodyTmpl, vars);
-        const fuType = isFu2 ? 'fu2' : 'fu1';
-        const { data: inserted, error: insErr } = await supabase.from('emails').insert({
-          contact_id: fu.contact_id, job_id: fu.job_id, to_email: contact.email,
-          from_email: job.sending_email?.email_address || null,
-          subject: 'Follow-up', body, platform: 'Outlook', sent_by: bdId,
-          status: 'pending', followup_type: fuType, follow_up_id: fu.id
-        }).select('id').single();
-        if (insErr) {
-          if (isFu2) log.fu2_failed++; else log.fu1_failed++;
-          console.error('[FollowupEngine] insert failed:', insErr.message);
-          continue;
-        }
-        const outbound = {
-          id: inserted.id, job_id: fu.job_id, contact_id: fu.contact_id,
-          to_email: contact.email, subject: 'Follow-up', body,
-          followup_type: fuType, outreach_sent_at: fu.outreach_sent_at
-        };
-        try {
-          const graph = await deliverOutboundEmail(outbound, acId);
-          await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', inserted.id);
-          await persistGraphIds(inserted.id, graph);
-          const nowTs = new Date().toISOString();
-          if (isFu2) {
-            await supabase.from('follow_ups').update({ followup2_sent_at: nowTs, status: 'completed' }).eq('id', fu.id);
-            log.fu2_sent++;
-          } else {
-            await supabase.from('follow_ups').update({ followup1_sent_at: nowTs }).eq('id', fu.id);
-            log.fu1_sent++;
-          }
-          acCountDelta[acId] = (acCountDelta[acId] || 0) + 1;
-          await randomDelay(2, 45);
-        } catch (sendErr) {
-          await supabase.from('emails').update({ status: 'failed' }).eq('id', inserted.id);
-          if (isFu2) log.fu2_failed++; else log.fu1_failed++;
-          console.error(`[FollowupEngine] send failed (${fuType}) ${contact.email}:`, sendErr.message);
-        }
+          ? getBDTemplate(bdId, 'tmpl_fu2_body', 'template_fu2_body', 'Hi {{fn}},\n\nI wanted to reach out one last time regarding {{pos}} at {{company}}.\n\nBest,\n{{sender}}')
+          : getBDTemplate(bdId, 'tmpl_fu1_body', 'template_fu1_body', 'Hi {{fn}},\n\nJust following up on my previous email regarding {{pos}} at {{company}}.\n\nBest,\n{{sender}}');
+        emailsToInsert.push({ contact_id: fu.contact_id, job_id: fu.job_id, to_email: contact.email, from_email: job.sending_email?.email_address || null, subject: fillTemplate(subjTmpl, vars), body: fillTemplate(bodyTmpl, vars), platform: 'Outlook', sent_by: bdId, status: 'pending', followup_type: isFu2 ? 'fu2' : 'fu1', follow_up_id: fu.id });
+        if (isFu2) { fu2Updates.push(fu.id); log.fu2_queued++; } else { fu1Updates.push(fu.id); log.fu1_queued++; }
+        acCountDelta[acId] = (acCountDelta[acId] || 0) + 1;
       }
     }
 
+    if (emailsToInsert.length) await supabase.from('emails').insert(emailsToInsert);
+    const nowTs = new Date().toISOString();
+    if (fu1Updates.length) await supabase.from('follow_ups').update({ followup1_sent_at: nowTs }).in('id', fu1Updates);
+    if (fu2Updates.length) { await supabase.from('follow_ups').update({ followup2_sent_at: nowTs, status: 'completed' }).in('id', fu2Updates); }
     for (const [acId, cnt] of Object.entries(acCountDelta)) {
       await supabase.from('email_send_log').upsert({ user_email_id: acId, send_date: todayDate, emails_sent: (sentToday[acId] || 0) + cnt }, { onConflict: 'user_email_id,send_date' });
     }
-    log.fu1_queued = log.fu1_sent;
-    log.fu2_queued = log.fu2_sent;
-    console.log(`[FollowupEngine] FU1 sent=${log.fu1_sent} failed=${log.fu1_failed}, FU2 sent=${log.fu2_sent} failed=${log.fu2_failed}, skipped_quota=${log.skipped_quota}, skipped_stage=${log.skipped_stage}`);
+    console.log(`[FollowupEngine] FU1: ${log.fu1_queued}, FU2: ${log.fu2_queued}, skipped_quota: ${log.skipped_quota}, skipped_stage: ${log.skipped_stage}`);
     return log;
   } catch (err) { console.error('[FollowupEngine] Error:', err.message); return { ...log, error: err.message }; }
 }
@@ -2298,7 +2204,7 @@ async function setLastFollowupRun(dateStr) {
       console.log(`[Startup] Follow-ups not yet run today (last: ${lastRun || 'never'}). Running now...`);
       await setLastFollowupRun(todayStr);
       const result = await runFollowupEngine();
-      console.log(`[Startup] Follow-up engine result: FU1=${result.fu1_sent}, FU2=${result.fu2_sent}`);
+      console.log(`[Startup] Follow-up engine result: FU1=${result.fu1_queued}, FU2=${result.fu2_queued}`);
     } else {
       console.log(`[Startup] Follow-ups already ran today (${lastRun}). Skipping.`);
     }
@@ -2326,15 +2232,108 @@ setInterval(async () => {
 // ══════════════════════════════════════════════════════════════
 // MICROSOFT OAUTH
 // ══════════════════════════════════════════════════════════════
+const MS_TENANT   = process.env.MICROSOFT_TENANT_ID;
+const MS_CLIENT   = process.env.MICROSOFT_CLIENT_ID;
+const MS_SECRET   = process.env.MICROSOFT_CLIENT_SECRET;
+const MS_REDIRECT = 'https://fute-lms-backend.onrender.com/auth/microsoft/callback';
+const MS_SCOPES   = 'Mail.Send offline_access User.Read';
+
+app.get('/auth/microsoft/connect', async (req, res) => {
+  try {
+    const token = req.query.token || (req.headers.authorization || '').replace('Bearer ', '');
+    if (!token) return res.status(401).send('Unauthorized');
+    let reqUser;
+    try { reqUser = jwt.verify(token, process.env.JWT_SECRET); } catch { return res.status(401).send('Invalid token'); }
+    if (!reqUser.roles?.includes('admin') && reqUser.role !== 'admin') return res.status(403).send('Admin only');
+    const { userEmailId } = req.query;
+    if (!userEmailId) return res.status(400).send('userEmailId required');
+    const state = Buffer.from(JSON.stringify({ userEmailId, userId: reqUser.id })).toString('base64');
+    const url = `https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/authorize?client_id=${MS_CLIENT}&response_type=code&redirect_uri=${encodeURIComponent(MS_REDIRECT)}&scope=${encodeURIComponent(MS_SCOPES)}&state=${encodeURIComponent(state)}&prompt=select_account`;
+    res.redirect(url);
+  } catch (err) { res.status(500).send(err.message); }
+});
+
+app.get('/auth/microsoft/callback', async (req, res) => {
+  try {
+    const { code, state, error: msError } = req.query;
+    if (msError) return res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:'${msError}'},'*');window.close();</script>`);
+    if (!code || !state) return res.status(400).send('Missing code or state');
+    const { userEmailId, userId } = JSON.parse(Buffer.from(decodeURIComponent(state), 'base64').toString());
+    const tokenRes = await fetch(`https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/token`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: MS_CLIENT, client_secret: MS_SECRET, code, redirect_uri: MS_REDIRECT, grant_type: 'authorization_code', scope: MS_SCOPES }) });
+    const tokens = await tokenRes.json();
+    if (tokens.error) return res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',userEmailId:'${userEmailId}',error:'${tokens.error_description}'},'*');window.close();</scr`+`ipt>`);
+    const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
+    const profileRes = await fetch('https://graph.microsoft.com/v1.0/me', { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+    const profile = await profileRes.json();
+    const emailAddress = profile.mail || profile.userPrincipalName || '';
+
+    // ── VALIDATE FIRST before touching the DB ──────────────────
+    const { data: userEmailRow } = await supabase.from('user_emails').select('email_address').eq('id', userEmailId).single();
+    const expectedEmail = (userEmailRow?.email_address || '').toLowerCase().trim();
+    const actualEmail = emailAddress.toLowerCase().trim();
+    if (expectedEmail && actualEmail && expectedEmail !== actualEmail) {
+      const errMsg = `Wrong account: you logged in as ${emailAddress} but this slot is for ${userEmailRow.email_address}. Please sign out of Microsoft and try again with the correct account.`;
+      return res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',userEmailId:'${userEmailId}',error:${JSON.stringify(errMsg)}},'*');window.close();</scr`+`ipt>`);
+    }
+
+    // Validation passed — now safe to delete old token and save new one
+    await supabase.from('microsoft_tokens').delete().eq('user_email_id', userEmailId);
+    const { error: insertErr } = await supabase.from('microsoft_tokens').insert(
+      { user_email_id: userEmailId, user_id: userId, email_address: emailAddress, access_token: tokens.access_token, refresh_token: tokens.refresh_token, expires_at: expiresAt, updated_at: new Date() }
+    );
+    if (insertErr) {
+      console.error('microsoft_tokens insert error:', insertErr);
+      return res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',userEmailId:'${userEmailId}',error:'DB save failed: ${insertErr.message}'},'*');window.close();</scr`+`ipt>`);
+    }
+    await supabase.from('user_emails').update({ platform: 'Microsoft', is_active: true }).eq('id', userEmailId);
+    res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_success',userEmailId:'${userEmailId}',email:'${emailAddress}'},'*');window.close();</scr`+`ipt>`);
+  } catch (err) {
+    console.error('Microsoft OAuth callback error:', err);
+    res.send(`<scr`+`ipt>window.opener&&window.opener.postMessage({type:'ms_oauth_error',userEmailId:'${userEmailId||''}',error:'${err.message}'},'*');window.close();</scr`+`ipt>`);
+  }
+});
+
+// Random delay between emails to avoid domain flagging (1–120 seconds)
+// Validate recipient email before sending — prevents Microsoft Graph 'not resolved' errors
+function isValidEmail(addr) {
+  return typeof addr === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr.trim());
+}
+
+function randomDelay(minSec = 1, maxSec = 120) {
+  const ms = Math.floor(Math.random() * (maxSec - minSec + 1) + minSec) * 1000;
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Send progress tracking — stored in app_settings keyed per user
+async function setSendProgress(userId, data) {
+  const key = `send_progress_${userId}`;
+  try { await supabase.from('app_settings').upsert({ key, value: JSON.stringify(data) }, { onConflict: 'key' }); } catch(_) {}
+}
+async function clearSendProgress(userId) {
+  const key = `send_progress_${userId}`;
+  try { await supabase.from('app_settings').delete().eq('key', key); } catch(_) {}
+}
+
+async function getMicrosoftToken(userEmailId) {
+  const { data: tokenRow, error } = await supabase.from('microsoft_tokens').select('*').eq('user_email_id', userEmailId).single();
+  if (error || !tokenRow) throw new Error('No Microsoft token found. Please reconnect.');
+  const now = new Date();
+  if (new Date(tokenRow.expires_at).getTime() - now.getTime() > 5 * 60 * 1000) return tokenRow.access_token;
+  const refreshRes = await fetch(`https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/token`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: MS_CLIENT, client_secret: MS_SECRET, refresh_token: tokenRow.refresh_token, grant_type: 'refresh_token', scope: MS_SCOPES }) });
+  const refreshed = await refreshRes.json();
+  if (refreshed.error) throw new Error('Token refresh failed: ' + refreshed.error_description);
+  await supabase.from('microsoft_tokens').update({ access_token: refreshed.access_token, refresh_token: refreshed.refresh_token || tokenRow.refresh_token, expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(), updated_at: new Date() }).eq('user_email_id', userEmailId);
+  return refreshed.access_token;
+}
+
 app.post('/emails/send-microsoft', auth, async (req, res) => {
   try {
-    const { user_email_id, to_email, subject, body, email_id, followup_type, job_id, contact_id } = req.body;
+    const { user_email_id, to_email, subject, body, email_id } = req.body;
     if (!user_email_id || !to_email || !subject || !body) return res.status(400).json({ error: 'user_email_id, to_email, subject, body required' });
-    const graph = await deliverOutboundEmail({ to_email, subject, body, followup_type, job_id, contact_id }, user_email_id);
-    if (email_id) {
-      await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email_id);
-      await persistGraphIds(email_id, graph);
-    }
+    const accessToken = await getMicrosoftToken(user_email_id);
+    const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', { method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: { subject, body: { contentType: 'Text', content: body }, toRecipients: [{ emailAddress: { address: to_email } }] }, saveToSentItems: true }) });
+    if (!sendRes.ok) { const errData = await sendRes.json().catch(() => ({})); throw new Error(errData?.error?.message || `Send failed: ${sendRes.status}`); }
+    if (email_id) await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email_id);
     const todayDate = today();
     const { data: logRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', user_email_id).eq('send_date', todayDate).single();
     await supabase.from('email_send_log').upsert({ user_email_id, send_date: todayDate, emails_sent: (logRow?.emails_sent || 0) + 1 }, { onConflict: 'user_email_id,send_date' });
