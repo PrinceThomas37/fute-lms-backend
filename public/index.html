@@ -2918,8 +2918,7 @@ window.openEmailEngineModal=function(){
       '</div>'+
     '</div>'+
     '<div class="mf">'+
-      '<button class="btn btn-outline btn-sm" onclick="clearPendingFollowupQueue()" style="color:var(--red);border-color:var(--red);margin-right:auto">Clear stuck follow-up queue</button>'+
-      '<button class="btn btn-outline btn-sm" onclick="runFollowupEngineNow()" style="color:var(--amber);border-color:var(--amber)">▶ Run now</button>'+
+      '<button class="btn btn-outline btn-sm" onclick="runFollowupEngineNow()" style="color:var(--amber);border-color:var(--amber);margin-right:auto">▶ Run now</button>'+
       '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
       '<button class="btn btn-primary" onclick="saveAdminSendTimes()">Save schedule</button>'+
     '</div>'+
@@ -2955,17 +2954,6 @@ window.generatePendingEmails=function(){
       STATE.pendingEmails=d||[];render();
     });
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
-};
-
-
-window.clearPendingFollowupQueue=function(){
-  if(!confirm('Remove all pending Follow-up 1 and Follow-up 2 emails from the queue? Outreach drafts are not deleted.'))return;
-  showToast('Clearing stuck follow-up queue...','info');
-  apiPost('/emails/clear-pending-queue',{scope:'followups_only',reset_followups:true}).then(function(r){
-    var msg='Cleared '+r.deleted+' pending (FU1: '+(r.breakdown&&r.breakdown.fu1||0)+', FU2: '+(r.breakdown&&r.breakdown.fu2||0)+')';
-    showToast(msg,'success');
-    apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];render();});
-  }).catch(function(e){showToast('Clear failed: '+e.message,'error');});
 };
 
 window.runFollowupEngineNow=function(){
@@ -5490,11 +5478,15 @@ window.openAssignToManager=function(managerId){
   var pool=STATE.distributePoolStats&&STATE.distributePoolStats.total>0
     ?STATE.distributePoolStats
     :{total:_unassignedJobs.length,by_industry:{},by_timezone:{},duplicates:_unassignedJobs.filter(function(j){return j.is_duplicate;}).length};
-  var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
+  var emailAccounts=getSendReadyEmailAccounts(managerId);
   var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
   STATE._assignManagerId=managerId;
   STATE._assignRatio=null;
   STATE._assignGenerating=false;
+  if(!emailAccounts.length){
+    showToast('This manager has no Microsoft-connected email IDs. Connect them in Manager Users first.','error');
+    return;
+  }
 
   STATE.modal='<div class="modal modal-w540">'+
     '<div class="mh">'+
@@ -5591,7 +5583,7 @@ function generateAutoRatio(){
     ?STATE.distributePoolStats
     :{total:_unassignedJobs.length,by_industry:{},by_timezone:{},duplicates:0};
   var managerId=STATE._assignManagerId;
-  var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
+  var emailAccounts=getSendReadyEmailAccounts(managerId);
   var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
   // Respect manual count if set
   var manualEl=document.getElementById('assign-manual-count');
@@ -5615,7 +5607,7 @@ window.generateAssignRatio=function(){
     ?STATE.distributePoolStats
     :{total:_unassignedJobs.length,by_industry:{},by_timezone:{},duplicates:0};
   var managerId=STATE._assignManagerId;
-  var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
+  var emailAccounts=getSendReadyEmailAccounts(managerId);
   var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
   var ps=Object.assign({},pool,{capacity:capacity});
   var btn=document.getElementById('gen-ratio-btn');
@@ -5637,7 +5629,11 @@ window.confirmAssignToManager=function(){
   if(!ratio||!managerId)return;
   if(guestSimulate('assignLeads',{count:ratio.total_to_send||3}))return;
   var m=STATE.users.find(function(u){return u.id===managerId;})||{name:'Manager'};
-  var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
+  var emailAccounts=getSendReadyEmailAccounts(managerId);
+  if(!emailAccounts.length){
+    showToast('No Microsoft-connected email IDs for this manager. Connect in Manager Users before assigning.','error');
+    return;
+  }
   var totalCapacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
   var now=new Date();
   var dateStr=now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
@@ -5663,7 +5659,7 @@ window.confirmAssignToManager=function(){
         '</div>'+
       '</div>';
     }).join(''):
-    '<div style="font-size:12px;color:var(--red);padding:8px">No active email IDs found for this manager.</div>';
+    '<div style="font-size:12px;color:var(--red);padding:8px">No Microsoft-connected email IDs. Connect in Manager Users first.</div>';
 
   STATE.modal='<div class="modal modal-w480">'+
     '<div class="mh"><div class="mt">Confirm assignment</div>'+
@@ -5699,6 +5695,10 @@ window.submitAssignToManager=function(){
   var ratio=STATE._assignRatio;
   var managerId=STATE._assignManagerId;
   if(!ratio||!managerId)return;
+  if(!getSendReadyEmailAccounts(managerId).length){
+    showToast('Cannot assign: manager has no Microsoft-connected email IDs.','error');
+    return;
+  }
   closeModal();
   apiPost('/distribute/execute',{manager_id:managerId,ratio:ratio}).then(function(res){
     var msg=res.total_assigned+' leads assigned · emails sending automatically';
@@ -5709,7 +5709,13 @@ window.submitAssignToManager=function(){
     render();
     startProgressPoll();
     return Promise.all([refreshPoolStats(),refreshJobs()]);
-  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+  }).catch(function(e){
+    var msg=e.message||'Assignment failed';
+    if(/no connected Microsoft/i.test(msg)){
+      msg='Manager has email IDs but Microsoft is not connected. Open Manager Users \u2192 select the manager \u2192 Connect Microsoft on each email ID.';
+    }
+    showToast(msg,'error');
+  });
 };
 
 // ════════════════════════════════════════════════
@@ -5960,6 +5966,16 @@ window.toggleEmailAccount=function(id,active){
 // ════════════════════════════════════════════════
 // ASSIGN LEADS — RA Team Lead bulk assign UI (Drop E)
 // ════════════════════════════════════════════════
+// Active Microsoft email IDs with OAuth connected (required for auto-send on assign)
+function getSendReadyEmailAccounts(managerId){
+  return (STATE.userEmailsCache[managerId]||[]).filter(function(a){
+    if(!a.is_active)return false;
+    var p=(a.platform||'Microsoft').toLowerCase();
+    if(p==='gmail'||p==='google')return false;
+    return !!a.ms_connected;
+  });
+}
+
 function renderAssignLeads(){
   var u=STATE.user;
   // Use API pool stats if loaded, otherwise count from STATE.jobs directly
@@ -5973,28 +5989,33 @@ function renderAssignLeads(){
 
   // Show manager cards
   var managerCards=managers.map(function(m){
-    var emailAccounts=(STATE.userEmailsCache[m.id]||[]).filter(function(a){return a.is_active;});
+    var allAccounts=(STATE.userEmailsCache[m.id]||[]).filter(function(a){return a.is_active;});
+    var emailAccounts=getSendReadyEmailAccounts(m.id);
     var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
     var hasCapacity=emailAccounts.length>0;
+    var needsConnect=allAccounts.length>0&&!hasCapacity;
     return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:16px;display:flex;align-items:center;gap:14px;margin-bottom:12px">'+
       av(m,'40')+
       '<div style="flex:1;min-width:0">'+
         '<div style="font-weight:600;font-size:14px">'+htmlEsc(m.name)+'</div>'+
         '<div style="font-size:12px;color:var(--text3);margin-top:3px">'+
-          emailAccounts.length+' email ID'+(emailAccounts.length!==1?'s':'')+
+          emailAccounts.length+' send-ready email ID'+(emailAccounts.length!==1?'s':'')+
+          (allAccounts.length>emailAccounts.length?' ('+allAccounts.length+' total)':'')+
           ' \u00b7 '+capacity+' emails/day capacity'+
         '</div>'+
         (emailAccounts.length?
           '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">'+
             emailAccounts.map(function(a){
-              return '<span style="font-size:11px;padding:2px 8px;background:var(--accent-l);color:var(--accent);border-radius:6px">'+htmlEsc(a.display_name)+'</span>';
+              return '<span style="font-size:11px;padding:2px 8px;background:var(--accent-l);color:var(--accent);border-radius:6px">'+htmlEsc(a.display_name||a.email_address)+'</span>';
             }).join('')+
           '</div>':
-          '<div style="font-size:12px;color:var(--red);margin-top:4px">No email IDs assigned</div>')+
+          (needsConnect?
+            '<div style="font-size:12px;color:var(--red);margin-top:4px">Microsoft not connected \u2014 open Manager Users and connect each email ID</div>':
+            '<div style="font-size:12px;color:var(--red);margin-top:4px">No email IDs assigned</div>'))+
       '</div>'+
       (hasCapacity&&poolStats.total>0?
         '<button onclick="openAssignToManager(\''+m.id+'\')" style="background:var(--accent);color:#fff;border:0;padding:10px 20px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap">Assign leads</button>':
-        '<span style="font-size:12px;color:var(--text3);padding:8px 12px">'+(!hasCapacity?'No email IDs':'No leads')+'</span>')+
+        '<span style="font-size:12px;color:var(--text3);padding:8px 12px">'+(needsConnect?'Connect Microsoft':!allAccounts.length?'No email IDs':'No leads')+'</span>')+
     '</div>';
   }).join('');
 
