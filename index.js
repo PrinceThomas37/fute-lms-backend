@@ -2235,11 +2235,6 @@ app.get('/auth/microsoft/callback', async (req, res) => {
 });
 
 // Random delay between emails to avoid domain flagging (1–120 seconds)
-// Validate recipient email before sending — prevents Microsoft Graph 'not resolved' errors
-function isValidEmail(addr) {
-  return typeof addr === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr.trim());
-}
-
 function randomDelay(minSec = 1, maxSec = 120) {
   const ms = Math.floor(Math.random() * (maxSec - minSec + 1) + minSec) * 1000;
   return new Promise(resolve => setTimeout(resolve, ms));
