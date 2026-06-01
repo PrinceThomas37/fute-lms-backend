@@ -2389,6 +2389,77 @@ setInterval(async () => {
 // ══════════════════════════════════════════════════════════════
 // MICROSOFT OAUTH
 // ══════════════════════════════════════════════════════════════
+
+app.get('/auth/microsoft/connect', async (req, res) => {
+  try {
+    if (!MS_TENANT || !MS_CLIENT || !MS_SECRET) {
+      return res.status(503).send('Microsoft OAuth is not configured on the server. Set MICROSOFT_TENANT_ID, MICROSOFT_CLIENT_ID, and MICROSOFT_CLIENT_SECRET on Render.');
+    }
+    const token = req.query.token || (req.headers.authorization || '').replace('Bearer ', '');
+    if (!token) return res.status(401).send('Unauthorized — log in again and retry Connect Microsoft.');
+    let reqUser;
+    try { reqUser = jwt.verify(token, process.env.JWT_SECRET); } catch { return res.status(401).send('Session expired — log in again and retry.'); }
+    const userEmailId = req.query.userEmailId || req.query.accountId;
+    if (!userEmailId) return res.status(400).send('userEmailId required');
+    const { data: emailRow, error: emailErr } = await supabase.from('user_emails').select('id,user_id,email_address').eq('id', userEmailId).single();
+    if (emailErr || !emailRow) return res.status(404).send('Email account not found');
+    const roles = reqUser.roles || (reqUser.role ? [reqUser.role] : []);
+    const isPrivileged = roles.includes('admin') || roles.includes('ra_lead') || reqUser.role === 'admin' || reqUser.role === 'ra_lead';
+    const isOwner = emailRow.user_id === reqUser.id;
+    if (!isPrivileged && !isOwner) return res.status(403).send('Not allowed to connect this email account');
+    const state = Buffer.from(JSON.stringify({ userEmailId, userId: reqUser.id })).toString('base64');
+    const url = `https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/authorize?client_id=${MS_CLIENT}&response_type=code&redirect_uri=${encodeURIComponent(MS_REDIRECT)}&scope=${encodeURIComponent(MS_SCOPES)}&state=${encodeURIComponent(state)}&prompt=select_account`;
+    res.redirect(url);
+  } catch (err) { res.status(500).send(err.message); }
+});
+
+app.get('/auth/microsoft/callback', async (req, res) => {
+  let userEmailId = '';
+  try {
+    const { code, state, error: msError } = req.query;
+    if (msError) return res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_error',error:${JSON.stringify(String(msError))}},'*');window.close();</script>`);
+    if (!code || !state) return res.status(400).send('Missing code or state');
+    const { userEmailId: uid, userId } = JSON.parse(Buffer.from(decodeURIComponent(state), 'base64').toString());
+    userEmailId = uid;
+    const tokenRes = await fetch(`https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: MS_CLIENT, client_secret: MS_SECRET, code, redirect_uri: MS_REDIRECT, grant_type: 'authorization_code', scope: MS_SCOPES })
+    });
+    const tokens = await tokenRes.json();
+    if (tokens.error) {
+      const errDesc = tokens.error_description || tokens.error;
+      return res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_error',userEmailId:${JSON.stringify(userEmailId)},error:${JSON.stringify(errDesc)}},'*');window.close();</script>`);
+    }
+    const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
+    const profileRes = await fetch('https://graph.microsoft.com/v1.0/me', { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+    const profile = await profileRes.json();
+    const emailAddress = profile.mail || profile.userPrincipalName || '';
+    const { data: userEmailRow } = await supabase.from('user_emails').select('email_address').eq('id', userEmailId).single();
+    const expectedEmail = (userEmailRow?.email_address || '').toLowerCase().trim();
+    const actualEmail = emailAddress.toLowerCase().trim();
+    if (expectedEmail && actualEmail && expectedEmail !== actualEmail) {
+      const errMsg = `Wrong account: you logged in as ${emailAddress} but this slot is for ${userEmailRow.email_address}. Sign out of Microsoft and try again with the correct account.`;
+      return res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_error',userEmailId:${JSON.stringify(userEmailId)},error:${JSON.stringify(errMsg)}},'*');window.close();</script>`);
+    }
+    await supabase.from('microsoft_tokens').delete().eq('user_email_id', userEmailId);
+    const { error: insertErr } = await supabase.from('microsoft_tokens').insert({
+      user_email_id: userEmailId, user_id: userId, email_address: emailAddress,
+      access_token: tokens.access_token, refresh_token: tokens.refresh_token,
+      expires_at: expiresAt, updated_at: new Date()
+    });
+    if (insertErr) {
+      console.error('microsoft_tokens insert error:', insertErr);
+      return res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_error',userEmailId:${JSON.stringify(userEmailId)},error:${JSON.stringify('DB save failed: ' + insertErr.message)}},'*');window.close();</script>`);
+    }
+    await supabase.from('user_emails').update({ platform: 'Microsoft', is_active: true }).eq('id', userEmailId);
+    res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_success',userEmailId:${JSON.stringify(userEmailId)},accountId:${JSON.stringify(userEmailId)},email:${JSON.stringify(emailAddress)}},'*');window.close();</script>`);
+  } catch (err) {
+    console.error('Microsoft OAuth callback error:', err);
+    res.send(`<script>window.opener&&window.opener.postMessage({type:'ms_oauth_error',userEmailId:${JSON.stringify(userEmailId)},error:${JSON.stringify(err.message)}},'*');window.close();</script>`);
+  }
+});
+
 app.post('/emails/send-microsoft', auth, async (req, res) => {
   try {
     const { user_email_id, to_email, subject, body, email_id, followup_type, job_id, contact_id } = req.body;
