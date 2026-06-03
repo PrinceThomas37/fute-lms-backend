@@ -1471,7 +1471,7 @@ function renderEmail(){
     progressBar='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px 18px;margin-bottom:16px">'+
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'+
         '<div style="font-weight:600;font-size:13.5px">'+(sp.done?'Send complete':'Sending emails...')+'</div>'+
-        '<div style="font-size:13px;color:var(--text2)">'+sp.sent+' sent · '+sp.failed+' failed'+(sp.deferred?(' · '+sp.deferred+' waiting window'):'')+' · '+sp.total+' total</div>'+
+        '<div style="font-size:13px;color:var(--text2)">'+sp.sent+' sent · '+sp.failed+' failed'+(sp.deferred?(' · '+sp.deferred+' waiting'+(sp.deferredWindow?(' ('+sp.deferredWindow+' window'):'')+(sp.deferredQuota?((sp.deferredWindow?', ':' (')+sp.deferredQuota+' quota'):'')+(sp.deferredDomain?(((sp.deferredWindow||sp.deferredQuota)?', ':' (')+sp.deferredDomain+' domain'):'')+((sp.deferredWindow||sp.deferredQuota||sp.deferredDomain)?')':'')):'')+' · '+sp.total+' total</div>'+
       '</div>'+
       '<div style="background:var(--border);border-radius:99px;height:8px;overflow:hidden;margin-bottom:8px">'+
         '<div style="height:100%;border-radius:99px;background:'+barColor+';width:'+pct+'%;transition:width .3s ease"></div>'+
