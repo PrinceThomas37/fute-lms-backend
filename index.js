@@ -510,7 +510,7 @@ app.post('/users/:id/emails', auth, async (req, res) => {
       platform: platform || 'Microsoft',
       is_primary: is_primary || false,
       is_active: true,
-      daily_send_limit: daily_send_limit || 150
+      daily_send_limit: daily_send_limit || 300
     }).select().single();
     if (error) throw error;
     res.status(201).json(data);
@@ -1784,7 +1784,7 @@ app.post('/distribute/generate-ratio', auth, async (req, res) => {
     if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'RA Lead only' });
     const { priority_text, pool_stats, manager_id } = req.body;
     const { data: manager } = await supabase.from('users').select('id,name').eq('id', manager_id).single();
-    const capacity = pool_stats.capacity || 150;
+    const capacity = pool_stats.capacity || 300;
     if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY === 'your_anthropic_api_key_here') return res.json(buildAutoRatio(pool_stats, capacity));
     // Build dynamic industry keys from what's actually in the pool
     const poolIndustries = Object.keys(pool_stats.by_industry || {}).filter(Boolean);
@@ -1794,7 +1794,7 @@ app.post('/distribute/generate-ratio', auth, async (req, res) => {
     const aiData = await aiResp.json();
     const ratio = JSON.parse((aiData.content?.[0]?.text || '{}').replace(/```json|```/g, '').trim());
     res.json(ratio);
-  } catch (err) { res.json(buildAutoRatio(req.body.pool_stats, req.body.pool_stats?.capacity || 150)); }
+  } catch (err) { res.json(buildAutoRatio(req.body.pool_stats, req.body.pool_stats?.capacity || 300)); }
 });
 
 // Auto-send all pending emails for a specific BD manager (called after assignment)
@@ -1929,7 +1929,7 @@ app.post('/distribute/execute', auth, async (req, res) => {
     const sentToday = {};
     (sendLogs || []).forEach(l => { sentToday[l.user_email_id] = l.emails_sent; });
 
-    const accounts = userEmails.map(a => ({ ...a, remaining: (a.daily_send_limit || 150) - (sentToday[a.id] || 0) })).filter(a => a.remaining > 0);
+    const accounts = userEmails.map(a => ({ ...a, remaining: (a.daily_send_limit || 300) - (sentToday[a.id] || 0) })).filter(a => a.remaining > 0);
     if (!accounts.length) return res.status(400).json({ error: 'All email IDs have reached daily limit' });
 
     const totalCapacity = accounts.reduce((s, a) => s + a.remaining, 0);
@@ -2316,7 +2316,7 @@ async function runFollowupEngine() {
     (sendLogs || []).forEach(l => { sentToday[l.user_email_id] = l.emails_sent || 0; });
     const { data: allEmails } = await supabase.from('user_emails').select('id,daily_send_limit').eq('is_active', true);
     const limitMap = {};
-    (allEmails || []).forEach(a => { limitMap[a.id] = a.daily_send_limit || 150; });
+    (allEmails || []).forEach(a => { limitMap[a.id] = a.daily_send_limit || 300; });
 
     const bdIdSet = [...new Set((dueFu || []).map(f => f.job?.assigned_to_bd).filter(Boolean))];
     let bdMap = {};
@@ -2339,7 +2339,7 @@ async function runFollowupEngine() {
         }
         const acId = job.sending_email?.id;
         if (!acId) continue;
-        const rem = (limitMap[acId] || 150) - (sentToday[acId] || 0) - (acCountDelta[acId] || 0);
+        const rem = (limitMap[acId] || 300) - (sentToday[acId] || 0) - (acCountDelta[acId] || 0);
         if (rem <= 0) { log.skipped_quota++; continue; }
         const contact = fu.contact;
         if (!contact?.email || !isValidEmail(contact.email)) continue;
