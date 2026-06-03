@@ -56,7 +56,7 @@ function isValidEmail(addr) {
   return typeof addr === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr.trim());
 }
 
-function randomDelay(minSec = 1, maxSec = 120) {
+function randomDelay(minSec = 1, maxSec = 60) {
   const ms = Math.floor(Math.random() * (maxSec - minSec + 1) + minSec) * 1000;
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -1305,7 +1305,7 @@ app.post('/emails/send-selected', auth, async (req, res) => {
         if (email.job_id) sentJobIds.push(email.job_id);
         sent++;
         await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
-        if (sent + failed < totalCount) await randomDelay(1, 120);
+        if (sent + failed < totalCount) await randomDelay(1, 60);
       } catch (e) {
         failed++;
         failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: e.message });
@@ -1404,7 +1404,7 @@ app.post('/emails/queue-all', auth, async (req, res) => {
         if (email.job_id) sentJobIds.push(email.job_id);
         sent++;
         await setSendProgress(userId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString() });
-        if (sent + failed < pendingEmails.length) await randomDelay(1, 120);
+        if (sent + failed < pendingEmails.length) await randomDelay(1, 60);
       } catch (e) {
         failed++;
         failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: e.message });
@@ -1887,7 +1887,7 @@ async function autoSendForManager(managerId, host, authHeader) {
         if (email.job_id) sentJobIds.push(email.job_id);
         sent++;
         await setSendProgress(managerId, { active: true, total: totalCount, sent, failed, current: email.to_email, failDetails, startedAt: new Date().toISOString(), autoSend: true });
-        if (sent + failed < totalCount) await randomDelay(1, 120);
+        if (sent + failed < totalCount) await randomDelay(1, 60);
       } catch (e) {
         failed++;
         failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: e.message });
@@ -2380,7 +2380,7 @@ async function runFollowupEngine() {
             log.fu1_sent++;
           }
           acCountDelta[acId] = (acCountDelta[acId] || 0) + 1;
-          await randomDelay(2, 45);
+          await randomDelay(1, 60);
         } catch (sendErr) {
           await supabase.from('emails').update({ status: 'failed' }).eq('id', inserted.id);
           if (isFu2) log.fu2_failed++; else log.fu1_failed++;
