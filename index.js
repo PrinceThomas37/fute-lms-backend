@@ -111,6 +111,31 @@ function isInLeadSendWindow(tz, date = new Date(), window = { start: 8, end: 16 
   return mins >= window.start * 60 && mins < window.end * 60;
 }
 
+function getMinutesUntilWindowOpens(tz, date = new Date(), window = { start: 8, end: 16 }) {
+  if (isInLeadSendWindow(tz, date, window)) return 0;
+  const mins = getLocalMinutesInLeadZone(tz || 'EST', date);
+  const startMins = window.start * 60;
+  if (mins < startMins) return startMins - mins;
+  return (24 * 60 - mins) + startMins;
+}
+
+function formatWindowOpensLabel(tz, window, date = new Date()) {
+  const minsUntil = getMinutesUntilWindowOpens(tz, date, window);
+  if (minsUntil <= 0) return 'Now';
+  const iana = LEAD_TZ_IANA[tz] || LEAD_TZ_IANA.EST;
+  const openAt = new Date(date.getTime() + minsUntil * 60000);
+  const fmtDay = d => new Intl.DateTimeFormat('en-CA', { timeZone: iana, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+  const dayWord = fmtDay(openAt) === fmtDay(date) ? 'Today' : 'Tomorrow';
+  const timeStr = new Intl.DateTimeFormat('en-US', { timeZone: iana, hour: 'numeric', minute: '2-digit', hour12: true }).format(openAt);
+  return `${dayWord} ${timeStr} ${tz || 'EST'}`;
+}
+
+function padHour(h) {
+  const hr = h % 12 || 12;
+  const ap = h < 12 ? 'AM' : 'PM';
+  return `${hr}:00 ${ap}`;
+}
+
 const activeSendByUser = new Set();
 
 async function logActivity(job_id, contact_id, user_id, action_type, description, old_value, new_value) {
@@ -825,7 +850,7 @@ app.get('/emails', auth, async (req, res) => {
     // Paginate to avoid Supabase 1000-row silent cap
     let allData = [], from = 0;
     while (true) {
-      let query = supabase.from('emails').select(`*, contact:contacts(id,first_name,last_name,email,designation), job:jobs(id,position,company_id,company:companies(name,industry,location),sending_email:user_emails!sending_email_id(id,email_address,display_name)), sender:users!sent_by(id,name,email)`).order('created_at', { ascending: false });
+      let query = supabase.from('emails').select(`*, contact:contacts(id,first_name,last_name,email,designation), job:jobs(id,position,timezone,company_id,company:companies(name,industry,location),sending_email:user_emails!sending_email_id(id,email_address,display_name)), sender:users!sent_by(id,name,email)`).order('created_at', { ascending: false });
       if (!hasRole(req, 'admin', 'ra_lead')) query = query.eq('sent_by', req.user.id);
       if (status) query = query.eq('status', status);
       query = query.range(from, from + 999);
@@ -845,6 +870,83 @@ app.get('/emails/pending-count', auth, async (req, res) => {
     const { count, error } = await supabase.from('emails').select('id', { count: 'exact', head: true }).eq('sent_by', req.user.id).eq('status', 'pending');
     if (error) throw error;
     res.json({ count: count || 0 });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/emails/pending-summary', auth, async (req, res) => {
+  try {
+    const sendWindow = await getSendWindowHours();
+    if (!hasRole(req, 'admin', 'ra_lead', 'bd', 'bd_lead')) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    let query = supabase.from('emails').select('id, job:jobs(timezone)').eq('status', 'pending');
+    if (hasRole(req, 'admin', 'ra_lead') && req.query.manager_id) {
+      query = query.eq('sent_by', req.query.manager_id);
+    } else if (!hasRole(req, 'admin', 'ra_lead')) {
+      query = query.eq('sent_by', req.user.id);
+    }
+
+    let rows = [], from = 0;
+    while (true) {
+      const { data, error } = await query.range(from, from + 999);
+      if (error) throw error;
+      if (!data || !data.length) break;
+      rows = rows.concat(data);
+      if (data.length < 1000) break;
+      from += 1000;
+    }
+
+    const byTz = {};
+    let ready_now = 0;
+    let waiting_window = 0;
+    for (const row of rows) {
+      const tz = row.job?.timezone || 'EST';
+      if (!byTz[tz]) byTz[tz] = { timezone: tz, pending: 0, ready_now: 0, waiting_window: 0 };
+      byTz[tz].pending++;
+      if (isInLeadSendWindow(tz, new Date(), sendWindow)) {
+        byTz[tz].ready_now++;
+        ready_now++;
+      } else {
+        byTz[tz].waiting_window++;
+        waiting_window++;
+      }
+    }
+
+    const by_timezone = Object.values(byTz)
+      .sort((a, b) => b.pending - a.pending)
+      .map(t => ({
+        ...t,
+        minutes_until_opens: getMinutesUntilWindowOpens(t.timezone, new Date(), sendWindow),
+        resumes_label: formatWindowOpensLabel(t.timezone, sendWindow)
+      }));
+
+    const winLbl = `${padHour(sendWindow.start)} – ${padHour(sendWindow.end)} lead local time`;
+    res.json({
+      total_pending: rows.length,
+      ready_now,
+      waiting_window,
+      by_timezone,
+      send_window: sendWindow,
+      send_window_label: winLbl,
+      auto_retry: {
+        interval_minutes: 20,
+        note: 'In-window emails auto-retry every 20 minutes while the server is awake, and again ~3 minutes after startup.'
+      }
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/emails/retry-pending-window', auth, async (req, res) => {
+  try {
+    if (notGuest(req, res)) return;
+    let managerId = req.user.id;
+    if (hasRole(req, 'admin', 'ra_lead') && req.body?.manager_id) managerId = req.body.manager_id;
+    if (activeSendByUser.has(managerId)) {
+      return res.json({ started: false, message: 'Send already in progress for this manager' });
+    }
+    res.json({ started: true, message: 'Retrying in-window pending emails' });
+    autoSendForManager(managerId).catch(e => console.error('[RetryPendingWindow]', e.message));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

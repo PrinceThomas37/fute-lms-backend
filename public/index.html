@@ -458,6 +458,8 @@ var STATE = {
   period: "monthly",
   emailTab: "compose",
   sendProgress: null,
+  pendingSummary: null,
+  _pendingSummaryTimer: null,
   _progressPollTimer: null,
   previewEmail: null,
   showEmailPreview: false,
@@ -1469,7 +1471,7 @@ function renderEmail(){
     progressBar='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px 18px;margin-bottom:16px">'+
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'+
         '<div style="font-weight:600;font-size:13.5px">'+(sp.done?'Send complete':'Sending emails...')+'</div>'+
-        '<div style="font-size:13px;color:var(--text2)">'+sp.sent+' sent · '+sp.failed+' failed · '+sp.total+' total</div>'+
+        '<div style="font-size:13px;color:var(--text2)">'+sp.sent+' sent · '+sp.failed+' failed'+(sp.deferred?(' · '+sp.deferred+' waiting window'):'')+' · '+sp.total+' total</div>'+
       '</div>'+
       '<div style="background:var(--border);border-radius:99px;height:8px;overflow:hidden;margin-bottom:8px">'+
         '<div style="height:100%;border-radius:99px;background:'+barColor+';width:'+pct+'%;transition:width .3s ease"></div>'+
@@ -1483,17 +1485,27 @@ function renderEmail(){
           sp.failDetails.slice(0,3).map(function(f){return htmlEsc(f.to)+': '+htmlEsc(f.error);}).join(' · ')+
           (sp.failDetails.length>3?' + '+(sp.failDetails.length-3)+' more':'')+
         '</div>':'')+
+      (sp.deferredNote?'<div style="margin-top:8px;font-size:12px;color:#b45309">'+htmlEsc(sp.deferredNote)+'</div>':'')+
     '</div>';
   }
 
   var tabBar=tabs.map(function(t){
-    var lbl=t==='pending'?('Pending'+(pending.length?' ('+pending.length+')':'')):t==='outreachplan'?'Outreach Plan':t.charAt(0).toUpperCase()+t.slice(1);
+    var lbl;
+    if(t==='pending'){
+      var ps=STATE.pendingSummary;
+      if(ps&&ps.total_pending){
+        lbl='Pending ('+ps.total_pending+(ps.ready_now?': '+ps.ready_now+' now':'')+(ps.waiting_window?(', '+ps.waiting_window+' waiting'):'')+')';
+      }else{
+        lbl='Pending'+(pending.length?' ('+pending.length+')':'');
+      }
+    }else if(t==='outreachplan'){lbl='Outreach Plan';}else{lbl=t.charAt(0).toUpperCase()+t.slice(1);}
     return '<div class="tab'+(STATE.emailTab===t?' active':'')+'" onclick="setEmailTab(\''+t+'\')">'+lbl+'</div>';
   }).join('');
 
   // ── PENDING TAB ──
   var pendingHtml='';
   if(STATE.emailTab==='pending'){
+    var scheduleBanner=renderPendingScheduleBanner();
     var isRaLead=userHasRole(u,'ra_lead');
 
     // ── RA LEAD: BD user picker ──────────────────────────────────────
@@ -1523,7 +1535,7 @@ function renderEmail(){
           (bd.sent&&bd.failed?' · ':'')+
           (bd.failed?'<span style="color:var(--red,#dc2626);font-weight:600">'+bd.failed+' failed</span>':'')
         );
-        return '<div onclick="STATE.raLeadSelectedBD=\''+bd.id+'\';STATE.pendingEmailPage=0;render()" style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s" onmouseover="this.style.background=\'var(--accent-l)\'" onmouseout="this.style.background=\'\'" >'+
+        return '<div onclick="STATE.raLeadSelectedBD=\''+bd.id+'\';STATE.pendingEmailPage=0;loadPendingSummary();render()" style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s" onmouseover="this.style.background=\'var(--accent-l)\'" onmouseout="this.style.background=\'\'" >'+
           '<div style="width:38px;height:38px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0">'+htmlEsc(initials)+'</div>'+
           '<div style="flex:1">'+
             '<div style="font-weight:600;font-size:13.5px">'+htmlEsc(bd.name)+'</div>'+
@@ -1533,7 +1545,7 @@ function renderEmail(){
         '</div>';
       }).join('');
       if(!bdCards)bdCards='<div style="padding:40px;text-align:center;color:var(--text3)">No BD users found.</div>';
-      pendingHtml='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
+      pendingHtml=scheduleBanner+'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
         '<div style="padding:12px 18px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">BD Managers — click to view emails</div>'+
         bdCards+
       '</div>';
@@ -1558,7 +1570,10 @@ function renderEmail(){
         var fu=e.followup_type;
         var rowBg=isSelected?'var(--accent-l)':fu==='fu2'?'#fff8f0':fu==='fu1'?'#fffdf0':'';
         var fuBadge=fu==='fu1'?'<span style="font-size:10px;padding:2px 7px;background:#fef9c3;color:#92400e;border-radius:6px;font-weight:700;margin-left:6px">FU1</span>':fu==='fu2'?'<span style="font-size:10px;padding:2px 7px;background:#ffedd5;color:#9a3412;border-radius:6px;font-weight:700;margin-left:6px">FU2</span>':'';
-        return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer;background:'+rowBg+'" onclick="previewPendingEmail(\''+e.id+'\')">'+'<td style="padding:10px 12px;font-size:13px"><div style="font-weight:500">'+htmlEsc(e.to_email)+fuBadge+'</div>'+'<div style="font-size:11px;color:var(--text3)">'+htmlEsc((e.contact&&e.contact.first_name?e.contact.first_name+' '+(e.contact.last_name||''):''))+'</div></td>'+'<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+htmlEsc(jname)+'</td>'+'<td style="padding:10px 12px;font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subject||'')+'</td>'+'<td style="padding:10px 12px;white-space:nowrap">'+(function(){var sc=e.status==='sent'?'background:var(--green-l);color:var(--green)':e.status==='failed'?'background:#fee2e2;color:#dc2626':'background:var(--amber-l);color:var(--amber)';return '<span style="font-size:11px;padding:2px 8px;'+sc+';border-radius:8px;font-weight:600">'+htmlEsc(e.status)+'</span>';})() +'</td>'+'</tr>';
+        var leadTz=(e.job&&e.job.timezone)||'EST';
+        var tzRow2=(STATE.pendingSummary&&STATE.pendingSummary.by_timezone||[]).find(function(t){return t.timezone===leadTz;});
+        var winBadge=(tzRow2&&tzRow2.waiting_window>0&&!(tzRow2.ready_now>0))?'<span style="font-size:10px;padding:2px 7px;background:#fef3c7;color:#92400e;border-radius:6px;font-weight:600;margin-left:6px">Waiting · '+htmlEsc(leadTz)+'</span>':'<span style="font-size:10px;padding:2px 7px;background:var(--green-l);color:var(--green);border-radius:6px;font-weight:600;margin-left:6px">Ready now</span>';
+        return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer;background:'+rowBg+'" onclick="previewPendingEmail(\''+e.id+'\')">'+'<td style="padding:10px 12px;font-size:13px"><div style="font-weight:500">'+htmlEsc(e.to_email)+fuBadge+winBadge+'</div>'+'<div style="font-size:11px;color:var(--text3)">'+htmlEsc((e.contact&&e.contact.first_name?e.contact.first_name+' '+(e.contact.last_name||''):''))+'</div></td>'+'<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+htmlEsc(jname)+'</td>'+'<td style="padding:10px 12px;font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(e.subject||'')+'</td>'+'<td style="padding:10px 12px;white-space:nowrap">'+(function(){var sc=e.status==='sent'?'background:var(--green-l);color:var(--green)':e.status==='failed'?'background:#fee2e2;color:#dc2626':'background:var(--amber-l);color:var(--amber)';return '<span style="font-size:11px;padding:2px 8px;'+sc+';border-radius:8px;font-weight:600">'+htmlEsc(e.status)+'</span>';})() +'</td>'+'</tr>';
       }).join('');
       if(!pendingRows)pendingRows='<tr><td colspan="4" style="padding:40px;text-align:center;color:var(--text3)">No pending emails yet.</td></tr>';
 
@@ -1586,9 +1601,9 @@ function renderEmail(){
     }
 
     // Back button for RA Lead drill-down view
-    var backBtn=viewingBD?('<div style="margin-bottom:14px"><button onclick="STATE.raLeadSelectedBD=null;STATE.previewPendingId=null;render()" style="background:none;border:1px solid var(--border2);padding:6px 14px;border-radius:7px;font-size:13px;cursor:pointer;color:var(--text2)">← Back to all BD Managers</button><span style="margin-left:12px;font-weight:600;font-size:14px">'+htmlEsc(bdName)+'</span></div>'):'';
+    var backBtn=viewingBD?('<div style="margin-bottom:14px"><button onclick="STATE.raLeadSelectedBD=null;STATE.previewPendingId=null;loadPendingSummary();render()" style="background:none;border:1px solid var(--border2);padding:6px 14px;border-radius:7px;font-size:13px;cursor:pointer;color:var(--text2)">← Back to all BD Managers</button><span style="margin-left:12px;font-weight:600;font-size:14px">'+htmlEsc(bdName)+'</span></div>'):'';
 
-    pendingHtml='<div>'+
+    pendingHtml='<div>'+scheduleBanner+
       backBtn+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
         '<div style="font-size:13px;color:var(--text2)">'+totalRecipients+' email'+(totalRecipients!==1?'s':'')+' ready · page '+(_pPg+1)+' of '+_pTp+'</div>'+
@@ -2601,7 +2616,65 @@ window.exportXL=function(){
   }catch(e){showToast("Export failed: "+e.message,"error");}
 }
 
-window.setEmailTab=function(t){STATE.emailTab=t;STATE.raLeadSelectedBD=null;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;STATE.composeFromEmailId=null;STATE.pendingEmailPage=0;STATE.sentEmailPage=0;loadEmailsForCurrentUser();render();}
+window.setEmailTab=function(t){STATE.emailTab=t;STATE.raLeadSelectedBD=null;STATE.genEmail=null;STATE.emailSearch=null;STATE.previewEmail=null;STATE.showEmailPreview=false;STATE.composeFromEmailId=null;STATE.pendingEmailPage=0;STATE.sentEmailPage=0;loadEmailsForCurrentUser();if(t==='pending'){loadPendingSummary();startPendingSummaryPoll();}else{stopPendingSummaryPoll();}render();}
+
+
+function loadPendingSummary(){
+  if(!STATE.user||!STATE.token||STATE.token==='guest')return;
+  var q='';
+  if(userHasRole(STATE.user,'ra_lead')&&STATE.raLeadSelectedBD)q='?manager_id='+encodeURIComponent(STATE.raLeadSelectedBD);
+  apiGet('/emails/pending-summary'+q).then(function(d){STATE.pendingSummary=d;render();}).catch(function(){});
+}
+function startPendingSummaryPoll(){
+  if(STATE._pendingSummaryTimer){clearInterval(STATE._pendingSummaryTimer);STATE._pendingSummaryTimer=null;}
+  if(!STATE.user||STATE.emailTab!=='pending')return;
+  loadPendingSummary();
+  STATE._pendingSummaryTimer=setInterval(function(){
+    if(STATE.emailTab==='pending'&&STATE.user)loadPendingSummary();
+    else if(STATE._pendingSummaryTimer){clearInterval(STATE._pendingSummaryTimer);STATE._pendingSummaryTimer=null;}
+  },60000);
+}
+function stopPendingSummaryPoll(){
+  if(STATE._pendingSummaryTimer){clearInterval(STATE._pendingSummaryTimer);STATE._pendingSummaryTimer=null;}
+}
+function renderPendingScheduleBanner(){
+  var ps=STATE.pendingSummary;
+  if(!ps||!ps.total_pending)return '';
+  var ready=ps.ready_now||0;
+  var wait=ps.waiting_window||0;
+  var winLbl=ps.send_window_label||'8:00 – 16:00 lead local time';
+  var tzRows=(ps.by_timezone||[]).filter(function(t){return t.waiting_window>0;}).map(function(t){
+    return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">'+
+      '<span><strong>'+htmlEsc(t.timezone)+'</strong> · '+t.waiting_window+' waiting</span>'+
+      '<span style="color:var(--amber);font-weight:600">Resumes: '+htmlEsc(t.resumes_label)+'</span></div>';
+  }).join('');
+  var retryBtn='';
+  if(wait>0&&!userHasRole(STATE.user,'ra_lead')){
+    retryBtn='<button onclick="retryPendingWindowNow()" style="margin-top:10px;background:var(--accent);color:#fff;border:0;padding:8px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Send in-window emails now</button>';
+  }
+  return '<div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:var(--r2);padding:14px 18px;margin-bottom:14px">'+
+    '<div style="font-weight:700;font-size:14px;color:#92400e;margin-bottom:8px">Pending send schedule (US lead timezones)</div>'+
+    '<div style="font-size:13px;color:#78350f;line-height:1.5;margin-bottom:10px">'+
+      '<strong>'+ps.total_pending+'</strong> pending total · '+
+      '<span style="color:var(--green);font-weight:600">'+ready+' ready to send now</span>'+
+      (wait?' · <span style="color:#b45309;font-weight:600">'+wait+' waiting for send window</span>':'')+
+      '<br><span style="font-size:12px">Send window: '+htmlEsc(winLbl)+'. '+
+      htmlEsc((ps.auto_retry&&ps.auto_retry.note)||'')+'</span>'+
+    '</div>'+
+    (tzRows?'<div style="font-size:12px;margin-top:8px">'+tzRows+'</div>':'')+
+    retryBtn+
+  '</div>';
+}
+window.retryPendingWindowNow=function(){
+  var body={};
+  if(userHasRole(STATE.user,'ra_lead')&&STATE.raLeadSelectedBD)body.manager_id=STATE.raLeadSelectedBD;
+  apiPost('/emails/retry-pending-window',body).then(function(){
+    showToast('Retrying in-window pending emails…','success');
+    startProgressPoll();
+    loadPendingSummary();
+  }).catch(function(e){showToast('Retry failed: '+e.message,'error');});
+};
+
 
 // ── Send progress polling ──────────────────────
 // Auto-starts on login for BD/BD_Lead. No button click required.
@@ -2647,11 +2720,12 @@ function loadEmailsForCurrentUser(){
       apiGet('/emails').then(function(d){
         var all=d||[];
         STATE.pendingEmails=all.filter(function(e){return e.status==='pending';});
-        STATE.allBDEmails=all; // full set for BD picker
+        STATE.allBDEmails=all;
+        loadPendingSummary();
         render();
       }).catch(function(){});
     } else {
-      apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];render();}).catch(function(){});
+      apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];loadPendingSummary();render();}).catch(function(){});
       apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];render();}).catch(function(){});
     }
   }
