@@ -2011,7 +2011,7 @@ function renderAdminUserDetail(userId){
     return '<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border)">'+
       '<div style="flex:1"><div style="font-weight:500;font-size:13px">'+htmlEsc(a.display_name)+'</div>'+
         '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(a.email_address)+'</div></div>'+
-      '<div style="font-size:12px;color:var(--text3)">'+htmlEsc(String(a.daily_send_limit||150))+'/day</div>'+
+      '<div style="font-size:12px;color:var(--text3)">'+htmlEsc(String(a.daily_send_limit||300))+'/day</div>'+
       msBadge+
       '<span style="font-size:11px;padding:2px 7px;border-radius:7px;font-weight:600;background:'+(a.is_active?'var(--green-l)':'var(--red-l)')+';color:'+(a.is_active?'var(--green)':'var(--red)')+'">'+( a.is_active?'Active':'Inactive')+'</span>'+
       '<button class="btn-icon" onclick="openEditEmailAccount(\''+a.id+'\')">'+ico('edit',13)+'</button>'+
@@ -2689,7 +2689,7 @@ window.openAddUserEmail=function(userId,platform){
     +'<div class="mb_">'
     +'<div class="fgrp"><label class="flbl">Email address *</label><input class="inp" id="ue-email" placeholder="e.g. john@futeglobal.com"/></div>'
     +'<div class="fgrp"><label class="flbl">Display name</label><input class="inp" id="ue-name" placeholder="John Smith"/></div>'
-    +'<div class="fgrp"><label class="flbl">Daily limit</label><input class="inp" type="number" id="ue-limit" value="150" min="1" max="500" style="width:120px"/></div>'
+    +'<div class="fgrp"><label class="flbl">Daily limit</label><input class="inp" type="number" id="ue-limit" value="300" min="1" max="500" style="width:120px"/></div>'
     +'<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:6px 0">'
     +'<input type="checkbox" id="ue-primary"/> Set as primary email (login email)</label>'
     +'</div>'
@@ -2704,7 +2704,7 @@ window.openAddUserEmail=function(userId,platform){
 window.submitAddUserEmail=function(userId,platform){
   var email=(document.getElementById('ue-email')||{}).value||'';
   var name=(document.getElementById('ue-name')||{}).value||'';
-  var limit=parseInt((document.getElementById('ue-limit')||{}).value||'150');
+  var limit=parseInt((document.getElementById('ue-limit')||{}).value||'300');
   var isPrimary=(document.getElementById('ue-primary')||{}).checked||false;
   if(!email){showToast('Email address required','warning');return;}
   apiPost('/users/'+userId+'/emails',{email_address:email,display_name:name||email,platform:platform||'Gmail',daily_send_limit:limit,is_primary:isPrimary}).then(function(e){
@@ -2717,7 +2717,7 @@ window.submitAddUserEmail=function(userId,platform){
 window.submitAddUserEmailMicrosoft=function(userId){
   var email=(document.getElementById('ue-email')||{}).value||'';
   var name=(document.getElementById('ue-name')||{}).value||'';
-  var limit=parseInt((document.getElementById('ue-limit')||{}).value||'150');
+  var limit=parseInt((document.getElementById('ue-limit')||{}).value||'300');
   var isPrimary=(document.getElementById('ue-primary')||{}).checked||false;
   if(!email){showToast('Email address required','warning');return;}
   apiPost('/users/'+userId+'/emails',{email_address:email,display_name:name||email,platform:'Microsoft',daily_send_limit:limit,is_primary:isPrimary}).then(function(e){
@@ -5479,7 +5479,7 @@ window.openAssignToManager=function(managerId){
     ?STATE.distributePoolStats
     :{total:_unassignedJobs.length,by_industry:{},by_timezone:{},duplicates:_unassignedJobs.filter(function(j){return j.is_duplicate;}).length};
   var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
-  var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
+  var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||300);},0);
   STATE._assignManagerId=managerId;
   STATE._assignRatio=null;
   STATE._assignGenerating=false;
@@ -5580,7 +5580,7 @@ function generateAutoRatio(){
     :{total:_unassignedJobs.length,by_industry:{},by_timezone:{},duplicates:0};
   var managerId=STATE._assignManagerId;
   var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
-  var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
+  var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||300);},0);
   // Respect manual count if set
   var manualEl=document.getElementById('assign-manual-count');
   var manualCount=manualEl&&manualEl.value?parseInt(manualEl.value):0;
@@ -5604,7 +5604,7 @@ window.generateAssignRatio=function(){
     :{total:_unassignedJobs.length,by_industry:{},by_timezone:{},duplicates:0};
   var managerId=STATE._assignManagerId;
   var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
-  var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
+  var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||300);},0);
   var ps=Object.assign({},pool,{capacity:capacity});
   var btn=document.getElementById('gen-ratio-btn');
   if(btn){btn.textContent='Generating\u2026';btn.disabled=true;}
@@ -5626,7 +5626,7 @@ window.confirmAssignToManager=function(){
   if(guestSimulate('assignLeads',{count:ratio.total_to_send||3}))return;
   var m=STATE.users.find(function(u){return u.id===managerId;})||{name:'Manager'};
   var emailAccounts=(STATE.userEmailsCache[managerId]||[]).filter(function(a){return a.is_active;});
-  var totalCapacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
+  var totalCapacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||300);},0);
   var now=new Date();
   var dateStr=now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
   var timeStr=now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
@@ -5638,7 +5638,7 @@ window.confirmAssignToManager=function(){
       var count=idx===emailAccounts.length-1
         ?ratio.total_to_send-perEmail*(emailAccounts.length-1)
         :perEmail;
-      count=Math.max(0,Math.min(count,a.daily_send_limit||150));
+      count=Math.max(0,Math.min(count,a.daily_send_limit||300));
       return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--card);border-radius:var(--r);margin-bottom:6px;border:1px solid var(--border)">'+
         '<span style="font-size:10px;padding:2px 7px;border-radius:5px;font-weight:600;background:'+(a.platform==='Microsoft'?'#e0f2fe':'#f0fdf4')+';color:'+(a.platform==='Microsoft'?'#0369a1':'#166534')+'">'+htmlEsc(a.platform||'Email')+'</span>'+
         '<div style="flex:1;min-width:0">'+
@@ -5776,7 +5776,7 @@ window.openAddEmailAccount=function(managerId,fromDetail,platform){
   var platformBadge=isMicrosoft?
     '<span style="font-size:11px;padding:2px 8px;background:#e0f2fe;color:#0369a1;border-radius:6px;font-weight:600;margin-left:8px">Microsoft / Outlook</span>':
     '<span style="font-size:11px;padding:2px 8px;background:#f0fdf4;color:#166534;border-radius:6px;font-weight:600;margin-left:8px">Gmail</span>';
-  STATE.modal='<div class="modal modal-w480">'+'<div class="mh">'+'<div>'+'<div class="mt">Add Email Account'+platformBadge+'</div>'+(managerUser?'<div style="font-size:12px;color:var(--text3);margin-top:3px">Assign to '+htmlEsc(managerUser.name)+'</div>':'')+'</div>'+'<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button>'+'</div>'+'<div class="mb_">'+(isMicrosoft?'<div style="padding:12px 14px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--r2);margin-bottom:16px;font-size:13px;color:#0c4a6e">First enter the email address and display name, then click <strong>Save &amp; Connect Microsoft</strong> to authorise sending via Microsoft OAuth.</div>':'<div style="padding:12px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--r2);margin-bottom:16px;font-size:13px;color:#14532d">Enter the Gmail address and display name. Google OAuth sending will be added in a future update.</div>')+'<div class="fgrp"><label class="flbl">Email address <span style="color:var(--red)">*</span></label><input class="inp" id="ea-email" placeholder="e.g. john@futeglobal.com" autocomplete="off"/></div>'+'<div class="fgrp"><label class="flbl">Display name <span style="color:var(--red)">*</span></label><input class="inp" id="ea-name" placeholder="John Smith"/></div>'+'<div class="fgrp"><label class="flbl">Daily outreach limit</label><div style="display:flex;align-items:center;gap:10px"><input class="inp" type="number" id="ea-limit" value="150" min="1" max="500" style="width:120px"/><span style="font-size:12px;color:var(--text3)">emails per day</span></div></div>'+'</div>'+'<div class="mf">'+'<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+(isMicrosoft?'<button class="btn btn-primary" onclick="submitCreateEmailAndConnectMicrosoft(\''+managerId+'\')" style="background:#0078d4">Save &amp; Connect Microsoft</button>':'<button class="btn btn-primary" onclick="submitCreateAndAssignEmailAccount(\''+managerId+'\')" style="background:#16a34a">Save Gmail Account</button>')+'</div>'+'</div>';
+  STATE.modal='<div class="modal modal-w480">'+'<div class="mh">'+'<div>'+'<div class="mt">Add Email Account'+platformBadge+'</div>'+(managerUser?'<div style="font-size:12px;color:var(--text3);margin-top:3px">Assign to '+htmlEsc(managerUser.name)+'</div>':'')+'</div>'+'<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button>'+'</div>'+'<div class="mb_">'+(isMicrosoft?'<div style="padding:12px 14px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--r2);margin-bottom:16px;font-size:13px;color:#0c4a6e">First enter the email address and display name, then click <strong>Save &amp; Connect Microsoft</strong> to authorise sending via Microsoft OAuth.</div>':'<div style="padding:12px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--r2);margin-bottom:16px;font-size:13px;color:#14532d">Enter the Gmail address and display name. Google OAuth sending will be added in a future update.</div>')+'<div class="fgrp"><label class="flbl">Email address <span style="color:var(--red)">*</span></label><input class="inp" id="ea-email" placeholder="e.g. john@futeglobal.com" autocomplete="off"/></div>'+'<div class="fgrp"><label class="flbl">Display name <span style="color:var(--red)">*</span></label><input class="inp" id="ea-name" placeholder="John Smith"/></div>'+'<div class="fgrp"><label class="flbl">Daily outreach limit</label><div style="display:flex;align-items:center;gap:10px"><input class="inp" type="number" id="ea-limit" value="300" min="1" max="500" style="width:120px"/><span style="font-size:12px;color:var(--text3)">emails per day</span></div></div>'+'</div>'+'<div class="mf">'+'<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+(isMicrosoft?'<button class="btn btn-primary" onclick="submitCreateEmailAndConnectMicrosoft(\''+managerId+'\')" style="background:#0078d4">Save &amp; Connect Microsoft</button>':'<button class="btn btn-primary" onclick="submitCreateAndAssignEmailAccount(\''+managerId+'\')" style="background:#16a34a">Save Gmail Account</button>')+'</div>'+'</div>';
   render();
 };
 
@@ -5794,7 +5794,7 @@ window.selectEmailAccountToAssign=function(accountId, managerId){
       '</div>'+
       '<div class="fgrp"><label class="flbl">Daily outreach limit</label>'+
         '<div style="display:flex;align-items:center;gap:10px">'+
-          '<input class="inp" type="number" id="ea-assign-limit" value="'+htmlEsc(String(a.daily_send_limit||150))+'" min="1" max="500" style="width:120px"/>'+
+          '<input class="inp" type="number" id="ea-assign-limit" value="'+htmlEsc(String(a.daily_send_limit||300))+'" min="1" max="500" style="width:120px"/>'+
           '<span style="font-size:12px;color:var(--text3)">emails per day</span>'+
         '</div>'+
       '</div>'+
@@ -5808,7 +5808,7 @@ window.selectEmailAccountToAssign=function(accountId, managerId){
 };
 
 window.submitAssignExistingEmailAccount=function(accountId, managerId){
-  var limit=parseInt((document.getElementById('ea-assign-limit')||{}).value||'150');
+  var limit=parseInt((document.getElementById('ea-assign-limit')||{}).value||'300');
   apiPut('/email-accounts/'+accountId,{assigned_to:managerId,daily_send_limit:limit}).then(function(a){
     STATE.emailAccounts=STATE.emailAccounts.map(function(x){return x.id===accountId?a:x;});
     closeModal();showToast('Email ID assigned','success');render();
@@ -5842,7 +5842,7 @@ window.emailAccountTypeahead=function(val){
     el.addEventListener('mouseenter',function(){this.style.background='var(--accent-l)';});
     el.addEventListener('mouseleave',function(){this.style.background='';});
     el.addEventListener('click',function(){
-      pickEmailAccountSuggestion(this.getAttribute('data-email'),this.getAttribute('data-name'),150);
+      pickEmailAccountSuggestion(this.getAttribute('data-email'),this.getAttribute('data-name'),300);
     });
   });
 };
@@ -5854,14 +5854,14 @@ window.pickEmailAccountSuggestion=function(email,name,limit){
   var sugBox=document.getElementById('ea-suggestions');
   if(emailEl)emailEl.value=email;
   if(nameEl)nameEl.value=name;
-  if(limitEl)limitEl.value=limit||150;
+  if(limitEl)limitEl.value=limit||300;
   if(sugBox)sugBox.style.display='none';
 };
 
 window.submitCreateEmailAndConnectMicrosoft=function(managerId){
   var email=(document.getElementById('ea-email')||{}).value||'';
   var name=(document.getElementById('ea-name')||{}).value||'';
-  var limit=parseInt((document.getElementById('ea-limit')||{}).value||'150');
+  var limit=parseInt((document.getElementById('ea-limit')||{}).value||'300');
   if(!email||!name){showToast('Email address and display name required','warning');return;}
   // Sanitise managerId — treat string "null" or empty as no assignment
   var assignTo=(managerId&&managerId!=='null'&&managerId!=='')?managerId:undefined;
@@ -5871,7 +5871,7 @@ window.submitCreateEmailAndConnectMicrosoft=function(managerId){
     closeModal();
     render();
     // Then open Microsoft OAuth popup
-    var url=API_URL+'/auth/microsoft/connect?userEmailId='+a.id+'&token='+STATE.token;
+    var url=API_URL+'/auth/microsoft/connect?accountId='+a.id+'&token='+STATE.token;
     var popup=window.open(url,'ms_oauth','width=600,height=700,scrollbars=yes');
     showToast('Account created — complete Microsoft login in the popup','info');
     // Listen for popup callback
@@ -5895,7 +5895,7 @@ window.submitCreateEmailAndConnectMicrosoft=function(managerId){
 window.submitCreateAndAssignEmailAccount=function(managerId){
   var email=(document.getElementById('ea-email')||{}).value||'';
   var name=(document.getElementById('ea-name')||{}).value||'';
-  var limit=parseInt((document.getElementById('ea-limit')||{}).value||'150');
+  var limit=parseInt((document.getElementById('ea-limit')||{}).value||'300');
   if(!email||!name){showToast('Email address and display name required','warning');return;}
   var assignTo=(managerId&&managerId!=='null'&&managerId!=='')?managerId:undefined;
   apiPost('/email-accounts',{email_address:email,display_name:name,assigned_to:assignTo,daily_send_limit:limit}).then(function(a){
@@ -5917,7 +5917,7 @@ window.openEditEmailAccount=function(id){
       '<div class="fgrp"><label class="flbl">Email address</label><input class="inp" id="ea-email" value="'+htmlEsc(a.email_address)+'"/></div>'+
       '<div class="fgrp"><label class="flbl">Display name</label><input class="inp" id="ea-name" value="'+htmlEsc(a.display_name)+'"/></div>'+
       '<div class="fgrp"><label class="flbl">Assign to Manager</label><select class="sel" id="ea-manager">'+mOpts+'</select></div>'+
-      '<div class="fgrp"><label class="flbl">Daily send limit</label><input class="inp" type="number" id="ea-limit" value="'+htmlEsc(String(a.daily_send_limit||150))+'" min="1" max="500"/></div>'+
+      '<div class="fgrp"><label class="flbl">Daily send limit</label><input class="inp" type="number" id="ea-limit" value="'+htmlEsc(String(a.daily_send_limit||300))+'" min="1" max="500"/></div>'+
     '</div>'+
     '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
       '<button class="btn btn-primary" onclick="submitEditEmailAccount(\''+id+'\')">Save changes</button></div>'+
@@ -5931,7 +5931,7 @@ window.submitEditEmailAccount=function(id){
   var email=(document.getElementById('ea-email')||{}).value||'';
   var name=(document.getElementById('ea-name')||{}).value||'';
   var manager=(document.getElementById('ea-manager')||{}).value||null;
-  var limit=parseInt((document.getElementById('ea-limit')||{}).value||'150');
+  var limit=parseInt((document.getElementById('ea-limit')||{}).value||'300');
   apiPut('/email-accounts/'+id,{email_address:email,display_name:name,assigned_to:manager||null,daily_send_limit:limit}).then(function(a){
     STATE.emailAccounts=STATE.emailAccounts.map(function(x){return x.id===id?a:x;});
     closeModal();showToast('Email ID updated','success');render();
@@ -5962,7 +5962,7 @@ function renderAssignLeads(){
   // Show manager cards
   var managerCards=managers.map(function(m){
     var emailAccounts=(STATE.userEmailsCache[m.id]||[]).filter(function(a){return a.is_active;});
-    var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||150);},0);
+    var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||300);},0);
     var hasCapacity=emailAccounts.length>0;
     return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:16px;display:flex;align-items:center;gap:14px;margin-bottom:12px">'+
       av(m,'40')+
