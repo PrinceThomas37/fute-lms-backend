@@ -60,6 +60,31 @@ module.exports = function (app, deps) {
     'bd_manager:users!bd_manager_id(id,name,employee_id), ' +
     'creator:users!created_by(id,name,employee_id)';
 
+  // All editable job fields (matches the frontend form + migration #2 columns).
+  // Used by both create routes and the PUT so every field round-trips.
+  const JOB_FIELDS = [
+    'job_title','client','client_job_id','client_manager','end_client',
+    'status','job_type','emp_level','work_auth','priority','remote','clearance',
+    'country','state','city','zip','pay_cur','pay_min','pay_max',
+    'start_date','end_date','duration','placement_fee','req_docs',
+    'primary_skills','secondary_skills','exp_min','exp_max',
+    'industry','domain','degree','languages','job_category',
+    'positions','job_description','comments'
+  ];
+  // Date columns need null (not '') when empty, or Postgres rejects them.
+  const JOB_DATE_FIELDS = ['start_date','end_date'];
+  function pickJobFields(src) {
+    const out = {};
+    src = src || {};
+    JOB_FIELDS.forEach(function (k) {
+      if (src[k] === undefined) return;
+      let v = src[k];
+      if (JOB_DATE_FIELDS.indexOf(k) > -1 && (v === '' || v === null)) { out[k] = null; return; }
+      out[k] = v;
+    });
+    return out;
+  }
+
   // ==========================================================================
   // CONVERSION — lead -> job order
   // ==========================================================================
@@ -93,24 +118,21 @@ module.exports = function (app, deps) {
 
       const b = req.body || {};
       const jobCode = await nextId('JOB');
-      const { data: jobOrder, error } = await supabase.from('job_orders').insert({
+      const jobRow = Object.assign({
         job_code: jobCode,
         source_lead_id: lead.id,
         lead_code: leadCode,
         company_id: lead.company_id,
-        position_title: lead.position,              // title carries over from the lead
-        client_name: b.client_name || null,
-        job_description: b.job_description || null,
-        location: b.location || lead.location || null,
-        pay_rate: b.pay_rate || null,
-        bill_rate: b.bill_rate || null,
-        positions_count: b.positions_count || 1,
-        employment_type: b.employment_type || null,
-        priority: b.priority || 'Normal',
-        status: 'Open',
+        job_title: lead.position,                   // title carries over from the lead
+        priority: 'Normal',
+        status: 'Active',
         bd_manager_id: b.bd_manager_id || req.user.id,
         created_by: req.user.id
-      }).select(JOB_ORDER_SELECT).single();
+      }, pickJobFields(b));
+      // never let the client blank out the inherited title
+      if (!jobRow.job_title) jobRow.job_title = lead.position;
+      const { data: jobOrder, error } = await supabase.from('job_orders')
+        .insert(jobRow).select(JOB_ORDER_SELECT).single();
       if (error) throw error;
 
       res.status(201).json(jobOrder);
@@ -160,24 +182,20 @@ module.exports = function (app, deps) {
 
       // 2) create the job order from that lead
       const jobCode = await nextId('JOB');
-      const { data: jobOrder, error } = await supabase.from('job_orders').insert({
+      const jobRow = Object.assign({
         job_code: jobCode,
         source_lead_id: leadRow.id,
         lead_code: leadCode,
         company_id: leadRow.company_id,
-        position_title: leadRow.position,
-        client_name: job.client_name || null,
-        job_description: job.job_description || null,
-        location: job.location || leadRow.location || null,
-        pay_rate: job.pay_rate || null,
-        bill_rate: job.bill_rate || null,
-        positions_count: job.positions_count || 1,
-        employment_type: job.employment_type || null,
-        priority: job.priority || 'Normal',
-        status: 'Open',
+        job_title: leadRow.position,
+        priority: 'Normal',
+        status: 'Active',
         bd_manager_id: job.bd_manager_id || req.user.id,
         created_by: req.user.id
-      }).select(JOB_ORDER_SELECT).single();
+      }, pickJobFields(job));
+      if (!jobRow.job_title) jobRow.job_title = leadRow.position;
+      const { data: jobOrder, error } = await supabase.from('job_orders')
+        .insert(jobRow).select(JOB_ORDER_SELECT).single();
       if (error) throw error;
 
       res.status(201).json(jobOrder);
@@ -231,10 +249,8 @@ module.exports = function (app, deps) {
       if (notGuest(req, res)) return;
       if (!isBDM(req)) return res.status(403).json({ error: 'Only BD Managers can edit job orders.' });
       const b = req.body || {};
-      const allowed = ['client_name','job_description','location','pay_rate','bill_rate',
-                       'positions_count','employment_type','priority','status','bd_manager_id','position_title'];
-      const updates = { updated_at: new Date() };
-      for (const k of allowed) if (b[k] !== undefined) updates[k] = b[k];
+      const updates = Object.assign({ updated_at: new Date() }, pickJobFields(b));
+      if (b.bd_manager_id !== undefined) updates.bd_manager_id = b.bd_manager_id || null;
       const { data, error } = await supabase.from('job_orders')
         .update(updates).eq('id', req.params.id).select(JOB_ORDER_SELECT).single();
       if (error) throw error;
