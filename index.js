@@ -2576,6 +2576,10 @@ app.delete('/auth/microsoft/:userEmailId', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── BD MANAGER / RECRUITER WORKFLOW (branch: bd-manager-recruiter-workflow) ──
+// Additive module — registers new routes only; nothing above is modified.
+require('./bd_recruiter_routes')(app, { supabase, auth, hasRole, notGuest, today });
+
 // ── START ──────────────────────────────────────────────────────
 app.listen(PORT, () => console.log(`Fute Global LMS API v3.0.0 running on port ${PORT}`));
 module.exports = app;
