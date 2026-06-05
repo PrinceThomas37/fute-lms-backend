@@ -804,7 +804,7 @@ function renderApp(){
   renderToasts()+renderModal();
 }
 
-function roleLabel(r){return{ra:"Research Analyst",bd:"BD Manager",admin:"Admin",ra_lead:"RA Team Lead",bd_lead:"BD Team Lead"}[r]||r;}
+function roleLabel(r){return{ra:"Research Analyst",bd:"BD Manager",admin:"Admin",ra_lead:"RA Team Lead",bd_lead:"BD Team Lead",recruiter:"Recruiter"}[r]||r;}
 
 // ════════════════════════════════════════════════
 // RENDER PAGES
@@ -1963,10 +1963,14 @@ function renderAdmin(){
   var selectedUserId=STATE.adminSelectedUser||null;
   if(selectedUserId){return renderAdminUserDetail(selectedUserId);}
 
-  var roleOrder=['admin','ra_lead','bd_lead','bd','ra'];
-  var roleGroupLabels={admin:'Admins',ra_lead:'RA Team Leads',bd_lead:'BD Team Leads',bd:'Managers',ra:'Research Analysts'};
+  var roleOrder=['admin','ra_lead','bd_lead','bd','ra','recruiter'];
+  var roleGroupLabels={admin:'Admins',ra_lead:'RA Team Leads',bd_lead:'BD Team Leads',bd:'Managers',ra:'Research Analysts',recruiter:'Recruiters'};
   var grouped={};roleOrder.forEach(function(r){grouped[r]=[];});
-  STATE.users.forEach(function(usr){if(grouped[usr.role])grouped[usr.role].push(usr);});
+  STATE.users.forEach(function(usr){
+    var r=usr.role;
+    if(Array.isArray(usr.roles)&&usr.roles.length&&!grouped[r])r=usr.roles[0];
+    if(grouped[r])grouped[r].push(usr);
+  });
 
   var sections=roleOrder.map(function(role){
     var users=grouped[role]||[];
@@ -2011,8 +2015,8 @@ function renderAdminUserDetail(userId){
   if(!usr)return'';
   var isManager=usr.role==='bd';
   var emailAccounts=(STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===userId;});
-  var roleOpts=['ra','ra_lead','bd','bd_lead','admin'].map(function(r){
-    var labels={ra:'Research Analyst',ra_lead:'RA Team Lead',bd:'Manager',bd_lead:'BD Team Lead',admin:'Admin'};
+  var roleOpts=['ra','ra_lead','bd','bd_lead','admin','recruiter'].map(function(r){
+    var labels={ra:'Research Analyst',ra_lead:'RA Team Lead',bd:'Manager',bd_lead:'BD Team Lead',admin:'Admin',recruiter:'Recruiter'};
     return '<option value="'+r+'"'+(usr.role===r?' selected':'')+'>'+labels[r]+'</option>';
   }).join('');
   var emailRows=emailAccounts.map(function(a){
@@ -2416,6 +2420,7 @@ function renderUserModal(existing){
             '<option value="bd"'+(u.role==="bd"?" selected":"")+'>BD Manager</option>'+
             '<option value="bd_lead"'+(u.role==="bd_lead"?" selected":"")+'>BD Team Lead</option>'+
             '<option value="admin"'+(u.role==="admin"?" selected":"")+'>Admin</option>'+
+            '<option value="recruiter"'+(u.role==="recruiter"?" selected":"")+'>Recruiter</option>'+
           '</select>'+
         '</div>'+
         '<div class="fgrp"><label class="flbl">Email platform</label><select class="sel" id="u-plt"><option'+(u.plt==="Gmail"?" selected":"")+'>Gmail</option><option'+(u.plt==="Outlook"?" selected":"")+'>Outlook</option></select></div>'+
@@ -3243,8 +3248,8 @@ window.toggleBDAssign=function(role){
 };
 window.openAddUser=function(){
   var managers=STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead'||x.role==='admin';});
-  var roleOpts=['ra','ra_lead','bd','bd_lead','admin'].map(function(r){
-    var labels={ra:'Research Analyst',ra_lead:'RA Team Lead',bd:'Manager',bd_lead:'BD Team Lead',admin:'Admin'};
+  var roleOpts=['ra','ra_lead','bd','bd_lead','admin','recruiter'].map(function(r){
+    var labels={ra:'Research Analyst',ra_lead:'RA Team Lead',bd:'Manager',bd_lead:'BD Team Lead',admin:'Admin',recruiter:'Recruiter'};
     return '<option value="'+r+'">'+labels[r]+'</option>';
   }).join('');
   STATE.modal='<div class="modal modal-w480">'+
