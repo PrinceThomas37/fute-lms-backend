@@ -1963,36 +1963,28 @@ function renderAdmin(){
   var selectedUserId=STATE.adminSelectedUser||null;
   if(selectedUserId){return renderAdminUserDetail(selectedUserId);}
 
-  // tab + search state
-  var tab=STATE.adminTab||'all';
+  var tab=STATE.adminTab||'bd';
   var q=(STATE.adminSearch||'').toLowerCase().trim();
 
-  // tab definitions
   var tabs=[
-    {id:'all',      lbl:'All Users'},
-    {id:'bd',       lbl:'BD Managers'},
-    {id:'ra',       lbl:'Research Analysts'},
-    {id:'bdteam',   lbl:'BD Team'},
-    {id:'rateam',   lbl:'RA Team'},
-    {id:'recruiter',lbl:'Recruiters'}
+    {id:'bd',        lbl:'BD'},
+    {id:'ra',        lbl:'RA'},
+    {id:'recruiter', lbl:'Recruiter'},
+    {id:'admin',     lbl:'Admin'}
   ];
 
   var assignments=STATE.teamAssignments||[];
-
-  // filter users by tab
   var allUsers=STATE.users||[];
+
   function usersForTab(t){
-    if(t==='all')     return allUsers;
-    if(t==='bd')      return allUsers.filter(function(x){return userHasRole(x,'bd')&&!userHasRole(x,'bd_lead')&&!userHasRole(x,'admin');});
-    if(t==='ra')      return allUsers.filter(function(x){return userHasRole(x,'ra')&&!userHasAnyRole(x,'bd','bd_lead','admin');});
-    if(t==='bdteam')  return allUsers.filter(function(x){return userHasRole(x,'bd_lead');});
-    if(t==='rateam')  return allUsers.filter(function(x){return userHasRole(x,'bd');});
-    if(t==='recruiter')return allUsers.filter(function(x){return userHasRole(x,'recruiter');});
+    if(t==='bd')        return allUsers.filter(function(x){return userHasAnyRole(x,'bd','bd_lead')&&!userHasRole(x,'admin');});
+    if(t==='ra')        return allUsers.filter(function(x){return userHasAnyRole(x,'ra','ra_lead')&&!userHasAnyRole(x,'bd','bd_lead','admin');});
+    if(t==='recruiter') return allUsers.filter(function(x){return userHasRole(x,'recruiter')&&!userHasAnyRole(x,'bd','bd_lead','ra','ra_lead','admin');});
+    if(t==='admin')     return allUsers.filter(function(x){return userHasRole(x,'admin');});
     return allUsers;
   }
-  var tabUsers=usersForTab(tab);
 
-  // apply search
+  var tabUsers=usersForTab(tab);
   if(q){
     tabUsers=tabUsers.filter(function(x){
       return (x.name||'').toLowerCase().indexOf(q)>-1||
@@ -2002,63 +1994,29 @@ function renderAdmin(){
     });
   }
 
-  // tab bar
   var tabBar=tabs.map(function(t){
     var count=usersForTab(t.id).length;
     var on=tab===t.id;
-    return '<button onclick="STATE.adminTab=\''+t.id+'\';render()" style="padding:8px 14px;border:0;border-bottom:2px solid '+(on?'var(--accent)':'transparent')+';background:none;cursor:pointer;font-size:13px;font-weight:'+(on?'700':'500')+';color:'+(on?'var(--accent)':'var(--text2)')+'">'+t.lbl+' <span style="font-size:11px;color:'+(on?'var(--accent)':'var(--text3)')+'">'+count+'</span></button>';
+    return '<button onclick="STATE.adminTab=\''+t.id+'\';render()" style="padding:8px 16px;border:0;border-bottom:2px solid '+(on?'var(--accent)':'transparent')+';background:none;cursor:pointer;font-size:13px;font-weight:'+(on?'700':'500')+';color:'+(on?'var(--accent)':'var(--text2)')+'">'+t.lbl+' <span style="font-size:11px;color:'+(on?'var(--accent)':'var(--text3)')+'">'+count+'</span></button>';
   }).join('');
 
-  // rows
-  var rows='';
-  if(tab==='bdteam'){
-    // BD Team: show BD Leads with their assigned BD Managers
-    var bdLeads=usersForTab('bdteam').filter(function(x){return !q||(x.name||'').toLowerCase().indexOf(q)>-1||(x.email||'').toLowerCase().indexOf(q)>-1;});
-    rows=bdLeads.map(function(lead){
-      var members=assignments.filter(function(a){return a.manager_id===lead.id&&a.assignment_type==='bd_to_bdlead';});
-      var memberNames=members.map(function(a){return a.member&&a.member.name||'';}).filter(Boolean).join(', ');
-      return '<div onclick="STATE.adminSelectedUser=\''+lead.id+'\';render()" style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer">'+
-        av(lead,'36')+
-        '<div style="flex:1"><div style="font-weight:600;font-size:13.5px">'+htmlEsc(lead.name)+'</div>'+
-          '<div style="font-size:11.5px;color:var(--text3)">'+htmlEsc(lead.email)+'</div></div>'+
-        (memberNames?'<span style="font-size:11px;padding:2px 8px;background:var(--accent-l);color:var(--accent);border-radius:8px">'+memberNames+'</span>':'<span style="font-size:11px;color:var(--text3)">No BDs assigned</span>')+
-        '<div style="color:var(--text3);font-size:18px;margin-left:8px">›</div>'+
-      '</div>';
-    }).join('');
-  } else if(tab==='rateam'){
-    // RA Team: show BD Managers with their assigned RAs
-    var bdMgrs=usersForTab('bd').filter(function(x){return !q||(x.name||'').toLowerCase().indexOf(q)>-1||(x.email||'').toLowerCase().indexOf(q)>-1;});
-    rows=bdMgrs.map(function(mgr){
-      var members=assignments.filter(function(a){return a.manager_id===mgr.id&&a.assignment_type==='ra_to_bd';});
-      var memberNames=members.map(function(a){return a.member&&a.member.name||'';}).filter(Boolean).join(', ');
-      return '<div onclick="STATE.adminSelectedUser=\''+mgr.id+'\';render()" style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer">'+
-        av(mgr,'36')+
-        '<div style="flex:1"><div style="font-weight:600;font-size:13.5px">'+htmlEsc(mgr.name)+'</div>'+
-          '<div style="font-size:11.5px;color:var(--text3)">'+htmlEsc(mgr.email)+'</div></div>'+
-        (memberNames?'<span style="font-size:11px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:8px">'+memberNames+'</span>':'<span style="font-size:11px;color:var(--text3)">No RAs assigned</span>')+
-        '<button onclick="event.stopPropagation();openAssignRAToManager(\''+mgr.id+'\')" style="font-size:11px;padding:4px 10px;background:var(--accent);color:#fff;border:0;border-radius:7px;cursor:pointer">+ Assign RA</button>'+
-        '<div style="color:var(--text3);font-size:18px;margin-left:8px">›</div>'+
-      '</div>';
-    }).join('');
-  } else {
-    // All other tabs: standard user rows
-    rows=tabUsers.map(function(usr){
-      var emailCount=(STATE.userEmailsCache&&STATE.userEmailsCache[usr.id]||[]).length||
-                     (STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===usr.id;}).length;
-      var teamCount=assignments.filter(function(a){return a.manager_id===usr.id;}).length;
-      return '<div onclick="STATE.adminSelectedUser=\''+usr.id+'\';loadUserEmails(\''+usr.id+'\');render()" style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer">'+
-        av(usr,'36')+
-        '<div style="flex:1;min-width:0">'+
-          '<div style="font-weight:600;font-size:13.5px">'+htmlEsc(usr.name)+'</div>'+
-          '<div style="font-size:11.5px;color:var(--text3)">'+htmlEsc(usr.email)+(usr.empId?' · '+htmlEsc(usr.empId):'')+'</div>'+
-        '</div>'+
-        (emailCount?'<span style="font-size:11px;padding:2px 8px;background:var(--accent-l);color:var(--accent);border-radius:8px">'+emailCount+' email'+(emailCount>1?'s':'')+'</span>':'')+
-        (teamCount?'<span style="font-size:11px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:8px">'+teamCount+' member'+(teamCount>1?'s':'')+'</span>':'')+
-        '<span style="font-size:11px;padding:3px 9px;background:'+(usr.is_active!==false?'var(--green-l)':'var(--red-l)')+';color:'+(usr.is_active!==false?'var(--green)':'var(--red)')+';border-radius:8px;font-weight:600">'+(usr.is_active!==false?'Active':'Inactive')+'</span>'+
-        '<div style="color:var(--text3);font-size:18px;margin-left:4px">›</div>'+
-      '</div>';
-    }).join('');
-  }
+  var rows=tabUsers.map(function(usr){
+    var emailCount=(STATE.userEmailsCache&&STATE.userEmailsCache[usr.id]||[]).length||
+                   (STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===usr.id;}).length;
+    var teamCount=assignments.filter(function(a){return a.manager_id===usr.id;}).length;
+    return '<div onclick="STATE.adminSelectedUser=\''+usr.id+'\';loadUserEmails(\''+usr.id+'\');render()" style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer">'+
+      av(usr,'36')+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-weight:600;font-size:13.5px">'+htmlEsc(usr.name)+'</div>'+
+        '<div style="font-size:11.5px;color:var(--text3)">'+htmlEsc(usr.email)+(usr.empId?' · '+htmlEsc(usr.empId):'')+'</div>'+
+      '</div>'+
+      (usr.desig?'<span style="font-size:11px;padding:2px 8px;background:var(--bg);border:1px solid var(--border);color:var(--text2);border-radius:8px">'+htmlEsc(usr.desig)+'</span>':'')+
+      (emailCount?'<span style="font-size:11px;padding:2px 8px;background:var(--accent-l);color:var(--accent);border-radius:8px">'+emailCount+' email'+(emailCount>1?'s':'')+'</span>':'')+
+      (teamCount?'<span style="font-size:11px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:8px">'+teamCount+' member'+(teamCount>1?'s':'')+'</span>':'')+
+      '<span style="font-size:11px;padding:3px 9px;background:'+(usr.is_active!==false?'var(--green-l)':'var(--red-l)')+';color:'+(usr.is_active!==false?'var(--green)':'var(--red)')+';border-radius:8px;font-weight:600">'+(usr.is_active!==false?'Active':'Inactive')+'</span>'+
+      '<div style="color:var(--text3);font-size:18px;margin-left:4px">›</div>'+
+    '</div>';
+  }).join('');
 
   var canSeeEngine=userHasAnyRole(u,'admin','ra_lead');
   var engineBtn='<button onclick="openEmailEngineModal()" style="display:flex;align-items:center;gap:7px;padding:7px 14px;background:var(--card);border:1px solid var(--border2);border-radius:8px;font-size:13px;color:var(--text2);cursor:pointer">'+
@@ -2074,15 +2032,12 @@ function renderAdmin(){
         '<button class="btn btn-primary btn-sm" onclick="openAddUser()">'+ico('plus',13)+'Add user</button>'+
       '</div>'+
     '</div></div>'+
-    // search bar
     '<div style="margin-bottom:14px">'+
       '<input class="inp" placeholder="Search by name, email, employee ID…" value="'+htmlEsc(STATE.adminSearch||'')+'" oninput="STATE.adminSearch=this.value;render()" style="max-width:360px">'+
     '</div>'+
-    // tab bar
-    '<div style="display:flex;gap:2px;border-bottom:2px solid var(--border);margin-bottom:16px;overflow-x:auto">'+tabBar+'</div>'+
-    // user list
+    '<div style="display:flex;gap:2px;border-bottom:2px solid var(--border);margin-bottom:16px">'+tabBar+'</div>'+
     '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
-      (rows||'<div style="padding:40px;text-align:center;color:var(--text3);font-size:13px)">'+(q?'No users match "'+htmlEsc(q)+'"':'No users in this group yet.')+'</div>')+
+      (rows||'<div style="padding:40px;text-align:center;color:var(--text3);font-size:13px">'+(q?'No users match "'+htmlEsc(q)+'"':'No users in this group yet.')+'</div>')+
     '</div>'+
   '</div>';
 }
