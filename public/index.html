@@ -518,6 +518,9 @@ var STATE = {
   composeCompanyId: null,
   composeFromEmailId: null,
   showAIPanel: false,
+  signatureHtml: '',
+  sigEditing: false,
+  sigLayout: 'simple',
   raForm: {
     coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',
     position:'',jobUrl:'',jobCreatedDate:'',jobOpenedDate:'',salaryRange:'',source:'',editJobId:null,
@@ -1668,10 +1671,18 @@ function renderEmail(){
   }
 
   // ── OUTREACH PLAN TAB ──
-  var vars=[['{{fn}}','First name'],['{{company}}','Company'],['{{pos}}','Position'],['{{ind}}','Industry'],['{{desig}}','Designation'],['{{loc}}','Location'],['{{sender}}','Sender name']];
-  var varChips=vars.map(function(v){
-    return '<span onclick="insertVar(\''+v[0]+'\')" style="font-size:11.5px;padding:4px 10px;background:var(--accent-l);color:var(--accent);border-radius:6px;cursor:pointer;font-family:var(--mono);border:1px solid rgba(37,99,235,.2)">'+v[0]+'<span style="font-family:var(--font);font-size:10px;opacity:.7;margin-left:4px">'+v[1]+'</span></span>';
-  }).join(' ');
+  var vars=[['{{fn}}','First name'],['{{ln}}','Last name'],['{{company}}','Company name'],['{{pos}}','Position'],['{{ind}}','Industry'],['{{desig}}','Designation'],['{{loc}}','Location'],['{{sender}}','Sender name']];
+  var varChips='<div style="display:flex;align-items:center;gap:7px">'+
+    '<span style="font-size:11px;color:var(--text3);white-space:nowrap">Insert variable:</span>'+
+    '<select id="var-picker-sel" onchange="insertVarFromPicker(this.value,\''+activeTmpl.bodyId+'\')" style="font-size:12px;padding:4px 8px;border:1px solid var(--border2);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer;max-width:180px">'+
+      '<option value="">— pick one —</option>'+
+      vars.map(function(v){return '<option value="'+v[0]+'">'+v[0]+' — '+v[1]+'</option>';}).join('')+
+    '</select>'+
+    '<select id="var-picker-subj-sel" onchange="insertVarFromPicker(this.value,\''+activeTmpl.subjId+'\')" style="font-size:12px;padding:4px 8px;border:1px solid var(--border2);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer;max-width:160px">'+
+      '<option value="">into subject…</option>'+
+      vars.map(function(v){return '<option value="'+v[0]+'">'+v[0]+'</option>';}).join('')+
+    '</select>'+
+  '</div>';
   if(!STATE.activeTmpl)STATE.activeTmpl='outreach';
   var myPlan=STATE.myOutreachPlan||{};
   var fu1Day=parseInt(myPlan['fu1_day']||'3',10);
@@ -1718,13 +1729,61 @@ function renderEmail(){
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
           '<div><div style="font-weight:700;font-size:14px;color:var(--text)">'+activeTmpl.label+'</div>'+
               '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+activeTmpl.sublabel+'</div></div>'+
-          '<div style="display:flex;gap:6px;flex-wrap:wrap">'+varChips+'</div>'+
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'+varChips+'</div>'+
         '</div>'+
         daySettingsHtml+
         '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="'+activeTmpl.subjId+'" value="'+htmlEsc(activeTmpl.subjVal)+'"/></div>'+
         '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:200px" id="'+activeTmpl.bodyId+'">'+htmlEsc(activeTmpl.bodyVal)+'</textarea></div>'+
         '<button class="btn btn-primary mt2" onclick="saveOutreachTemplate(\''+activeTmpl.key+'\',\''+activeTmpl.subjId+'\',\''+activeTmpl.bodyId+'\')" >Save template</button>'+
       '</div>'+
+
+      // ── SIGNATURE EDITOR ──────────────────────────────────────
+      (function(){
+        var sig=STATE.myOutreachPlan&&STATE.myOutreachPlan['signature_html']||STATE.signatureHtml||'';
+        var editing=STATE.sigEditing;
+        var presets={simple:'<div style="font-family:Arial,sans-serif;font-size:13px;color:#222;line-height:1.6"><img src="data:image/png;base64,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" alt="Fute Global" style="height:36px;display:block;margin-bottom:10px"><p style="margin:0"><strong>{{sender}}</strong><br><span style="color:#555">Fute Global LLC</span><br><a href="mailto:{{senderemail}}" style="color:#1E7A3C;text-decoration:none">{{senderemail}}</a></p></div>',full:'<div style="font-family:Arial,sans-serif;font-size:13px;color:#222;line-height:1.6"><img src="data:image/png;base64,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" alt="Fute Global" style="height:36px;display:block;margin-bottom:10px"><p style="margin:0"><strong>{{sender}}</strong><br><span style="color:#555;font-size:12px">BD Manager, Fute Global LLC</span><br><br><a href="mailto:{{senderemail}}" style="color:#1E7A3C;text-decoration:none">{{senderemail}}</a><br><span style="color:#555">+1 (972)-452-6644</span><br><a href="https://www.futeglobal.com/" style="color:#1E7A3C;text-decoration:none">www.futeglobal.com</a></p></div>',block:'<table style="font-family:Arial,sans-serif;font-size:13px;color:#222;border-collapse:collapse;max-width:520px"><tr><td style="padding-bottom:10px" colspan="3"><img src="data:image/png;base64,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" alt="Fute Global" style="height:36px;display:block;margin-bottom:10px"></td></tr><tr><td style="padding-right:16px;border-right:3px solid #1E7A3C;vertical-align:top;padding-top:4px"><p style="margin:0;white-space:nowrap"><strong style="font-size:14px">{{sender}}</strong><br><span style="color:#555;font-size:12px">BD Manager</span><br><span style="color:#1E7A3C;font-size:12px;font-weight:600">Fute Global LLC</span></p></td><td style="width:14px"></td><td style="vertical-align:top;font-size:12px;color:#555;padding-top:4px"><p style="margin:0">&#128231; <a href="mailto:{{senderemail}}" style="color:#1E7A3C;text-decoration:none">{{senderemail}}</a><br>&#128222; +1 (972)-452-6644<br>&#127760; <a href="https://www.futeglobal.com/" style="color:#1E7A3C;text-decoration:none">www.futeglobal.com</a><br>&#128205; 8111 LBJ Freeway, Suite 1340, Dallas, TX 75251</p></td></tr></table>'};
+        var presetNames={simple:'Simple',full:'Professional',block:'Branded block'};
+        var previewHtml=sig?(sig.replace(/{{sender}}/g,STATE.user&&STATE.user.name||'Your Name').replace(/{{senderemail}}/g,STATE.user&&STATE.user.email||'you@fute-global.com')):'<em style="color:var(--text3);font-size:12px">No signature set</em>';
+        return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);margin-top:16px;overflow:hidden">'+
+          '<div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'+
+            '<div>'+
+              '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Email Signature</div>'+
+              '<div style="font-size:11.5px;color:var(--text3);margin-top:2px">Appended automatically to all outbound emails as HTML</div>'+
+            '</div>'+
+            '<button onclick="STATE.sigEditing=!STATE.sigEditing;render()" style="font-size:12px;padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--bg);cursor:pointer;color:var(--text2)">'+(editing?'Close editor':'Edit signature')+'</button>'+
+          '</div>'+
+          (editing?
+            '<div style="padding:16px">'+
+              '<div style="margin-bottom:12px">'+
+                '<div style="font-size:11.5px;font-weight:600;color:var(--text2);margin-bottom:7px">Start from a preset layout:</div>'+
+                '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+                Object.keys(presets).map(function(pk){
+                  return '<button onclick="applySigPreset(\''+pk+'\')" style="font-size:12px;padding:5px 12px;border:1.5px solid var(--border2);border-radius:8px;background:var(--bg);cursor:pointer;color:var(--text2);transition:all .12s" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border2)\'">'+presetNames[pk]+'</button>';
+                }).join('')+
+                '</div>'+
+              '</div>'+
+              '<div style="margin-bottom:10px">'+
+                '<div style="font-size:11.5px;font-weight:600;color:var(--text2);margin-bottom:6px">Signature HTML <span style="font-weight:400;color:var(--text3)">(use {{sender}} and {{senderemail}} as variables)</span></div>'+
+                '<textarea id="sig-html-input" style="width:100%;min-height:110px;padding:10px;border:1.5px solid var(--border2);border-radius:8px;font-family:var(--mono);font-size:12px;line-height:1.6;resize:vertical;color:var(--text);background:var(--bg)" placeholder="<p>Best regards,<br><strong>{{sender}}</strong></p>">'+htmlEsc(sig)+'</textarea>'+
+              '</div>'+
+              '<div style="margin-bottom:12px">'+
+                '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Live preview</div>'+
+                '<div id="sig-live-preview" style="padding:14px 16px;background:#f8fafc;border:1px solid var(--border);border-radius:8px;font-family:Arial,sans-serif;min-height:48px">'+
+                  previewHtml+
+                '</div>'+
+              '</div>'+
+              '<div style="display:flex;gap:8px">'+
+                '<button onclick="saveSig()" style="padding:7px 18px;background:var(--accent);color:#fff;border:0;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">Save signature</button>'+
+                (sig?'<button onclick="clearSig()" style="padding:7px 14px;background:transparent;color:var(--red);border:1px solid var(--red);border-radius:8px;font-size:13px;cursor:pointer">Clear</button>':'')+
+              '</div>'+
+            '</div>'
+          :
+            '<div style="padding:14px 16px">'+
+              '<div style="padding:12px 16px;background:#f8fafc;border:1px solid var(--border);border-radius:8px;font-family:Arial,sans-serif;min-height:40px">'+previewHtml+'</div>'+
+            '</div>'
+          )+
+        '</div>';
+      })()+
     '</div>':
     '<div class="card cp"><div style="color:var(--text3);font-size:13px">Outreach plan editing is available to BD and Admin roles only.</div></div>';
 
@@ -3273,18 +3332,32 @@ window.sendEmail=function(){
   }
   // Attach from email if selected
   var fromEmail=null;
+  var fromEmailAddress=null;
   if(STATE.composeFromEmailId){
     var fromEm=(STATE.userEmailsCache[STATE.user.id]||[]).find(function(e){return e.id===STATE.composeFromEmailId;});
-    if(fromEm)fromEmail=fromEm.email_address;
+    if(fromEm){fromEmail=fromEm.email_address;fromEmailAddress=fromEm.email_address;}
   }
   var plt=STATE.user.plt||"Gmail";
   var gmailFrom=fromEmail||STATE.user.email||'';
-  var url=plt==="Gmail"
-    ?"https://mail.google.com/mail/?view=cm&to="+encodeURIComponent(ge.email)+"&su="+encodeURIComponent(ge.subj)+"&body="+encodeURIComponent(ge.body)+(gmailFrom?"&authuser="+encodeURIComponent(gmailFrom):'')
-    :"https://outlook.live.com/mail/0/deeplink/compose?to="+encodeURIComponent(ge.email)+"&subject="+encodeURIComponent(ge.subj)+"&body="+encodeURIComponent(ge.body);
+  // Build body for sending — HTML with signature for Outlook, plain text for Gmail deeplink
+  var sigHtml=STATE.myOutreachPlan&&STATE.myOutreachPlan['signature_html']||STATE.signatureHtml||'';
+  var senderName=STATE.user.name||'';
+  var senderEmail=fromEmailAddress||STATE.user.email||'';
+  var plainBody=ge.body||'';
+  var url;
+  if(plt==="Gmail"){
+    // Gmail deeplink only supports plain text body
+    var gmailBody=sigHtml?plainBody+'\n\n-- \n'+sigHtml.replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>'):plainBody;
+    url="https://mail.google.com/mail/?view=cm&to="+encodeURIComponent(ge.email)+"&su="+encodeURIComponent(ge.subj)+"&body="+encodeURIComponent(gmailBody)+(gmailFrom?"&authuser="+encodeURIComponent(gmailFrom):'');
+  } else {
+    // Outlook deeplink — compose window accepts plain text only in the URL param
+    // We open Outlook and include the sig in the body param as plain text stripped
+    var outlookBody=sigHtml?plainBody+'\n\n'+sigHtml.replace(/<br\s*\/?>/gi,'\n').replace(/<p[^>]*>/gi,'\n').replace(/<\/p>/gi,'').replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').trim():plainBody;
+    url="https://outlook.live.com/mail/0/deeplink/compose?to="+encodeURIComponent(ge.email)+"&subject="+encodeURIComponent(ge.subj)+"&body="+encodeURIComponent(outlookBody);
+  }
   window.open(url,"_blank");
-  STATE.emails.push({id:"e"+Date.now(),lid:ge.lid,by:STATE.user.id,to:ge.email,from_email:fromEmail||null,subj:ge.subj,body:ge.body,plt:plt,dt:todayIST(),status:"sent"});
-  showToast("Email opened in "+plt+(fromEmail?' from '+fromEmail:''),"success");
+  STATE.emails.push({id:"e"+Date.now(),lid:ge.lid,by:STATE.user.id,to:ge.email,from_email:fromEmail||null,subj:ge.subj,body:plainBody,plt:plt,dt:todayIST(),status:"sent"});
+  showToast("Email opened in "+plt+(fromEmail?' from '+fromEmail:'')+(sigHtml?' · signature appended':''),"success");
 }
 
 window.copyToClip=function(text){
@@ -3300,8 +3373,100 @@ function fallbackCopy(text){
   document.body.removeChild(el);
 }
 
+// Insert a merge variable at cursor position in any textarea by element ID
+window.insertVarFromPicker=function(v,targetId){
+  if(!v)return;
+  var el=document.getElementById(targetId);
+  if(!el){
+    // fallback: insert into the body textarea for the compose tab
+    var bodyEl=document.getElementById('email-body');
+    if(bodyEl){
+      var s=bodyEl.selectionStart!==undefined?bodyEl.selectionStart:bodyEl.value.length;
+      var e2=bodyEl.selectionEnd!==undefined?bodyEl.selectionEnd:s;
+      bodyEl.value=bodyEl.value.slice(0,s)+v+bodyEl.value.slice(e2);
+      bodyEl.selectionStart=bodyEl.selectionEnd=s+v.length;
+      STATE.emailBody=bodyEl.value;
+    }
+    // reset the picker
+    var pk=document.getElementById('var-picker-sel');if(pk)pk.value='';
+    var pks=document.getElementById('var-picker-subj-sel');if(pks)pks.value='';
+    return;
+  }
+  var start=el.selectionStart!==undefined?el.selectionStart:el.value.length;
+  var end2=el.selectionEnd!==undefined?el.selectionEnd:start;
+  el.value=el.value.slice(0,start)+v+el.value.slice(end2);
+  el.selectionStart=el.selectionEnd=start+v.length;
+  el.focus();
+  // reset pickers
+  var pk=document.getElementById('var-picker-sel');if(pk)pk.value='';
+  var pks=document.getElementById('var-picker-subj-sel');if(pks)pks.value='';
+};
+
+// Legacy insertVar (kept for any remaining callers) — inserts into email-body textarea
 window.insertVar=function(v){
-  if(el){var s=el.selectionStart||el.value.length;STATE.emailBody=STATE.emailBody.slice(0,s)+v+STATE.emailBody.slice(s);render();}
+  var el=document.getElementById('email-body')||document.getElementById('tmpl-o1-body')||document.getElementById('tmpl-fu1-body')||document.getElementById('tmpl-fu2-body');
+  if(el){
+    var s=el.selectionStart!==undefined?el.selectionStart:el.value.length;
+    var e2=el.selectionEnd!==undefined?el.selectionEnd:s;
+    el.value=el.value.slice(0,s)+v+el.value.slice(e2);
+    el.selectionStart=el.selectionEnd=s+v.length;
+    el.focus();
+  }
+};
+
+// Signature helpers
+var SIG_PRESETS={simple:'<div style="font-family:Arial,sans-serif;font-size:13px;color:#222;line-height:1.6"><img src="data:image/png;base64,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" alt="Fute Global" style="height:36px;display:block;margin-bottom:10px"><p style="margin:0"><strong>{{sender}}</strong><br><span style="color:#555">Fute Global LLC</span><br><a href="mailto:{{senderemail}}" style="color:#1E7A3C;text-decoration:none">{{senderemail}}</a></p></div>',full:'<div style="font-family:Arial,sans-serif;font-size:13px;color:#222;line-height:1.6"><img src="data:image/png;base64,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" alt="Fute Global" style="height:36px;display:block;margin-bottom:10px"><p style="margin:0"><strong>{{sender}}</strong><br><span style="color:#555;font-size:12px">BD Manager, Fute Global LLC</span><br><br><a href="mailto:{{senderemail}}" style="color:#1E7A3C;text-decoration:none">{{senderemail}}</a><br><span style="color:#555">+1 (972)-452-6644</span><br><a href="https://www.futeglobal.com/" style="color:#1E7A3C;text-decoration:none">www.futeglobal.com</a></p></div>',block:'<table style="font-family:Arial,sans-serif;font-size:13px;color:#222;border-collapse:collapse;max-width:520px"><tr><td style="padding-bottom:10px" colspan="3"><img src="data:image/png;base64,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" alt="Fute Global" style="height:36px;display:block;margin-bottom:10px"></td></tr><tr><td style="padding-right:16px;border-right:3px solid #1E7A3C;vertical-align:top;padding-top:4px"><p style="margin:0;white-space:nowrap"><strong style="font-size:14px">{{sender}}</strong><br><span style="color:#555;font-size:12px">BD Manager</span><br><span style="color:#1E7A3C;font-size:12px;font-weight:600">Fute Global LLC</span></p></td><td style="width:14px"></td><td style="vertical-align:top;font-size:12px;color:#555;padding-top:4px"><p style="margin:0">&#128231; <a href="mailto:{{senderemail}}" style="color:#1E7A3C;text-decoration:none">{{senderemail}}</a><br>&#128222; +1 (972)-452-6644<br>&#127760; <a href="https://www.futeglobal.com/" style="color:#1E7A3C;text-decoration:none">www.futeglobal.com</a><br>&#128205; 8111 LBJ Freeway, Suite 1340, Dallas, TX 75251</p></td></tr></table>'};
+window.applySigPreset=function(pk){
+  var html=SIG_PRESETS[pk]||'';
+  var el=document.getElementById('sig-html-input');
+  if(el){el.value=html;updateSigPreview(html);}
+};
+function updateSigPreview(html){
+  var prev=document.getElementById('sig-live-preview');
+  if(!prev)return;
+  var filled=html.replace(/{{sender}}/g,(STATE.user&&STATE.user.name)||'Your Name').replace(/{{senderemail}}/g,(STATE.user&&STATE.user.email)||'you@fute-global.com');
+  prev.innerHTML=filled||'<em style="color:#94A3B8;font-size:12px">Preview will appear here</em>';
+}
+// Wire live preview on input (called via oninput on the textarea via a delegated approach)
+document.addEventListener('input',function(e){
+  if(e.target&&e.target.id==='sig-html-input'){updateSigPreview(e.target.value);}
+});
+window.saveSig=function(){
+  var el=document.getElementById('sig-html-input');
+  var html=(el&&el.value)||'';
+  STATE.signatureHtml=html;
+  STATE.myOutreachPlan=STATE.myOutreachPlan||{};
+  STATE.myOutreachPlan['signature_html']=html;
+  STATE.sigEditing=false;
+  apiPost('/outreach-plan',{key:'signature_html',value:html}).then(function(){
+    showToast('Signature saved','success');render();
+  }).catch(function(e){showToast('Save failed: '+e.message,'error');});
+};
+window.clearSig=function(){
+  STATE.signatureHtml='';
+  STATE.myOutreachPlan=STATE.myOutreachPlan||{};
+  STATE.myOutreachPlan['signature_html']='';
+  STATE.sigEditing=false;
+  apiPost('/outreach-plan',{key:'signature_html',value:''}).then(function(){
+    showToast('Signature cleared','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');});
+};
+
+// Build the HTML email body from plain-text template + signature for sending
+function buildHtmlEmail(plainBody, sigHtml, senderName, senderEmail){
+  // Convert plain-text line breaks to <br> and wrap paragraphs
+  var htmlBody=plainBody
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\n\n/g,'</p><p>').replace(/\n/g,'<br>');
+  htmlBody='<p>'+htmlBody+'</p>';
+  var sig='';
+  if(sigHtml&&sigHtml.trim()){
+    var filled=sigHtml
+      .replace(/{{sender}}/g,htmlEsc(senderName||''))
+      .replace(/{{senderemail}}/g,htmlEsc(senderEmail||''));
+    sig='<hr style="border:none;border-top:1px solid #e2e8f0;margin:18px 0">'+filled;
+  }
+  return '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#0F172A">'+htmlBody+sig+'</div>';
 }
 
 window.toggleBDAssign=function(role){
@@ -6349,6 +6514,7 @@ function loadAppData(){
         if(plan['tmpl_fu1_body'])STATE.fu1Body=plan['tmpl_fu1_body'];
         if(plan['tmpl_fu2_subject'])STATE.fu2Subj=plan['tmpl_fu2_subject'];
         if(plan['tmpl_fu2_body'])STATE.fu2Body=plan['tmpl_fu2_body'];
+        if(plan['signature_html']!==undefined)STATE.signatureHtml=plan['signature_html']||'';
         render();
       }).catch(function(){});
     }
