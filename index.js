@@ -1693,6 +1693,13 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
   const failDetails = [], sentContactIds = [], sentJobIds = [];
   const startedAt = new Date().toISOString();
 
+  // Load this user's HTML signature (stored in app_settings as u_{uid}_signature_html)
+  let userSignatureHtml = '';
+  try {
+    const { data: sigRow } = await supabase.from('app_settings').select('value').eq('key', `u_${userId}_signature_html`).single();
+    userSignatureHtml = sigRow?.value || '';
+  } catch (_) {}
+
   const mailboxIds = [...new Set(pendingEmails.map(e => e.job?.sending_email_id).filter(Boolean))];
   const { limits, sentToday, delays, settings } = await loadMailboxQuotaState(mailboxIds);
   const lastSendAtByMailbox = {};
@@ -1781,7 +1788,7 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
         body: JSON.stringify({
           message: {
             subject: email.subject,
-            body: { contentType: 'Text', content: email.body },
+            body: { contentType: 'HTML', content: buildHtmlEmailBody(email.body, email._sigHtml || userSignatureHtml) },
             toRecipients: [{ emailAddress: { address: email.to_email } }]
           },
           saveToSentItems: true
@@ -2222,7 +2229,7 @@ app.post('/app-settings', auth, async (req, res) => {
 app.get('/outreach-plan', auth, async (req, res) => {
   try {
     const uid = req.user.id;
-    const keys = [`u_${uid}_fu1_day`,`u_${uid}_fu2_day`,`u_${uid}_tmpl_o1_subject`,`u_${uid}_tmpl_o1_body`,`u_${uid}_tmpl_fu1_subject`,`u_${uid}_tmpl_fu1_body`,`u_${uid}_tmpl_fu2_subject`,`u_${uid}_tmpl_fu2_body`];
+    const keys = [`u_${uid}_fu1_day`,`u_${uid}_fu2_day`,`u_${uid}_tmpl_o1_subject`,`u_${uid}_tmpl_o1_body`,`u_${uid}_tmpl_fu1_subject`,`u_${uid}_tmpl_fu1_body`,`u_${uid}_tmpl_fu2_subject`,`u_${uid}_tmpl_fu2_body`,`u_${uid}_signature_html`];
     const { data } = await supabase.from('app_settings').select('key,value').in('key', keys);
     const plan = {};
     (data || []).forEach(r => { plan[r.key.replace(`u_${uid}_`, '')] = r.value; });
@@ -2234,7 +2241,7 @@ app.post('/outreach-plan', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'bd', 'bd_lead', 'admin')) return res.status(403).json({ error: 'BD role required' });
     const uid = req.user.id;
-    const allowed = ['fu1_day','fu2_day','tmpl_o1_subject','tmpl_o1_body','tmpl_fu1_subject','tmpl_fu1_body','tmpl_fu2_subject','tmpl_fu2_body'];
+    const allowed = ['fu1_day','fu2_day','tmpl_o1_subject','tmpl_o1_body','tmpl_fu1_subject','tmpl_fu1_body','tmpl_fu2_subject','tmpl_fu2_body','signature_html'];
     const { key, value } = req.body;
     if (!allowed.includes(key)) return res.status(400).json({ error: 'Invalid key' });
     const fullKey = `u_${uid}_${key}`;
@@ -2512,12 +2519,26 @@ async function getMicrosoftToken(userEmailId) {
   return refreshed.access_token;
 }
 
+// Build an HTML email body from plain text + optional HTML signature.
+// Plain text is escaped and wrapped in <p> tags with <br> for line breaks.
+// The signature (already HTML) is appended after a ruled separator.
+function buildHtmlEmailBody(plainText, signatureHtml) {
+  const escaped = (plainText || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const htmlBody = '<p>' + escaped.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>') + '</p>';
+  const sig = signatureHtml && signatureHtml.trim()
+    ? '<hr style="border:none;border-top:1px solid #e2e8f0;margin:18px 0">' + signatureHtml
+    : '';
+  return '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#0F172A">' + htmlBody + sig + '</div>';
+}
+
 app.post('/emails/send-microsoft', auth, async (req, res) => {
   try {
-    const { user_email_id, to_email, subject, body, email_id } = req.body;
+    const { user_email_id, to_email, subject, body, email_id, signature_html } = req.body;
     if (!user_email_id || !to_email || !subject || !body) return res.status(400).json({ error: 'user_email_id, to_email, subject, body required' });
     const accessToken = await getMicrosoftToken(user_email_id);
-    const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', { method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: { subject, body: { contentType: 'Text', content: body }, toRecipients: [{ emailAddress: { address: to_email } }] }, saveToSentItems: true }) });
+    const htmlContent = buildHtmlEmailBody(body, signature_html || '');
+    const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', { method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: { subject, body: { contentType: 'HTML', content: htmlContent }, toRecipients: [{ emailAddress: { address: to_email } }] }, saveToSentItems: true }) });
     if (!sendRes.ok) { const errData = await sendRes.json().catch(() => ({})); throw new Error(errData?.error?.message || `Send failed: ${sendRes.status}`); }
     if (email_id) await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email_id);
     const todayDate = today();
