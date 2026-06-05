@@ -742,9 +742,8 @@ function renderApp(){
     ...(userHasRole(u,'ra')&&!userHasAnyRole(u,'admin','bd','bd_lead','ra_lead')?[{id:"insights",lbl:"Insights",ic:"dashboard"}]:[{id:"reminders",lbl:"Reminders",ic:"star",badge:STATE.reminders.filter(function(r){return r.user_id===u.id&&r.status==="pending"}).length||null}]),
     {id:"profile",lbl:"My Profile",ic:"profile"}
   ];
-  // Admin only: Admin panel + Manager Users
+  // Admin only: Admin panel
   if(userHasRole(u,'admin'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
-  if(userHasRole(u,'admin'))navItems.splice(5,0,{id:"managerusers",lbl:"Manager Users",ic:"email"});
   // RA Lead + Admin: Assign Leads + Insights (RA team view)
   if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
   if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(navItems.length-1,0,{id:"insights",lbl:"Insights",ic:"dashboard"});
@@ -1856,7 +1855,7 @@ function renderEmail(){
         if(!myEmails.length){
           return '<div class="card cp mb3">'
             +'<div class="fw6 mb2" style="font-size:13px">From</div>'
-            +'<div style="font-size:12px;color:var(--text3);padding:8px 0">No active email IDs assigned to your account. Add one in Manager Users.</div>'
+            +'<div style="font-size:12px;color:var(--text3);padding:8px 0">No active email IDs assigned to your account. Add one in Admin → your profile.</div>'
             +'</div>';
         }
         var fromOpts=myEmails.map(function(e){
@@ -2013,30 +2012,56 @@ function renderAdmin(){
 function renderAdminUserDetail(userId){
   var usr=STATE.users.find(function(x){return x.id===userId;});
   if(!usr)return'';
-  var isManager=usr.role==='bd';
-  var emailAccounts=(STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===userId;});
+
+  // trigger email load if not already cached
+  if(!(STATE.userEmailsCache&&STATE.userEmailsCache[userId])){
+    loadUserEmails(userId);
+  }
+
+  var userEmails=STATE.userEmailsCache&&STATE.userEmailsCache[userId]||[];
+  var assignments=STATE.teamAssignments||[];
+  var myManagers=assignments.filter(function(a){return a.member_id===userId;});
+  var myMembers=assignments.filter(function(a){return a.manager_id===userId;});
+
+  // role checkboxes (all roles including recruiter)
+  var rolesAll=['ra','ra_lead','bd','bd_lead','admin','recruiter'];
+  var roleLabelsMap={ra:'Research Analyst',ra_lead:'RA Team Lead',bd:'BD Manager',bd_lead:'BD Team Lead',admin:'Admin',recruiter:'Recruiter'};
+  var userRoles=Array.isArray(usr.roles)&&usr.roles.length?usr.roles:[usr.role];
+  var roleCheckboxes=rolesAll.map(function(r){
+    var checked=userRoles.indexOf(r)>-1;
+    return '<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:5px 0">'+
+      '<input type="checkbox" '+(checked?'checked':'')+' onchange="toggleUserRole(\''+userId+'\',\''+r+'\',this.checked)" style="width:15px;height:15px">'+
+      roleLabelsMap[r]+'</label>';
+  }).join('');
+
+  // role dropdown for primary role (used by save)
   var roleOpts=['ra','ra_lead','bd','bd_lead','admin','recruiter'].map(function(r){
-    var labels={ra:'Research Analyst',ra_lead:'RA Team Lead',bd:'Manager',bd_lead:'BD Team Lead',admin:'Admin',recruiter:'Recruiter'};
+    var labels={ra:'Research Analyst',ra_lead:'RA Team Lead',bd:'BD Manager',bd_lead:'BD Team Lead',admin:'Admin',recruiter:'Recruiter'};
     return '<option value="'+r+'"'+(usr.role===r?' selected':'')+'>'+labels[r]+'</option>';
   }).join('');
-  var emailRows=emailAccounts.map(function(a){
-    var isMicrosoft=a.platform==='Microsoft';
-    var msConnected=a.ms_connected||false;
-    var msBadge=isMicrosoft?
-      (msConnected?
-        '<span style="font-size:10px;padding:2px 7px;background:#e0f2fe;color:#0369a1;border-radius:6px;font-weight:600">✓ MS Connected</span>':
-        '<button onclick="connectMicrosoftAccount(\''+a.id+'\')" style="font-size:10px;padding:2px 8px;background:#0078d4;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:600">Connect Microsoft</button>'
-      ):'';
-    return '<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border)">'+
-      '<div style="flex:1"><div style="font-weight:500;font-size:13px">'+htmlEsc(a.display_name)+'</div>'+
-        '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(a.email_address)+'</div></div>'+
-      '<div style="font-size:12px;color:var(--text3)">'+htmlEsc(String(a.daily_send_limit||300))+'/day</div>'+
-      msBadge+
-      '<span style="font-size:11px;padding:2px 7px;border-radius:7px;font-weight:600;background:'+(a.is_active?'var(--green-l)':'var(--red-l)')+';color:'+(a.is_active?'var(--green)':'var(--red)')+'">'+( a.is_active?'Active':'Inactive')+'</span>'+
-      '<button class="btn-icon" onclick="openEditEmailAccount(\''+a.id+'\')">'+ico('edit',13)+'</button>'+
-      '<button class="btn-icon" style="color:'+(a.is_active?'var(--red)':'var(--green)')+'" onclick="toggleEmailAccount(\''+a.id+'\','+(!a.is_active)+')">'+( a.is_active?ico('trash',13):'↩')+'</button>'+
+
+  // email rows — using the richer Manager Users style
+  var emailRows=userEmails.map(function(e){
+    var msConn=e.ms_connected;
+    var platBadge='<span style="font-size:10px;padding:2px 7px;border-radius:6px;font-weight:600;background:'+(e.platform==='Microsoft'?'#e0f2fe':'#f0fdf4')+';color:'+(e.platform==='Microsoft'?'#0369a1':'#166534')+'">'+htmlEsc(e.platform)+'</span>';
+    var connBtn=e.platform==='Microsoft'&&!msConn?'<button onclick="connectMicrosoftUserEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:10px;padding:2px 8px;background:#0078d4;color:#fff;border:0;border-radius:6px;cursor:pointer">Connect</button>':(e.platform==='Microsoft'&&msConn?'<span style="font-size:10px;color:var(--green)">✓ Connected</span>':'');
+    return '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">'+
+      '<div style="flex:1;min-width:160px"><div style="font-weight:500;font-size:13px">'+htmlEsc(e.display_name||e.email_address)+'</div>'+
+        '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(e.email_address)+'</div></div>'+
+      platBadge+
+      (e.is_primary?'<span style="font-size:10px;padding:2px 7px;background:var(--amber-l);color:var(--amber);border-radius:6px;font-weight:600">Primary</span>':'')+
+      '<span style="font-size:10px;padding:2px 7px;border-radius:6px;font-weight:600;background:'+(e.is_active?'var(--green-l)':'var(--red-l)')+';color:'+(e.is_active?'var(--green)':'var(--red)')+'">'+( e.is_active?'Active':'Inactive')+'</span>'+
+      connBtn+
+      '<button onclick="toggleUserEmailActive(\''+userId+'\',\''+e.id+'\','+(e.is_active?'false':'true')+')" style="font-size:11px;color:'+(e.is_active?'var(--red)':'var(--green)')+';background:transparent;border:0;cursor:pointer">'+(e.is_active?'Deactivate':'Activate')+'</button>'+
+      (e.is_primary?'':'<button onclick="setPrimaryEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:11px;color:var(--text3);background:transparent;border:0;cursor:pointer">Set Primary</button>')+
+      '<button onclick="deleteUserEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:11px;color:var(--red);background:transparent;border:0;cursor:pointer">✕</button>'+
     '</div>';
   }).join('');
+
+  // team assignment
+  var teamHtml=
+    (myManagers.length?'<div style="font-size:13px;margin-bottom:8px">Reports to: '+myManagers.map(function(a){return '<strong>'+htmlEsc((a.manager&&a.manager.name)||'')+'</strong>';}).join(', ')+'</div>':'')+
+    (myMembers.length?'<div style="font-size:13px">Members: '+myMembers.map(function(a){return htmlEsc((a.member&&a.member.name)||'');}).filter(Boolean).join(', ')+'</div>':'<div style="font-size:13px;color:var(--text3)">No team members assigned.</div>');
 
   return '<div class="page">'+
     '<div class="ph"><div class="flex aic gap3">'+
@@ -2045,7 +2070,9 @@ function renderAdminUserDetail(userId){
       '<div><div class="ptitle" style="margin:0">'+htmlEsc(usr.name)+'</div>'+
         '<div class="psub" style="margin:0">'+roleLabel(usr.role)+(usr.empId?' · '+htmlEsc(usr.empId):'')+'</div></div>'+
     '</div></div>'+
-    '<div style="max-width:600px">'+
+    '<div style="max-width:620px">'+
+
+      // Profile
       '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
         '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Profile</div>'+
         '<div class="g2 mb3">'+
@@ -2057,23 +2084,39 @@ function renderAdminUserDetail(userId){
           '<div class="fgrp"><label class="flbl">Designation</label><input class="inp" id="ud-desig" value="'+htmlEsc(usr.desig||'')+'"/></div>'+
         '</div>'+
         '<div class="g2 mb3">'+
-          '<div class="fgrp"><label class="flbl">Role</label><select class="sel" id="ud-role">'+roleOpts+'</select></div>'+
+          '<div class="fgrp"><label class="flbl">Primary Role</label><select class="sel" id="ud-role">'+roleOpts+'</select></div>'+
           '<div class="fgrp"><label class="flbl">Platform</label><select class="sel" id="ud-plt"><option'+(usr.plt==='Gmail'?' selected':'')+'>Gmail</option><option'+(usr.plt==='Outlook'?' selected':'')+'>Outlook</option></select></div>'+
         '</div>'+
         '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:12px;border-top:1px solid var(--border)">'+
           '<button onclick="submitUserDetailSave(\''+userId+'\')" class="btn btn-primary">Save changes</button>'+
-          (usr.id!==STATE.user.id?'<button onclick="removeUser(\''+userId+'\',true)" style="background:transparent;color:var(--red);border:1px solid var(--red);padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer">Deactivate user</button>':'<span style="font-size:12px;color:var(--text3)">Cannot deactivate yourself</span>')+
+          (usr.id!==STATE.user.id?'<button onclick="removeUser(\''+userId+'\',true)" style="background:transparent;color:var(--red);border:1px solid var(--red);padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer">Deactivate</button>':'<span style="font-size:12px;color:var(--text3)">Cannot deactivate yourself</span>')+
         '</div>'+
       '</div>'+
-      (isManager?
-        '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;margin-bottom:16px">'+
-          '<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'+
-            '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Email IDs <span style="font-weight:400">('+emailAccounts.length+'/4)</span></div>'+
-            (emailAccounts.length<4?'<div style="display:flex;gap:6px"><button onclick="openAddEmailAccount(\''+userId+'\',true,\'Microsoft\')" style="font-size:12px;padding:5px 10px;background:var(--accent);color:#fff;border:0;border-radius:7px;cursor:pointer">+ Microsoft</button><button onclick="openAddEmailAccount(\''+userId+'\',true,\'Gmail\')" style="font-size:12px;padding:5px 10px;background:var(--card);color:var(--text2);border:1px solid var(--border);border-radius:7px;cursor:pointer">+ Gmail</button></div>':'<span style="font-size:12px;color:var(--text3)">Maximum reached</span>')+
+
+      // Roles
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
+        '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Roles</div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px">'+roleCheckboxes+'</div>'+
+      '</div>'+
+
+      // Outreach Email IDs (all users — relevant for BD/admin)
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;margin-bottom:16px">'+
+        '<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'+
+          '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Outreach Email IDs <span style="font-weight:400">('+userEmails.length+' · max 4)</span></div>'+
+          '<div style="display:flex;gap:6px">'+
+            '<button onclick="openAddUserEmail(\''+userId+'\',\'Microsoft\')" style="font-size:12px;padding:5px 10px;background:#0078d4;color:#fff;border:0;border-radius:7px;cursor:pointer">+ Microsoft</button>'+
+            '<button onclick="openAddUserEmail(\''+userId+'\',\'Gmail\')" style="font-size:12px;padding:5px 10px;background:#16a34a;color:#fff;border:0;border-radius:7px;cursor:pointer">+ Gmail</button>'+
           '</div>'+
-          (emailRows||'<div style="padding:20px;text-align:center;font-size:13px;color:var(--text3)">No email IDs assigned yet.</div>')+
-        '</div>'
-      :'<div style="background:var(--bg);border:1px dashed var(--border2);border-radius:var(--r2);padding:14px 16px;font-size:13px;color:var(--text3)">Email IDs are only assigned to Manager-role users.</div>')+
+        '</div>'+
+        (emailRows||'<div style="padding:20px;text-align:center;font-size:13px;color:var(--text3)">No outreach email IDs added yet.</div>')+
+      '</div>'+
+
+      // Team Assignment
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
+        '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Team Assignment</div>'+
+        teamHtml+
+      '</div>'+
+
     '</div>'+
   '</div>';
 }
