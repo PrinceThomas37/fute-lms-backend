@@ -2063,7 +2063,7 @@ function renderAdminUserDetail(userId){
   }).join('');
 
   // show outreach emails only for BD users and admins
-  var showEmails=userHasAnyRole(usr,'bd','bd_lead','admin');
+  var showEmails=!userHasRole(usr,'ra')||userHasAnyRole(usr,'ra_lead','bd','bd_lead','admin','recruiter');
 
   // email rows
   var emailRows=userEmails.map(function(e){
