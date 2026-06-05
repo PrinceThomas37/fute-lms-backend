@@ -1671,18 +1671,6 @@ function renderEmail(){
   }
 
   // ── OUTREACH PLAN TAB ──
-  var vars=[['{{fn}}','First name'],['{{ln}}','Last name'],['{{company}}','Company name'],['{{pos}}','Position'],['{{ind}}','Industry'],['{{desig}}','Designation'],['{{loc}}','Location'],['{{sender}}','Sender name']];
-  var varChips='<div style="display:flex;align-items:center;gap:7px">'+
-    '<span style="font-size:11px;color:var(--text3);white-space:nowrap">Insert variable:</span>'+
-    '<select id="var-picker-sel" onchange="insertVarFromPicker(this.value,\''+activeTmpl.bodyId+'\')" style="font-size:12px;padding:4px 8px;border:1px solid var(--border2);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer;max-width:180px">'+
-      '<option value="">— pick one —</option>'+
-      vars.map(function(v){return '<option value="'+v[0]+'">'+v[0]+' — '+v[1]+'</option>';}).join('')+
-    '</select>'+
-    '<select id="var-picker-subj-sel" onchange="insertVarFromPicker(this.value,\''+activeTmpl.subjId+'\')" style="font-size:12px;padding:4px 8px;border:1px solid var(--border2);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer;max-width:160px">'+
-      '<option value="">into subject…</option>'+
-      vars.map(function(v){return '<option value="'+v[0]+'">'+v[0]+'</option>';}).join('')+
-    '</select>'+
-  '</div>';
   if(!STATE.activeTmpl)STATE.activeTmpl='outreach';
   var myPlan=STATE.myOutreachPlan||{};
   var fu1Day=parseInt(myPlan['fu1_day']||'3',10);
@@ -1701,6 +1689,18 @@ function renderEmail(){
     {key:'fu2',label:'Follow-up 2',sublabel:'Day '+fu2Day+' after outreach',color:'#ea580c',subjVal:myPlan['tmpl_fu2_subject']||STATE.fu2Subj,bodyVal:myPlan['tmpl_fu2_body']||STATE.fu2Body,subjId:'tmpl-fu2-subj',bodyId:'tmpl-fu2-body'}
   ];
   var activeTmpl=tmplDefs.find(function(t){return t.key===STATE.activeTmpl;})||tmplDefs[0];
+  var vars=[['{{fn}}','First name'],['{{ln}}','Last name'],['{{company}}','Company name'],['{{pos}}','Position'],['{{ind}}','Industry'],['{{desig}}','Designation'],['{{loc}}','Location'],['{{sender}}','Sender name']];
+  var varChips='<div style="display:flex;align-items:center;gap:7px">'+
+    '<span style="font-size:11px;color:var(--text3);white-space:nowrap">Insert variable:</span>'+
+    '<select id="var-picker-sel" onchange="insertVarFromPicker(this.value,\''+activeTmpl.bodyId+'\')" style="font-size:12px;padding:4px 8px;border:1px solid var(--border2);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer;max-width:180px">'+
+      '<option value="">— pick one —</option>'+
+      vars.map(function(v){return '<option value="'+v[0]+'">'+v[0]+' — '+v[1]+'</option>';}).join('')+
+    '</select>'+
+    '<select id="var-picker-subj-sel" onchange="insertVarFromPicker(this.value,\''+activeTmpl.subjId+'\')" style="font-size:12px;padding:4px 8px;border:1px solid var(--border2);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer;max-width:160px">'+
+      '<option value="">into subject…</option>'+
+      vars.map(function(v){return '<option value="'+v[0]+'">'+v[0]+'</option>';}).join('')+
+    '</select>'+
+  '</div>';
   var tmplTabBtns=tmplDefs.map(function(t){
     var isActive=STATE.activeTmpl===t.key;
     return '<button onclick="STATE.activeTmpl=\''+t.key+'\';render()" style="padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:2px solid '+(isActive?t.color:'var(--border)')+';background:'+(isActive?t.color:'var(--card)')+';color:'+(isActive?'#fff':'var(--text2)')+';transition:all .15s">'+t.label+'</button>';
