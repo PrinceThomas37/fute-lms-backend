@@ -1666,6 +1666,161 @@ app.post('/distribute/generate-ratio', auth, async (req, res) => {
   } catch (err) { res.json(buildAutoRatio(req.body.pool_stats, req.body.pool_stats?.capacity || 150)); }
 });
 
+// ── Microsoft Graph threaded send (follow-ups quote prior emails like Gmail/Outlook) ──
+async function graphMailRequest(accessToken, path, options = {}) {
+  const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+    ...options,
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', ...(options.headers || {}) }
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error?.message || `Graph API ${res.status}`);
+  return data;
+}
+
+async function sendMicrosoftNewMessage(userEmailId, { to, subject, htmlBody }) {
+  const accessToken = await getMicrosoftToken(userEmailId);
+  const msg = await graphMailRequest(accessToken, '/me/messages', {
+    method: 'POST',
+    body: JSON.stringify({
+      subject,
+      body: { contentType: 'HTML', content: htmlBody },
+      toRecipients: [{ emailAddress: { address: to } }]
+    })
+  });
+  await graphMailRequest(accessToken, `/me/messages/${msg.id}/send`, { method: 'POST' });
+  return { graphMessageId: msg.id, conversationId: msg.conversationId || null, inReplyTo: null };
+}
+
+async function sendMicrosoftThreadReply(userEmailId, parentGraphMessageId, { htmlBody, subject }) {
+  const accessToken = await getMicrosoftToken(userEmailId);
+  const draft = await graphMailRequest(accessToken, `/me/messages/${parentGraphMessageId}/createReply`, {
+    method: 'POST',
+    body: JSON.stringify({})
+  });
+  const full = await graphMailRequest(accessToken, `/me/messages/${draft.id}?$select=body,subject,conversationId`);
+  const quotedPart = full.body?.content || '';
+  const combinedHtml = quotedPart ? `${htmlBody}<br><br>${quotedPart}` : htmlBody;
+  const patch = { body: { contentType: 'HTML', content: combinedHtml } };
+  if (subject) patch.subject = subject;
+  await graphMailRequest(accessToken, `/me/messages/${draft.id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+  await graphMailRequest(accessToken, `/me/messages/${draft.id}/send`, { method: 'POST' });
+  return { graphMessageId: draft.id, conversationId: full.conversationId || draft.conversationId || null, inReplyTo: parentGraphMessageId };
+}
+
+async function findSentMessageInMailbox(accessToken, { toEmail, subjectHint, minDate, conversationId }) {
+  const params = new URLSearchParams({ '$select': 'id,subject,toRecipients,sentDateTime,conversationId', '$orderby': 'sentDateTime desc', '$top': '75' });
+  if (minDate) params.set('$filter', `sentDateTime ge ${minDate}T00:00:00Z`);
+  const data = await graphMailRequest(accessToken, `/me/mailFolders/sentitems/messages?${params}`);
+  const to = toEmail.toLowerCase().trim();
+  const hint = (subjectHint || '').toLowerCase().replace(/^re:\s*/i, '').trim();
+  for (const m of (data.value || [])) {
+    const recipients = (m.toRecipients || []).map(r => (r.emailAddress?.address || '').toLowerCase());
+    if (!recipients.includes(to)) continue;
+    if (conversationId && m.conversationId && m.conversationId !== conversationId) continue;
+    if (hint && m.subject) {
+      const sub = m.subject.toLowerCase().replace(/^re:\s*/i, '').trim();
+      if (!sub.includes(hint) && !hint.includes(sub.slice(0, 20))) continue;
+    }
+    return m.id;
+  }
+  return null;
+}
+
+async function loadSentEmailRecord({ jobId, contactId, followupType }) {
+  if (followupType === 'fu2') {
+    const { data: fu1 } = await supabase.from('emails').select('id,graph_message_id,conversation_id,subject,body,sent_at,from_email')
+      .eq('job_id', jobId).eq('contact_id', contactId).eq('status', 'sent').eq('followup_type', 'fu1')
+      .order('sent_at', { ascending: false }).limit(1);
+    if (fu1?.[0]) return fu1[0];
+  }
+  const { data } = await supabase.from('emails').select('id,graph_message_id,conversation_id,subject,body,sent_at,from_email,followup_type')
+    .eq('job_id', jobId).eq('contact_id', contactId).eq('status', 'sent').order('sent_at', { ascending: true });
+  const rows = data || [];
+  return rows.find(r => !r.followup_type || r.followup_type === 'initial') || rows[0] || null;
+}
+
+async function resolveThreadParentMessageId({ jobId, contactId, followupType, userEmailId, toEmail, subjectHint }) {
+  const prior = await loadSentEmailRecord({ jobId, contactId, followupType });
+  if (prior?.graph_message_id) return { parentId: prior.graph_message_id, priorSubject: prior.subject, conversationId: prior.conversation_id };
+  const accessToken = await getMicrosoftToken(userEmailId);
+  const parentId = await findSentMessageInMailbox(accessToken, {
+    toEmail, subjectHint: subjectHint || prior?.subject, minDate: prior?.sent_at, conversationId: prior?.conversation_id
+  });
+  if (!parentId) return null;
+  return { parentId, priorSubject: prior?.subject || subjectHint, conversationId: prior?.conversation_id };
+}
+
+function formatQuoteDate(sentAt) {
+  if (!sentAt) return '';
+  try {
+    return new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'numeric', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(sentAt));
+  } catch (_) { return String(sentAt); }
+}
+
+function buildOutlookQuoteBlock({ fromName, fromEmail, sentAt, subject, body }) {
+  const bodyHtml = (body || '').includes('<')
+    ? body
+    : buildHtmlEmailBody(body, '');
+  const dateStr = formatQuoteDate(sentAt);
+  return `<div style="border:none;border-top:solid #B5C4DF 1.0pt;padding:3.0pt 0in 0in 0in;margin-top:12pt">` +
+    `<p style="font-size:11pt;font-family:Calibri,sans-serif;margin:0 0 8pt 0">` +
+    `<b>From:</b> ${fromName || 'Sender'}${fromEmail ? ` &lt;${fromEmail}&gt;` : ''}<br>` +
+    (dateStr ? `<b>Sent:</b> ${dateStr}<br>` : '') +
+    `<b>Subject:</b> ${subject || ''}</p></div>${bodyHtml}`;
+}
+
+async function buildQuotedChainFromDb({ jobId, contactId, followupType }) {
+  const quoteFrom = async (filterFn) => {
+    const { data } = await supabase.from('emails').select('subject,body,sent_at,from_email,followup_type')
+      .eq('job_id', jobId).eq('contact_id', contactId).eq('status', 'sent')
+      .order('sent_at', { ascending: false }).limit(5);
+    const row = (data || []).find(filterFn);
+    if (!row) return '';
+    return buildOutlookQuoteBlock({
+      fromName: row.from_email?.split('@')[0] || 'Sender',
+      fromEmail: row.from_email,
+      sentAt: row.sent_at,
+      subject: row.subject,
+      body: row.body
+    });
+  };
+  if (followupType === 'fu2') {
+    const fu1Quote = await quoteFrom(r => r.followup_type === 'fu1');
+    if (fu1Quote) return fu1Quote;
+  }
+  return quoteFrom(r => !r.followup_type || r.followup_type === 'initial');
+}
+
+async function persistGraphIds(emailId, graph) {
+  if (!emailId || !graph?.graphMessageId) return;
+  const { error } = await supabase.from('emails').update({
+    graph_message_id: graph.graphMessageId,
+    conversation_id: graph.conversationId || null,
+    in_reply_to_graph_message_id: graph.inReplyTo || null
+  }).eq('id', emailId);
+  if (error?.message?.includes('column') || error?.code === '42703') {
+    console.warn('[GraphMail] Run migrations/001_email_threading.sql to store message ids for threading');
+  }
+}
+
+async function deliverOutboundEmail(email, userEmailId, signatureHtml) {
+  const htmlBody = buildHtmlEmailBody(email.body, signatureHtml);
+  const isFollowup = email.followup_type === 'fu1' || email.followup_type === 'fu2';
+  if (!isFollowup) {
+    return sendMicrosoftNewMessage(userEmailId, { to: email.to_email, subject: email.subject, htmlBody });
+  }
+  const thread = await resolveThreadParentMessageId({
+    jobId: email.job_id, contactId: email.contact_id, followupType: email.followup_type,
+    userEmailId, toEmail: email.to_email, subjectHint: email.subject
+  });
+  if (thread?.parentId) {
+    return sendMicrosoftThreadReply(userEmailId, thread.parentId, { htmlBody, subject: email.subject });
+  }
+  const quotedHtml = await buildQuotedChainFromDb({ jobId: email.job_id, contactId: email.contact_id, followupType: email.followup_type });
+  if (!quotedHtml) throw new Error('Could not find the original outreach email — follow-up must include quoted context.');
+  return sendMicrosoftNewMessage(userEmailId, { to: email.to_email, subject: email.subject, htmlBody: `${htmlBody}<br><br>${quotedHtml}` });
+}
+
 // Auto-send all pending emails for a specific BD manager (called after assignment)
 async function fetchPendingEmailsForUser(userId) {
   let pendingEmails = [], from = 0;
@@ -1781,24 +1936,9 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
 
     try {
       sendAttempts++;
-      const accessToken = await getMicrosoftToken(userEmailId);
-      const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: {
-            subject: email.subject,
-            body: { contentType: 'HTML', content: buildHtmlEmailBody(email.body, email._sigHtml || userSignatureHtml) },
-            toRecipients: [{ emailAddress: { address: email.to_email } }]
-          },
-          saveToSentItems: true
-        })
-      });
-      if (!sendRes.ok) {
-        const errData = await sendRes.json().catch(() => ({}));
-        throw new Error(errData?.error?.message || `HTTP ${sendRes.status}`);
-      }
+      const graph = await deliverOutboundEmail(email, userEmailId, email._sigHtml || userSignatureHtml);
       await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email.id);
+      await persistGraphIds(email.id, graph);
       const todayDate = today();
       sentToday[userEmailId] = (sentToday[userEmailId] || 0) + 1;
       await supabase.from('email_send_log').upsert(
@@ -2429,7 +2569,7 @@ const MS_TENANT   = process.env.MICROSOFT_TENANT_ID;
 const MS_CLIENT   = process.env.MICROSOFT_CLIENT_ID;
 const MS_SECRET   = process.env.MICROSOFT_CLIENT_SECRET;
 const MS_REDIRECT = 'https://fute-lms-backend.onrender.com/auth/microsoft/callback';
-const MS_SCOPES   = 'Mail.Send offline_access User.Read';
+const MS_SCOPES   = 'Mail.Send Mail.ReadWrite offline_access User.Read';
 
 app.get('/auth/microsoft/connect', async (req, res) => {
   try {
