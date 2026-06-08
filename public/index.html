@@ -437,6 +437,16 @@ function jobContacts(jid){
 function jobById(id){ return STATE.jobs.find(function(j){return j.id===id;}); }
 function escAttr(v){ return String(v==null?"":v).replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
 function escHtml(v){ return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function getIndustriesList(){
+  return (STATE.industriesList&&STATE.industriesList.length)?STATE.industriesList:[];
+}
+function buildIndustrySelectOptions(selected){
+  var list=getIndustriesList().slice();
+  if(selected&&list.indexOf(selected)===-1)list.unshift(selected);
+  return [''].concat(list).map(function(v){
+    return '<option value="'+escAttr(v)+'"'+(selected===v?' selected':'')+'>'+(v||'— Select Industry —')+'</option>';
+  }).join('');
+}
 
 var STATE = {
 
@@ -497,6 +507,7 @@ var STATE = {
   jobs: [],
   contacts: [],
   detailJob: null,
+  industriesList: [],
   jobsFilter: {search:"",stages:[],industries:[],dateRange:"all",dateFrom:"",dateTo:""},
   openDrop: null,
   assignSel: {},
@@ -1183,7 +1194,7 @@ function renderJobs(){
   }
 
   var allStagesList=['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'];
-  var allIndustriesList=['Engineering','Healthcare','Legal','Accounting','Management','Other'];
+  var allIndustriesList=getIndustriesList();
   var stageActive=f.stages&&f.stages.length>0;
   var indActive=f.industries&&f.industries.length>0;
   var dateActive=f.dateRange&&f.dateRange!=='all';
@@ -2506,7 +2517,7 @@ function renderAddLeadModal(){
   var bds=u.role==="ra"?STATE.users.filter(function(x){return x.id===u.bdm}):STATE.users.filter(function(x){return x.role==="bd"||x.role==="admin"});
   var ras=u.role==="ra"?[u]:STATE.users.filter(function(x){return x.role==="ra"&&(u.role==="admin"||x.bdm===u.id)});
   var cos=STATE.companies;
-  var indOpts=INDUSTRIES.map(function(i){return'<option>'+i+'</option>'}).join("");
+  var indOpts=(getIndustriesList().length?getIndustriesList():INDUSTRIES).map(function(i){return'<option>'+htmlEsc(i)+'</option>'}).join("");
   var srcOpts=SOURCES.map(function(s){return'<option>'+s+'</option>'}).join("");
   var raOpts=ras.map(function(r){return'<option value="'+r.id+'">'+r.name+'</option>'}).join("");
   var bdOpts=bds.map(function(b){return'<option value="'+b.id+'">'+b.name+'</option>'}).join("");
@@ -4463,9 +4474,7 @@ window.doImportProcess=function(toProcess,dupEmailMap){
 function renderRALeadForm(){
   var f=STATE.raForm;
   var isEditing=!!f.editJobId;
-  var indOpts=['','Engineering','Healthcare','Legal','Accounting','Management'].map(function(v){
-    return '<option value="'+v+'"'+(f.industry===v?' selected':'')+'>'+( v||'— Select Industry —')+'</option>';
-  }).join('');
+  var indOpts=buildIndustrySelectOptions(f.industry||'');
 
   // Company info banner
   var coBanner='';
@@ -5519,9 +5528,6 @@ function renderResearchSection(j, canEdit){
   var jdRaw=r.jd_raw||'';
   var skillsStr=(req.skills||[]).join(', ');
 
-  var fundingOpts=['','Unknown','Pre-seed','Seed','Series A','Series B','Series C','Series D+','Public','Private/Bootstrapped'].map(function(v){
-    return '<option value="'+v+'"'+(company.funding===v?' selected':'')+'>'+( v||'— Select —')+'</option>';
-  }).join('');
   var headcountOpts=['','1-10','11-50','51-200','201-500','500+'].map(function(v){
     return '<option value="'+v+'"'+(company.headcount===v?' selected':'')+'>'+( v||'— Select —')+'</option>';
   }).join('');
@@ -5572,7 +5578,7 @@ function renderResearchSection(j, canEdit){
   if(!canEdit){
     // BD read-only view
     var hasReq=skillsStr||req.salary_display||req.location||req.local_hint||req.travel;
-    var hasData=company.funding||company.headcount||company.notes||company.tech_stack||outreach.angle||outreach.avoid||hasReq;
+    var hasData=company.headcount||company.notes||outreach.angle||outreach.avoid||hasReq;
     if(!hasData&&!contactIntel.trim())return '';
     return '<div style="background:var(--bg);border:1px solid var(--border2);border-radius:var(--r2);padding:14px;margin-top:14px">'+
       '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">\ud83d\udd2c RA Research</div>'+
@@ -5586,15 +5592,13 @@ function renderResearchSection(j, canEdit){
             (req.travel?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">Travel: '+htmlEsc(req.travel)+'</span>':'')+
           '</div>'+
         '</div>':'')+
-      (company.funding||company.headcount||company.hiring_volume||company.tech_stack||company.notes?
+      (company.headcount||company.hiring_volume||company.notes?
         '<div style="margin-bottom:10px">'+
           '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Company</div>'+
           '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--text2)">'+
-            (company.funding?'<span style="background:var(--accent-l);color:var(--accent);padding:2px 8px;border-radius:6px">'+htmlEsc(company.funding)+'</span>':'')+
             (company.headcount?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">'+htmlEsc(company.headcount)+' employees</span>':'')+
             (company.hiring_volume?'<span style="background:var(--green-l);color:var(--green);padding:2px 8px;border-radius:6px">Hiring: '+htmlEsc(company.hiring_volume)+'</span>':'')+
           '</div>'+
-          (company.tech_stack?'<div style="font-size:12px;color:var(--text2);margin-top:6px">Tech: '+htmlEsc(company.tech_stack)+'</div>':'')+
           (company.notes?'<div style="font-size:12px;color:var(--text2);margin-top:6px;padding:8px;background:var(--card);border-radius:var(--r)">'+htmlEsc(company.notes)+'</div>':'')+
         '</div>':'')+
       (contactIntel?'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Contacts</div>'+contactIntel+'</div>':'')+
@@ -5612,12 +5616,10 @@ function renderResearchSection(j, canEdit){
     '<div style="font-weight:700;font-size:13px;margin-bottom:14px">\ud83d\udd2c Research Notes</div>'+
 
     '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Company Intel</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'+
-      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Funding stage</label><select class="sel" style="font-size:12px" id="res-funding" onchange="researchUpdate(\''+j.id+'\',\'company\',\'funding\',this.value)">'+fundingOpts+'</select></div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
       '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Headcount</label><select class="sel" style="font-size:12px" id="res-headcount" onchange="researchUpdate(\''+j.id+'\',\'company\',\'headcount\',this.value)">'+headcountOpts+'</select></div>'+
       '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Hiring volume</label><select class="sel" style="font-size:12px" id="res-hiring" onchange="researchUpdate(\''+j.id+'\',\'company\',\'hiring_volume\',this.value)">'+hiringOpts+'</select></div>'+
     '</div>'+
-    '<div class="fgrp mb3"><label class="flbl">Tech stack (comma separated)</label><input class="inp" style="font-size:12px" id="res-tech" placeholder="e.g. Salesforce, SAP, Oracle" value="'+htmlEsc(company.tech_stack||'')+'" oninput="researchUpdate(\''+j.id+'\',\'company\',\'tech_stack\',this.value)"/></div>'+
     '<div class="fgrp mb4"><label class="flbl">Company notes / recent news</label><textarea class="txta w100" style="min-height:60px;font-size:12px" id="res-notes" oninput="researchUpdate(\''+j.id+'\',\'company\',\'notes\',this.value)" placeholder="Any relevant company news, context...">'+htmlEsc(company.notes||'')+'</textarea></div>'+
 
     (cs.length?
@@ -5628,9 +5630,8 @@ function renderResearchSection(j, canEdit){
     '<div class="fgrp mb2"><label class="flbl">Paste job description</label>'+
       '<textarea class="txta w100" style="min-height:120px;font-size:12px" id="res-jd-raw" placeholder="Paste the full JD here, then click Extract..." oninput="researchUpdate(\''+j.id+'\',\'jd_raw\',\'__root__\',this.value)">'+htmlEsc(jdRaw)+'</textarea>'+
     '</div>'+
-    '<div style="display:flex;gap:8px;margin-bottom:12px">'+
+    '<div style="margin-bottom:12px">'+
       '<button type="button" class="btn btn-outline btn-sm" onclick="parseJobDescription(\''+j.id+'\')">Extract requirements</button>'+
-      '<span style="font-size:11px;color:var(--text3);align-self:center">Regex + skill dictionary — no AI</span>'+
     '</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
       '<div class="fgrp"><label class="flbl">Skills (comma separated)</label><input class="inp" style="font-size:12px" id="res-skills" placeholder="CCH, QuickBooks, trust and estate" value="'+htmlEsc(skillsStr)+'" oninput="researchUpdateRequirements(\''+j.id+'\',\'skills\',this.value)"/></div>'+
@@ -6560,7 +6561,7 @@ function flattenContacts(jobs){var out=[];jobs.forEach(function(j){(j.contacts||
 
 function loadAppData(){
   STATE.loading=true;render();
-  var calls=[apiGet('/users'),apiGet('/jobs'),apiGet('/companies'),apiGet('/reminders')];
+  var calls=[apiGet('/users'),apiGet('/jobs'),apiGet('/companies'),apiGet('/reminders'),apiGet('/industries')];
   var u=STATE.user;
   var isBD=(u&&(u.role==='bd'||u.role==='bd_lead'||u.role==='admin'||u.role==='ra_lead'));
   if(isBD)calls.push(apiGet('/emails?status=pending'));
@@ -6571,6 +6572,7 @@ function loadAppData(){
     STATE.contacts=flattenContacts(r[1]);
     STATE.companies=r[2].map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});
     STATE.reminders=r[3]||[];
+    STATE.industriesList=r[4]||[];
     STATE.emailAccounts=[];
     // Load pool stats for ra_lead/admin
     if(STATE.user&&(STATE.user.role==='ra_lead'||STATE.user.role==='admin')){
@@ -6581,8 +6583,8 @@ function loadAppData(){
       apiGet('/distribute/today-summary').then(function(d){STATE.todaySummary=d;render();}).catch(function(){});
     }
     if(isBD){
-      STATE.pendingEmails=(r[4]||[]);
-      STATE.emails=(r[5]||[]);
+      STATE.pendingEmails=(r[5]||[]);
+      STATE.emails=(r[6]||[]);
       apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];render();}).catch(function(){STATE.sentEmails=[];});
     }
     // Load app settings (global send times)
