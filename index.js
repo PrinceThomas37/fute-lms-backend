@@ -4,6 +4,8 @@ const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { parseJobDescription } = require('./jd-parser');
+const { DEFAULT_TEMPLATES, buildEmailVars, fillTemplate } = require('./email-vars');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -870,6 +872,19 @@ app.patch('/jobs/:id/research', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.post('/jobs/:id/parse-jd', auth, async (req, res) => {
+  try {
+    const { jd_text, industry } = req.body;
+    if (!jd_text || !String(jd_text).trim()) return res.status(400).json({ error: 'jd_text required' });
+    const { data: job } = await supabase.from('jobs').select('created_by,industry,company:companies(industry)').eq('id', req.params.id).single();
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (!hasRole(req, 'admin', 'ra_lead') && job.created_by !== req.user.id) return res.status(403).json({ error: 'Only the RA who created this lead can parse JD' });
+    const resolvedIndustry = industry || job.industry || job.company?.industry || '';
+    const parsed = parseJobDescription(jd_text, resolvedIndustry);
+    res.json(parsed);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ══════════════════════════════════════════════════════════════
 // CONTACTS
 // ══════════════════════════════════════════════════════════════
@@ -1073,7 +1088,7 @@ async function generateEmailsForJobs(job_ids, callerUserId) {
   let jobs = [];
   for (let i = 0; i < job_ids.length; i += BATCH_SIZE) {
     const chunk = job_ids.slice(i, i + BATCH_SIZE);
-    const { data, error } = await supabase.from('jobs').select('id, position, assigned_to_bd, sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name), company:companies(name,industry,location), contacts(*)').in('id', chunk);
+    const { data, error } = await supabase.from('jobs').select('id, position, location, salary_range, research, industry, assigned_to_bd, sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name), company:companies(name,industry,location), contacts(*)').in('id', chunk);
     if (error) {
       console.error(`[GenerateEmails] Failed to fetch jobs batch ${i}-${i + chunk.length}:`, error.message);
       throw error;
@@ -1099,7 +1114,6 @@ async function generateEmailsForJobs(job_ids, callerUserId) {
   const { data: tmplRows } = await supabase.from('app_settings').select('key,value').in('key', tmplKeys);
   const tmplSettings = {};
   (tmplRows || []).forEach(r => { tmplSettings[r.key] = r.value; });
-  function fillTmpl(tmpl, vars) { return (tmpl || '').replace(/{{(\w+)}}/g, (m, k) => vars[k] !== undefined ? vars[k] : m); }
   const emailsToInsert = [];
   let contactsSkipped = 0;
   for (const job of jobs) {
@@ -1111,48 +1125,14 @@ async function generateEmailsForJobs(job_ids, callerUserId) {
     }
     const savedSubj = tmplSettings[`u_${bd.id}_tmpl_o1_subject`] || '';
     const savedBody = tmplSettings[`u_${bd.id}_tmpl_o1_body`] || '';
+    const subjTmpl = savedSubj || DEFAULT_TEMPLATES.o1_subject;
+    const bodyTmpl = savedBody || DEFAULT_TEMPLATES.o1_body;
     for (const contact of contacts) {
       try {
-        let subject, body;
         const senderDisplayName = job.sending_email?.display_name || bdPrimaryEmailMap[bd.id]?.display_name || bd.name || '';
-        const vars = { fn: contact.first_name || '', ln: contact.last_name || '', company: job.company?.name || '', pos: job.position || '', ind: job.company?.industry || '', loc: job.company?.location || '', desig: contact.designation || 'Hiring Manager', sender: senderDisplayName };
-        if (savedSubj && savedBody) {
-          subject = fillTmpl(savedSubj, vars); body = fillTmpl(savedBody, vars);
-        } else if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== 'your_anthropic_api_key_here') {
-          const prompt = `Write a hyper-personalized cold outreach email from ${senderDisplayName} at Fute Global LLC (a staffing/recruitment firm) to ${contact.first_name} ${contact.last_name || ''}, ${contact.designation || 'Hiring Manager'} at ${job.company?.name || ''} (${job.company?.industry || ''}, ${job.company?.location || ''}).
-
-They are hiring for: ${job.position}
-
-Instructions: 3 short paragraphs, warm but professional tone, no fluff, end with a clear call to action.
-
-Format strictly as:
-Subject: [subject line]
-
-[email body]`;
-          const aiResp = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 500, messages: [{ role: 'user', content: prompt }] }) });
-          if (!aiResp.ok) {
-            console.error(`[GenerateEmails] Claude API error for contact ${contact.email}: HTTP ${aiResp.status}`);
-            subject = fillTmpl('Staffing Partnership — {{company}}', vars);
-            body = fillTmpl(`Hi {{fn}},\n\nI came across {{company}} and noticed you're hiring for {{pos}}. At Fute Global, we specialize in placing top-tier talent for roles exactly like this.\n\nWould you be open to a quick 15-minute call this week?\n\nBest regards,\n{{sender}}\nFute Global LLC`, vars);
-          } else {
-            const aiData = await aiResp.json();
-            const text = aiData.content?.[0]?.text || '';
-            const subjectMatch = text.match(/Subject:\s*(.+)/i);
-            subject = subjectMatch ? subjectMatch[1].trim() : `Staffing Partnership — ${job.company?.name}`;
-            body = text.replace(/^Subject:.+\n*/im, '').trim();
-          }
-        } else {
-          subject = fillTmpl(savedSubj || 'Staffing Partnership — {{company}}', vars);
-          body = fillTmpl(savedBody || `Hi {{fn}},
-
-I came across {{company}} and noticed you're hiring for {{pos}}. At Fute Global, we specialize in placing top-tier talent for roles exactly like this.
-
-Would you be open to a quick 15-minute call this week?
-
-Best regards,
-{{sender}}
-Fute Global LLC`, vars);
-        }
+        const vars = buildEmailVars({ job, contact, senderDisplayName });
+        const subject = fillTemplate(subjTmpl, vars);
+        const body = fillTemplate(bodyTmpl, vars);
         const jobSendingEmail = job.sending_email;
         const bdPrimaryEmail = bdPrimaryEmailMap[bd.id];
         const resolvedSendingEmail = jobSendingEmail || bdPrimaryEmail;
@@ -1183,7 +1163,7 @@ app.post('/emails/generate', auth, async (req, res) => {
     if (!hasRole(req, 'admin', 'ra_lead', 'bd', 'bd_lead')) return res.status(403).json({ error: 'Not allowed' });
     const { job_ids } = req.body;
     if (!Array.isArray(job_ids) || !job_ids.length) return res.status(400).json({ error: 'job_ids required' });
-    const { data: jobs, error: jErr } = await supabase.from('jobs').select('id, position, assigned_to_bd, sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name), company:companies(name,industry,location), contacts(*)').in('id', job_ids);
+    const { data: jobs, error: jErr } = await supabase.from('jobs').select('id, position, location, salary_range, research, industry, assigned_to_bd, sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name), company:companies(name,industry,location), contacts(*)').in('id', job_ids);
     if (jErr) throw jErr;
     const bdIds = [...new Set(jobs.map(j => j.assigned_to_bd).filter(Boolean))];
     const { data: bdUsers } = bdIds.length ? await supabase.from('users').select('id,name,email').in('id', bdIds) : { data: [] };
@@ -1208,10 +1188,6 @@ app.post('/emails/generate', auth, async (req, res) => {
     const tmplSettings = {};
     (tmplRows || []).forEach(r => { tmplSettings[r.key] = r.value; });
 
-    function fillTmpl(tmpl, vars) {
-      return (tmpl || '').replace(/{{(\w+)}}/g, (m, k) => vars[k] !== undefined ? vars[k] : m);
-    }
-
     const emailsToInsert = [];
     const generated = [];
     const failed = [];
@@ -1219,44 +1195,17 @@ app.post('/emails/generate', auth, async (req, res) => {
       const bd = bdMap[job.assigned_to_bd] || { id: req.user.id, name: req.user.name, email: req.user.email };
       const contacts = (job.contacts || []).filter(c => isValidEmail(c.email));
 
-      // Get this BD's saved template, fall back to global defaults
       const savedSubj = tmplSettings[`u_${bd.id}_tmpl_o1_subject`] || '';
       const savedBody = tmplSettings[`u_${bd.id}_tmpl_o1_body`] || '';
+      const subjTmpl = savedSubj || DEFAULT_TEMPLATES.o1_subject;
+      const bodyTmpl = savedBody || DEFAULT_TEMPLATES.o1_body;
 
       for (const contact of contacts) {
         try {
-          let subject, body;
-          // sender = display name on the sending Outlook account (what recipient sees)
-          // Use job's sending email first, then BD's primary outreach email, never login name alone
           const senderDisplayName = job.sending_email?.display_name || bdPrimaryEmailMap[bd.id]?.display_name || bd.name || '';
-          const vars = {
-            fn: contact.first_name || '',
-            ln: contact.last_name || '',
-            company: job.company?.name || '',
-            pos: job.position || '',
-            ind: job.company?.industry || '',
-            loc: job.company?.location || '',
-            desig: contact.designation || 'Hiring Manager',
-            sender: senderDisplayName
-          };
-
-          if (savedSubj && savedBody) {
-            // Use BD's saved template from Outreach Plan
-            subject = fillTmpl(savedSubj, vars);
-            body = fillTmpl(savedBody, vars);
-          } else if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== 'your_anthropic_api_key_here') {
-            // No saved template — use AI to generate
-            const prompt = `Write a hyper-personalized cold outreach email from ${senderDisplayName} at Fute Global LLC (a staffing/recruitment firm) to ${contact.first_name} ${contact.last_name || ''}, ${contact.designation || 'Hiring Manager'} at ${job.company?.name || ''} (${job.company?.industry || ''}, ${job.company?.location || ''}).\n\nThey are hiring for: ${job.position}\n\nInstructions: 3 short paragraphs, warm but professional tone, no fluff, end with a clear call to action.\n\nFormat strictly as:\nSubject: [subject line]\n\n[email body]`;
-            const aiResp = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 500, messages: [{ role: 'user', content: prompt }] }) });
-            const aiData = await aiResp.json();
-            const text = aiData.content?.[0]?.text || '';
-            const subjectMatch = text.match(/Subject:\s*(.+)/i);
-            subject = subjectMatch ? subjectMatch[1].trim() : `Staffing Partnership — ${job.company?.name}`;
-            body = text.replace(/^Subject:.+\n*/im, '').trim();
-          } else {
-            subject = fillTmpl(savedSubj || 'Staffing Partnership — {{company}}', vars);
-            body = fillTmpl(savedBody || `Hi {{fn}},\n\nI came across {{company}} and noticed you're hiring for {{pos}}. At Fute Global, we specialize in placing top-tier talent for roles exactly like this.\n\nWould you be open to a quick 15-minute call this week?\n\nBest regards,\n{{sender}}\nFute Global LLC`, vars);
-          }
+          const vars = buildEmailVars({ job, contact, senderDisplayName });
+          const subject = fillTemplate(subjTmpl, vars);
+          const body = fillTemplate(bodyTmpl, vars);
           // Use job's assigned sending email, or fall back to BD's primary outreach email
           // Never fall back to bd.email (login email) — that's not an outreach account
           const jobSendingEmail = job.sending_email;
@@ -2422,7 +2371,7 @@ async function runFollowupEngine() {
   const log = { checked: 0, fu1_queued: 0, fu2_queued: 0, skipped_quota: 0, skipped_stage: 0 };
   try {
     const { data: dueFu, error: fuErr } = await supabase.from('follow_ups')
-      .select(`*, contact:contacts(id,first_name,last_name,email,designation), job:jobs(id,position,stage,timezone,assigned_to_bd,company:companies(name,industry,location),sending_email:user_emails!sending_email_id(id,email_address,display_name))`)
+      .select(`*, contact:contacts(id,first_name,last_name,email,designation), job:jobs(id,position,location,salary_range,research,industry,stage,timezone,assigned_to_bd,company:companies(name,industry,location),sending_email:user_emails!sending_email_id(id,email_address,display_name))`)
       .eq('status', 'active');
     if (fuErr) throw fuErr;
     log.checked = (dueFu || []).length;
@@ -2434,10 +2383,6 @@ async function runFollowupEngine() {
     function getBDTemplate(bdId, key, globalKey, fallback) {
       return settings[`u_${bdId}_${key}`] || settings[globalKey] || fallback;
     }
-    function fillTemplate(tmpl, vars) {
-      return (tmpl || '').replace(/{{(\w+)}}/g, (m, k) => vars[k] || m);
-    }
-
     const { data: sendLogs } = await supabase.from('email_send_log').select('user_email_id,emails_sent').eq('send_date', todayDate);
     const sentToday = {};
     (sendLogs || []).forEach(l => { sentToday[l.user_email_id] = l.emails_sent || 0; });
@@ -2478,13 +2423,13 @@ async function runFollowupEngine() {
         const bdId = job.assigned_to_bd;
         // Use sending email display_name so signature matches the From address
         const senderName = job.sending_email?.display_name || bdMap[bdId] || 'Fute Global';
-        const vars = { fn: contact.first_name || '', ln: contact.last_name || '', company: job.company?.name || '', pos: job.position || '', desig: contact.designation || '', ind: job.company?.industry || '', loc: job.company?.location || '', sender: senderName };
+        const vars = buildEmailVars({ job, contact, senderDisplayName: senderName });
         const subjTmpl = isFu2
-          ? getBDTemplate(bdId, 'tmpl_fu2_subject', 'template_fu2_subject', 'Re: Staffing Partnership — {{company}}')
-          : getBDTemplate(bdId, 'tmpl_fu1_subject', 'template_fu1_subject', 'Re: Staffing Partnership — {{company}}');
+          ? getBDTemplate(bdId, 'tmpl_fu2_subject', 'template_fu2_subject', DEFAULT_TEMPLATES.fu2_subject)
+          : getBDTemplate(bdId, 'tmpl_fu1_subject', 'template_fu1_subject', DEFAULT_TEMPLATES.fu1_subject);
         const bodyTmpl = isFu2
-          ? getBDTemplate(bdId, 'tmpl_fu2_body', 'template_fu2_body', 'Hi {{fn}},\n\nI wanted to reach out one last time regarding {{pos}} at {{company}}.\n\nBest,\n{{sender}}')
-          : getBDTemplate(bdId, 'tmpl_fu1_body', 'template_fu1_body', 'Hi {{fn}},\n\nJust following up on my previous email regarding {{pos}} at {{company}}.\n\nBest,\n{{sender}}');
+          ? getBDTemplate(bdId, 'tmpl_fu2_body', 'template_fu2_body', DEFAULT_TEMPLATES.fu2_body)
+          : getBDTemplate(bdId, 'tmpl_fu1_body', 'template_fu1_body', DEFAULT_TEMPLATES.fu1_body);
         emailsToInsert.push({ contact_id: fu.contact_id, job_id: fu.job_id, to_email: contact.email, from_email: job.sending_email?.email_address || null, subject: fillTemplate(subjTmpl, vars), body: fillTemplate(bodyTmpl, vars), platform: 'Outlook', sent_by: bdId, status: 'pending', followup_type: isFu2 ? 'fu2' : 'fu1', follow_up_id: fu.id });
         if (isFu2) { fu2Updates.push(fu.id); log.fu2_queued++; } else { fu1Updates.push(fu.id); log.fu1_queued++; }
         acCountDelta[acId] = (acCountDelta[acId] || 0) + 1;
