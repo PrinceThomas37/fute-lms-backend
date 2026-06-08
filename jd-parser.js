@@ -274,4 +274,43 @@ function parseJobDescription(text, industry) {
   };
 }
 
-module.exports = { parseJobDescription, normalizeIndustry, SKILL_DICTIONARIES };
+/**
+ * Build jobs.research from import fields (notes, position, location, salary, industry).
+ */
+function buildResearchFromLeadData({ notes, jdText, position, location, salaryRange, industry }) {
+  const parts = [];
+  if (position) parts.push(`Title: ${position}`);
+  if (notes) parts.push(String(notes).trim());
+  if (jdText) parts.push(String(jdText).trim());
+  const jd_raw = parts.filter(Boolean).join('\n\n').trim();
+  const seedText = jd_raw || [position, location, salaryRange].filter(Boolean).join(' ');
+  if (!seedText.trim()) return null;
+
+  const parsed = parseJobDescription(seedText, industry);
+  if (salaryRange) {
+    parsed.salary_display = parsed.salary_display || String(salaryRange).trim();
+    parsed.salary_range = parsed.salary_range || String(salaryRange).trim();
+  }
+  if (location) {
+    const loc = String(location).trim();
+    if (!parsed.location) {
+      parsed.location = loc;
+      parsed.city = loc.includes(',') ? loc.split(',')[0].trim() : loc;
+    }
+    if (!parsed.local_hint && parsed.city) parsed.local_hint = parsed.city;
+  }
+
+  return {
+    requirements: parsed,
+    jd_raw: jd_raw || null,
+    parsed_at: new Date().toISOString(),
+    source: 'import'
+  };
+}
+
+module.exports = {
+  parseJobDescription,
+  normalizeIndustry,
+  SKILL_DICTIONARIES,
+  buildResearchFromLeadData
+};
