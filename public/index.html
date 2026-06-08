@@ -532,6 +532,11 @@ var STATE = {
   signatureHtml: '',
   sigEmailId: null,
   emailSignaturesCache: {},
+  planFromEmailId: null,
+  outreachStylePreset: 'standard',
+  varInsertTarget: 'body',
+  composeTemplatePick: 'outreach',
+  showMoreVarChips: false,
   sigEditing: false,
   sigLayout: 'simple',
   raForm: {
@@ -736,6 +741,128 @@ function fillEmail(tmpl,l,co,sender){
   return tmpl.replace(/{{(\w+)}}/g,function(m,k){
     return map[k]!==undefined?map[k]:m;
   });
+}
+
+// Daniel-style outreach presets — user picks a starting style, then edits if needed
+var OUTREACH_STYLE_PRESETS={
+  standard:{
+    label:'Standard',
+    hint:'Check before sending profiles',
+    o1:{subj:'Assistance for {{pos}} in {{loc}}',body:"Hi {{fn}},\n\nI'm reaching out about your {{pos}} opening in {{loc}}.\nI have a few qualified profiles{{skills_line}} — I'd like to check before sending anything over.\n\nAre you still open to reviewing external candidates?\nThere's no charge to review resumes; we only charge if you hire.\n\nThanks & Regards,\n{{sender}}"},
+    fu1:{subj:'Re: Assistance for {{pos}} in {{loc}}',body:"Hi {{fn}},\n\nJust checking in on my note about your {{pos}} opening in {{loc}}.\nI still have a few relevant profiles{{skills_line}} if you're reviewing candidates.\n\nNo pressure — just let me know if you'd like to see any.\n\nThanks,\n{{sender}}"},
+    fu2:{subj:'Re: Assistance for {{pos}} in {{loc}}',body:"Hi {{fn}},\n\nLast quick note on the {{pos}} role in {{loc}}.\nHappy to send profiles when timing works — no charge to review.\n\nThanks,\n{{sender}}"}
+  },
+  skills:{
+    label:'Skills-forward',
+    hint:'Leads with candidate skills',
+    o1:{subj:'Qualified candidates for {{pos}} in {{loc}}',body:"Hi {{fn}},\n\nI'm reaching out about your {{pos}} opening in {{loc}}.\nI have candidates{{skills_line}} who may be a fit — wanted to confirm before sharing profiles.\n\nAre you open to reviewing external candidates?\n\nThanks,\n{{sender}}"},
+    fu1:{subj:'Re: Candidates for {{pos}} in {{loc}}',body:"Hi {{fn}},\n\nFollowing up on your {{pos}} role in {{loc}}.\nI still have profiles{{skills_line}} that align with what you're hiring for.\n\nHappy to send a few if you're still accepting candidates.\n\nThanks,\n{{sender}}"},
+    fu2:{subj:'Re: {{pos}} in {{loc}}',body:"Hi {{fn}},\n\nLast note — I have relevant profiles{{skills_line}} for the {{pos}} role in {{loc}} whenever timing works.\n\nThanks,\n{{sender}}"}
+  },
+  nofee:{
+    label:'No-fee review',
+    hint:'Emphasizes free resume review',
+    o1:{subj:'Assistance for {{pos}} in {{loc}}',body:"Hi {{fn}},\n\nI'm reaching out about your {{pos}} opening in {{loc}}.\nI have a few qualified profiles{{skills_line}} I'd like to share.\n\nThere's no charge to review resumes — we only charge if you hire.\nWould you like to take a look?\n\nThanks & Regards,\n{{sender}}"},
+    fu1:{subj:'Re: Assistance for {{pos}} in {{loc}}',body:"Hi {{fn}},\n\nQuick follow-up on your {{pos}} opening in {{loc}}.\nI still have profiles{{skills_line}} available — still no charge to review.\n\nLet me know if you'd like to see any.\n\nThanks,\n{{sender}}"},
+    fu2:{subj:'Re: Assistance for {{pos}} in {{loc}}',body:"Hi {{fn}},\n\nLast quick note on the {{pos}} role in {{loc}}.\nHappy to send profiles when timing works — no charge to review.\n\nThanks,\n{{sender}}"}
+  },
+  short:{
+    label:'Short & direct',
+    hint:'Brief two-paragraph note',
+    o1:{subj:'Quick note — {{pos}} in {{loc}}',body:"Hi {{fn}},\n\nDo you have a minute to review external candidates for your {{pos}} role in {{loc}}?\nI have a few relevant profiles{{skills_line}} — no fee to review.\n\nThanks,\n{{sender}}"},
+    fu1:{subj:'Re: {{pos}} in {{loc}}',body:"Hi {{fn}},\n\nJust bumping my note about your {{pos}} opening in {{loc}}.\nStill have profiles{{skills_line}} if useful — no pressure.\n\nThanks,\n{{sender}}"},
+    fu2:{subj:'Re: {{pos}} in {{loc}}',body:"Hi {{fn}},\n\nLast note on {{pos}} in {{loc}} — happy to send profiles when you're ready.\n\nThanks,\n{{sender}}"}
+  }
+};
+var MERGE_VAR_GROUPS=[
+  {label:'Contact',chips:[
+    ['{{fn}}','First name','Contact\'s first name'],
+    ['{{ln}}','Last name','Contact\'s last name'],
+    ['{{desig}}','Their job title','Contact\'s designation']
+  ]},
+  {label:'Job & company',chips:[
+    ['{{pos}}','Job title','Open role you\'re hiring for'],
+    ['{{company}}','Company name','Company name'],
+    ['{{loc}}','Location','Job location'],
+    ['{{city}}','City','City from job location'],
+    ['{{ind}}','Industry','Company industry'],
+    ['{{skills_line}}','Skills phrase','Auto phrase from job skills, e.g. " with experience in HVAC"'],
+    ['{{local_line}}','Local requirement','Local/on-site requirement if set']
+  ]},
+  {label:'Compensation',chips:[
+    ['{{salary_line}}','Salary','Salary in parentheses if available'],
+    ['{{salary_range}}','Salary range','Raw salary range text']
+  ]},
+  {label:'Your details',chips:[
+    ['{{sender}}','Your name','Your display name on the sending email']
+  ]}
+];
+var MERGE_VAR_MORE=[
+  ['{{skill_1}}','Skill 1','First matched skill'],
+  ['{{skill_2}}','Skill 2','Second matched skill'],
+  ['{{skill_3}}','Skill 3','Third matched skill']
+];
+function outreachTmplApiKey(tabKey){return tabKey==='outreach'?'o1':tabKey;}
+function renderSendingEmailCard(userId,myEmails,selectedId,onSelectFn){
+  if(!myEmails.length){
+    return '<div class="card cp mb3"><div class="fw6 mb2" style="font-size:13px">Sending from</div>'+
+      '<div style="font-size:12px;color:var(--amber);padding:4px 0">No active email IDs yet. Ask your admin to add one under your profile.</div></div>';
+  }
+  var selId=selectedId||(myEmails.find(function(e){return e.is_primary;})||myEmails[0]).id;
+  var opts=myEmails.map(function(e){
+    return '<option value="'+e.id+'"'+(e.id===selId?' selected':'')+'>'+htmlEsc(e.display_name||e.email_address)+' &lt;'+htmlEsc(e.email_address)+'&gt;</option>';
+  }).join('');
+  return '<div class="card cp mb3">'+
+    '<div class="fw6 mb1" style="font-size:13px">Sending from</div>'+
+    '<div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">Emails go out from this address. Signature uses this ID too.</div>'+
+    '<select class="sel" onchange="'+onSelectFn+'(this.value)">'+opts+'</select>'+
+  '</div>';
+}
+function mergeVarFriendlyLabel(token){
+  var i,g,c;
+  for(i=0;i<MERGE_VAR_GROUPS.length;i++){
+    for(c=0;c<MERGE_VAR_GROUPS[i].chips.length;c++){
+      if(MERGE_VAR_GROUPS[i].chips[c][0]===token)return MERGE_VAR_GROUPS[i].chips[c][1];
+    }
+  }
+  for(i=0;i<MERGE_VAR_MORE.length;i++){
+    if(MERGE_VAR_MORE[i][0]===token)return MERGE_VAR_MORE[i][1];
+  }
+  return 'Field';
+}
+function renderVarChipBtn(token,label,hint,subjId,bodyId){
+  return '<button type="button" title="'+htmlEsc(hint||label)+'" onclick="insertVarChip(\''+token+'\',\''+subjId+'\',\''+bodyId+'\')" '+
+    'style="font-size:12px;padding:6px 12px;border-radius:20px;border:1px solid var(--border2);background:#fff;color:var(--text);cursor:pointer;white-space:nowrap;font-weight:500" '+
+    'onmouseover="this.style.borderColor=\'var(--accent)\';this.style.background=\'var(--accent-l)\';this.style.color=\'var(--accent)\'" '+
+    'onmouseout="this.style.borderColor=\'var(--border2)\';this.style.background=\'#fff\';this.style.color=\'var(--text)\'">'+htmlEsc(label)+'</button>';
+}
+function renderVarChipBar(subjId,bodyId){
+  var target=STATE.varInsertTarget||'body';
+  var groupHtml=MERGE_VAR_GROUPS.map(function(g){
+    var chips=g.chips.map(function(v){return renderVarChipBtn(v[0],v[1],v[2],subjId,bodyId);}).join('');
+    return '<div style="margin-bottom:10px"><div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">'+htmlEsc(g.label)+'</div>'+
+      '<div style="display:flex;flex-wrap:wrap;gap:6px">'+chips+'</div></div>';
+  }).join('');
+  var moreHtml='';
+  if(STATE.showMoreVarChips){
+    moreHtml='<div style="margin-bottom:10px"><div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Individual skills</div>'+
+      '<div style="display:flex;flex-wrap:wrap;gap:6px">'+
+      MERGE_VAR_MORE.map(function(v){return renderVarChipBtn(v[0],v[1],v[2],subjId,bodyId);}).join('')+
+      '</div></div>';
+  }
+  return '<div style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r2);margin-top:8px">'+
+    '<div style="font-weight:600;font-size:13px;color:var(--text);margin-bottom:4px">Personalize your message</div>'+
+    '<div style="font-size:12px;color:var(--text3);margin-bottom:12px">Step 1 — choose where to add &nbsp;·&nbsp; Step 2 — click a field below</div>'+
+    '<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">'+
+      '<button type="button" onclick="setVarInsertTarget(\'subject\')" style="padding:7px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:2px solid '+(target==='subject'?'var(--accent)':'var(--border)')+';background:'+(target==='subject'?'var(--accent)':'#fff')+';color:'+(target==='subject'?'#fff':'var(--text2)')+'">① Subject line</button>'+
+      '<button type="button" onclick="setVarInsertTarget(\'body\')" style="padding:7px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:2px solid '+(target==='body'?'var(--accent)':'var(--border)')+';background:'+(target==='body'?'var(--accent)':'#fff')+';color:'+(target==='body'?'#fff':'var(--text2)')+'">② Email body</button>'+
+      '<span style="font-size:11px;color:var(--text3);align-self:center">Adding to: <strong style="color:var(--accent)">'+(target==='subject'?'Subject line':'Email body')+'</strong></span>'+
+    '</div>'+
+    groupHtml+moreHtml+
+    '<button type="button" onclick="STATE.showMoreVarChips=!STATE.showMoreVarChips;render()" style="font-size:11px;padding:4px 0;border:0;background:transparent;color:var(--accent);cursor:pointer;font-weight:600">'+
+      (STATE.showMoreVarChips?'▲ Hide individual skills':'▼ Show individual skills (Skill 1, 2, 3)')+
+    '</button>'+
+  '</div>';
 }
 
 // ════════════════════════════════════════════════
@@ -1735,18 +1862,17 @@ function renderEmail(){
     {key:'fu2',label:'Follow-up 2',sublabel:'Day '+fu2Day+' after outreach',color:'#ea580c',subjVal:myPlan['tmpl_fu2_subject']||STATE.fu2Subj,bodyVal:myPlan['tmpl_fu2_body']||STATE.fu2Body,subjId:'tmpl-fu2-subj',bodyId:'tmpl-fu2-body'}
   ];
   var activeTmpl=tmplDefs.find(function(t){return t.key===STATE.activeTmpl;})||tmplDefs[0];
-  var vars=[['{{fn}}','First name'],['{{ln}}','Last name'],['{{company}}','Company name'],['{{pos}}','Position'],['{{ind}}','Industry'],['{{desig}}','Designation'],['{{loc}}','Location'],['{{city}}','City'],['{{sender}}','Sender name'],['{{skill_1}}','Skill 1'],['{{skill_2}}','Skill 2'],['{{skill_3}}','Skill 3'],['{{skills_line}}','Skills phrase'],['{{salary_range}}','Salary range'],['{{salary_line}}','Salary in parens'],['{{local_line}}','Local requirement']];
-  var varChips='<div style="display:flex;align-items:center;gap:7px">'+
-    '<span style="font-size:11px;color:var(--text3);white-space:nowrap">Insert variable:</span>'+
-    '<select id="var-picker-sel" onchange="insertVarFromPicker(this.value,\''+activeTmpl.bodyId+'\')" style="font-size:12px;padding:4px 8px;border:1px solid var(--border2);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer;max-width:180px">'+
-      '<option value="">— pick one —</option>'+
-      vars.map(function(v){return '<option value="'+v[0]+'">'+v[0]+' — '+v[1]+'</option>';}).join('')+
-    '</select>'+
-    '<select id="var-picker-subj-sel" onchange="insertVarFromPicker(this.value,\''+activeTmpl.subjId+'\')" style="font-size:12px;padding:4px 8px;border:1px solid var(--border2);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer;max-width:160px">'+
-      '<option value="">into subject…</option>'+
-      vars.map(function(v){return '<option value="'+v[0]+'">'+v[0]+'</option>';}).join('')+
-    '</select>'+
-  '</div>';
+  var planEmails=(STATE.userEmailsCache&&STATE.userEmailsCache[u.id]||[]).filter(function(e){return e.is_active;});
+  var planFromId=STATE.planFromEmailId||(planEmails.find(function(e){return e.is_primary;})||planEmails[0]||{}).id;
+  if(planFromId&&!STATE.planFromEmailId)STATE.planFromEmailId=planFromId;
+  if(planFromId&&STATE.sigEmailId!==planFromId)STATE.sigEmailId=planFromId;
+  var styleBtns=Object.keys(OUTREACH_STYLE_PRESETS).map(function(pk){
+    var p=OUTREACH_STYLE_PRESETS[pk];
+    var on=STATE.outreachStylePreset===pk;
+    return '<button type="button" onclick="applyOutreachStylePreset(\''+pk+'\')" style="text-align:left;padding:10px 14px;border-radius:10px;cursor:pointer;border:2px solid '+(on?'var(--accent)':'var(--border)')+';background:'+(on?'var(--accent-l)':'var(--card)')+';min-width:140px;flex:1">'+
+      '<div style="font-weight:700;font-size:13px;color:'+(on?'var(--accent)':'var(--text)')+'">'+htmlEsc(p.label)+'</div>'+
+      '<div style="font-size:11px;color:var(--text3);margin-top:3px">'+htmlEsc(p.hint)+'</div></button>';
+  }).join('');
   var tmplTabBtns=tmplDefs.map(function(t){
     var isActive=STATE.activeTmpl===t.key;
     return '<button onclick="STATE.activeTmpl=\''+t.key+'\';render()" style="padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:2px solid '+(isActive?t.color:'var(--border)')+';background:'+(isActive?t.color:'var(--card)')+';color:'+(isActive?'#fff':'var(--text2)')+';transition:all .15s">'+t.label+'</button>';
@@ -1769,18 +1895,27 @@ function renderEmail(){
   }
   var canEditTemplates=userHasAnyRole(u,'bd','bd_lead','admin');
   var tmplHtml=canEditTemplates?
-    '<div>'+
-      '<div style="display:flex;gap:10px;margin-bottom:20px">'+tmplTabBtns+'</div>'+
+    '<div style="max-width:720px">'+
+      '<div style="padding:12px 14px;background:var(--accent-l);border-radius:var(--r2);margin-bottom:16px;font-size:13px;color:var(--text2)">'+
+        '<strong>How this works:</strong> Pick your sending email → choose a message style → edit Outreach &amp; follow-ups → Save. Assigned leads use these templates automatically.'+
+      '</div>'+
+      renderSendingEmailCard(u.id,planEmails,planFromId,'selectPlanFromEmail')+
+      '<div class="card cp mb3">'+
+        '<div class="fw6 mb1" style="font-size:13px">Message style</div>'+
+        '<div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">Start from a proven template — you can edit any field after applying.</div>'+
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">'+styleBtns+'</div>'+
+      '</div>'+
+      '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">'+tmplTabBtns+'</div>'+
       '<div class="card cp" style="border-top:3px solid '+activeTmpl.color+'">'+
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
-          '<div><div style="font-weight:700;font-size:14px;color:var(--text)">'+activeTmpl.label+'</div>'+
-              '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+activeTmpl.sublabel+'</div></div>'+
-          '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'+varChips+'</div>'+
+        '<div style="margin-bottom:14px">'+
+          '<div style="font-weight:700;font-size:14px;color:var(--text)">'+activeTmpl.label+'</div>'+
+          '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+activeTmpl.sublabel+'</div>'+
         '</div>'+
         daySettingsHtml+
-        '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="'+activeTmpl.subjId+'" value="'+htmlEsc(activeTmpl.subjVal)+'"/></div>'+
-        '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:200px" id="'+activeTmpl.bodyId+'">'+htmlEsc(activeTmpl.bodyVal)+'</textarea></div>'+
-        '<button class="btn btn-primary mt2" onclick="saveOutreachTemplate(\''+activeTmpl.key+'\',\''+activeTmpl.subjId+'\',\''+activeTmpl.bodyId+'\')" >Save template</button>'+
+        '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="'+activeTmpl.subjId+'" value="'+htmlEsc(activeTmpl.subjVal)+'" onfocus="setVarInsertTarget(\'subject\')"/></div>'+
+        '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:200px" id="'+activeTmpl.bodyId+'" onfocus="setVarInsertTarget(\'body\')">'+htmlEsc(activeTmpl.bodyVal)+'</textarea></div>'+
+        renderVarChipBar(activeTmpl.subjId,activeTmpl.bodyId)+
+        '<button class="btn btn-primary mt3" onclick="saveOutreachTemplate(\''+activeTmpl.key+'\',\''+activeTmpl.subjId+'\',\''+activeTmpl.bodyId+'\')">Save '+activeTmpl.label+'</button>'+
       '</div>'+
 
       // ── SIGNATURE EDITOR (per sending email ID) ───────────────
@@ -1802,20 +1937,16 @@ function renderEmail(){
         var previewEmail=(sigEmail&&sigEmail.email_address)||'you@fute-global.com';
         var previewSource=sig||(SIG_PRESETS&&SIG_PRESETS.full)||'';
         var previewHtml=previewSource?(previewSource.replace(/{{sender}}/g,previewSender).replace(/{{senderemail}}/g,previewEmail)):'<em style="color:var(--text3);font-size:12px">Loading signature…</em>';
-        var emailOpts=myEmails.map(function(e){
-          return '<option value="'+e.id+'"'+(e.id===sigEmailId?' selected':'')+'>'+htmlEsc(e.display_name||e.email_address)+' &lt;'+htmlEsc(e.email_address)+'&gt;</option>';
-        }).join('');
+        var sigLabel=sigEmail?(htmlEsc(sigEmail.display_name||sigEmail.email_address)+' &lt;'+htmlEsc(sigEmail.email_address)+'&gt;'):'selected email above';
         return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);margin-top:16px;overflow:hidden">'+
           '<div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">'+
             '<div>'+
               '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Email Signature</div>'+
-              '<div style="font-size:11.5px;color:var(--text3);margin-top:2px">Per sending email ID — appended to outbound mail from that address</div>'+
+              '<div style="font-size:11.5px;color:var(--text3);margin-top:2px">For '+sigLabel+' — appended automatically on send</div>'+
             '</div>'+
             '<button onclick="STATE.sigEditing=!STATE.sigEditing;render()" style="font-size:12px;padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--bg);cursor:pointer;color:var(--text2)">'+(editing?'Close editor':'Edit signature')+'</button>'+
           '</div>'+
-          (myEmails.length?
-            '<div style="padding:12px 16px 0"><div class="fgrp" style="margin-bottom:0"><label class="flbl">Signature for</label><select class="sel" onchange="selectSigEmail(this.value)">'+emailOpts+'</select></div></div>'
-          :'<div style="padding:12px 16px 0;font-size:12px;color:var(--amber)">Add a sending email ID in Admin → your profile before setting a signature.</div>')+
+          (!myEmails.length?'<div style="padding:12px 16px 0;font-size:12px;color:var(--amber)">Add a sending email ID in Admin → your profile before setting a signature.</div>':'')+
           (editing?
             '<div style="padding:16px">'+
               '<div style="margin-bottom:12px">'+
@@ -1973,32 +2104,22 @@ function renderEmail(){
         recipientBadge+
       '</div>'+
 
-      // ── From email selector ──
       (function(){
         var myEmails=(STATE.userEmailsCache&&STATE.userEmailsCache[u.id]||[]).filter(function(e){return e.is_active;});
-        if(!myEmails.length){
-          return '<div class="card cp mb3">'
-            +'<div class="fw6 mb2" style="font-size:13px">From</div>'
-            +'<div style="font-size:12px;color:var(--text3);padding:8px 0">No active email IDs assigned to your account. Add one in Admin → your profile.</div>'
-            +'</div>';
-        }
-        var fromOpts=myEmails.map(function(e){
-          var sel=STATE.composeFromEmailId===e.id;
-          return '<option value="'+e.id+'"'+(sel?' selected':'')+'>'+htmlEsc(e.display_name||e.email_address)+' &lt;'+htmlEsc(e.email_address)+'&gt;</option>';
-        }).join('');
-        return '<div class="card cp mb3">'
-          +'<div class="fw6 mb2" style="font-size:13px">From</div>'
-          +'<select class="sel" onchange="STATE.composeFromEmailId=this.value;if(this.value)loadMailboxSignature(\''+u.id+'\',this.value);render()">'
-            +'<option value="">— Select sending email —</option>'+fromOpts
-          +'</select>'
-          +(STATE.composeFromEmailId?'':'<div style="font-size:11px;color:var(--amber);margin-top:6px">Select a sending email to enable send</div>')
-          +'</div>';
+        var fromId=STATE.composeFromEmailId||STATE.planFromEmailId||(myEmails.find(function(e){return e.is_primary;})||myEmails[0]||{}).id;
+        if(fromId&&!STATE.composeFromEmailId)STATE.composeFromEmailId=fromId;
+        return renderSendingEmailCard(u.id,myEmails,fromId,'selectComposeFromEmail');
       })()+
 
       '<div class="card cp mb3">'+
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">'+
           '<div class="fw6" style="font-size:13px">Message</div>'+
-          '<div style="display:flex;gap:8px;align-items:center">'+
+          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+            '<select class="sel" style="max-width:200px;font-size:12px" onchange="loadComposeTemplate(this.value)">'+
+              '<option value="outreach"'+(STATE.composeTemplatePick==='outreach'?' selected':'')+'>Outreach 1 template</option>'+
+              '<option value="fu1"'+(STATE.composeTemplatePick==='fu1'?' selected':'')+'>Follow-up 1 template</option>'+
+              '<option value="fu2"'+(STATE.composeTemplatePick==='fu2'?' selected':'')+'>Follow-up 2 template</option>'+
+            '</select>'+
             '<button onclick="STATE.showAIPanel=!STATE.showAIPanel;render()" style="font-size:12px;padding:5px 11px;border:1px solid rgba(124,58,237,.3);background:'+(STATE.showAIPanel?'var(--purple)':'var(--purple-l)')+';color:'+(STATE.showAIPanel?'#fff':'var(--purple)')+';border-radius:7px;cursor:pointer">\u2728 AI</button>'+
             '<div class="flex gap1">'+
               '<button class="fc'+(u.plt==='Gmail'?' on':'')+'" onclick="setPlatform(\'Gmail\')">Gmail</button>'+
@@ -2006,8 +2127,9 @@ function renderEmail(){
             '</div>'+
           '</div>'+
         '</div>'+
-        '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="email-subj" value="'+htmlEsc(STATE.emailSubj)+'" oninput="STATE.emailSubj=this.value"/></div>'+
-        '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:140px" id="email-body" oninput="STATE.emailBody=this.value">'+htmlEsc(STATE.emailBody)+'</textarea></div>'+
+        '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="email-subj" value="'+htmlEsc(STATE.emailSubj)+'" oninput="STATE.emailSubj=this.value" onfocus="setVarInsertTarget(\'subject\')"/></div>'+
+        '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:140px" id="email-body" oninput="STATE.emailBody=this.value" onfocus="setVarInsertTarget(\'body\')">'+htmlEsc(STATE.emailBody)+'</textarea></div>'+
+        renderVarChipBar('email-subj','email-body')+
         aiSection+
         (hasRecipient&&!STATE.genEmail?
           '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
@@ -2069,7 +2191,7 @@ function renderEmail(){
     (oooCards?'<div style="padding:0 24px;padding-top:16px">'+oooCards+'</div>':'')+
     (bdSummaryCard?'<div style="padding:0 24px;padding-top:16px">'+bdSummaryCard+'</div>':'')+
     '<div class="ph"><div class="ptitle">Email</div>'+
-      '<div class="psub">'+(isBD?'Manage AI-generated outreach emails':'Email outreach')+' · '+u.name+'</div>'+
+      '<div class="psub">'+(isBD?'Compose one-off emails or set up your outreach plan':'Email outreach')+' · '+u.name+'</div>'+
     '</div>'+
     progressBar+
     '<div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:18px;overflow-x:auto">'+tabBar+'</div>'+
@@ -3114,21 +3236,71 @@ window.connectMicrosoftAccount=function(accountId){
   window.addEventListener('message',window._msOAuthHandler);
 };
 
+window.selectPlanFromEmail=function(emailId){
+  if(!emailId||!STATE.user)return;
+  STATE.planFromEmailId=emailId;
+  STATE.sigEmailId=emailId;
+  loadMailboxSignature(STATE.user.id,emailId);
+  render();
+};
+window.selectComposeFromEmail=function(emailId){
+  if(!emailId||!STATE.user)return;
+  STATE.composeFromEmailId=emailId;
+  loadMailboxSignature(STATE.user.id,emailId);
+  render();
+};
+window.applyOutreachStylePreset=function(presetKey){
+  var preset=OUTREACH_STYLE_PRESETS[presetKey];
+  if(!preset)return;
+  STATE.outreachStylePreset=presetKey;
+  STATE.emailSubj=preset.o1.subj;STATE.emailBody=preset.o1.body;
+  STATE.fu1Subj=preset.fu1.subj;STATE.fu1Body=preset.fu1.body;
+  STATE.fu2Subj=preset.fu2.subj;STATE.fu2Body=preset.fu2.body;
+  STATE.myOutreachPlan=STATE.myOutreachPlan||{};
+  STATE.myOutreachPlan['tmpl_o1_subject']=preset.o1.subj;STATE.myOutreachPlan['tmpl_o1_body']=preset.o1.body;
+  STATE.myOutreachPlan['tmpl_fu1_subject']=preset.fu1.subj;STATE.myOutreachPlan['tmpl_fu1_body']=preset.fu1.body;
+  STATE.myOutreachPlan['tmpl_fu2_subject']=preset.fu2.subj;STATE.myOutreachPlan['tmpl_fu2_body']=preset.fu2.body;
+  showToast('Applied "'+preset.label+'" style to all templates — review each tab and Save','success');
+  render();
+};
+window.setVarInsertTarget=function(target){
+  STATE.varInsertTarget=target||'body';
+  render();
+};
+window.insertVarChip=function(token,subjId,bodyId){
+  if(!token)return;
+  var targetId=(STATE.varInsertTarget==='subject')?subjId:bodyId;
+  var where=(STATE.varInsertTarget==='subject')?'subject line':'email body';
+  insertVarFromPicker(token,targetId);
+  showToast('Added '+mergeVarFriendlyLabel(token)+' to '+where,'success');
+};
+window.loadComposeTemplate=function(templateKey){
+  STATE.composeTemplatePick=templateKey||'outreach';
+  var subj=STATE.emailSubj,body=STATE.emailBody;
+  if(templateKey==='fu1'){subj=STATE.fu1Subj;body=STATE.fu1Body;}
+  else if(templateKey==='fu2'){subj=STATE.fu2Subj;body=STATE.fu2Body;}
+  STATE.emailSubj=subj||'';STATE.emailBody=body||'';
+  var sEl=document.getElementById('email-subj');
+  var bEl=document.getElementById('email-body');
+  if(sEl)sEl.value=STATE.emailSubj;
+  if(bEl)bEl.value=STATE.emailBody;
+  showToast('Loaded '+(templateKey==='fu1'?'Follow-up 1':templateKey==='fu2'?'Follow-up 2':'Outreach 1')+' template','success');
+  render();
+};
 window.saveOutreachTemplate=function(key,subjId,bodyId){
   var subj=(document.getElementById(subjId)||{}).value||'';
   var body=(document.getElementById(bodyId)||{}).value||'';
-  // Update local STATE
+  var apiKey=outreachTmplApiKey(key);
   if(key==='outreach'){STATE.emailSubj=subj;STATE.emailBody=body;}
   else if(key==='fu1'){STATE.fu1Subj=subj;STATE.fu1Body=body;}
   else if(key==='fu2'){STATE.fu2Subj=subj;STATE.fu2Body=body;}
   STATE.myOutreachPlan=STATE.myOutreachPlan||{};
-  STATE.myOutreachPlan['tmpl_'+key+'_subject']=subj;
-  STATE.myOutreachPlan['tmpl_'+key+'_body']=body;
-  var saves=[
-    apiPost('/outreach-plan',{key:'tmpl_'+key+'_subject',value:subj}),
-    apiPost('/outreach-plan',{key:'tmpl_'+key+'_body',value:body})
-  ];
-  Promise.all(saves).then(function(){showToast('Template saved','success');}).catch(function(e){showToast('Save failed: '+e.message,'error');});
+  STATE.myOutreachPlan['tmpl_'+apiKey+'_subject']=subj;
+  STATE.myOutreachPlan['tmpl_'+apiKey+'_body']=body;
+  Promise.all([
+    apiPost('/outreach-plan',{key:'tmpl_'+apiKey+'_subject',value:subj}),
+    apiPost('/outreach-plan',{key:'tmpl_'+apiKey+'_body',value:body})
+  ]).then(function(){showToast('Template saved','success');}).catch(function(e){showToast('Save failed: '+e.message,'error');});
 };
 
 window.saveOutreachDay=function(key,val){
@@ -3453,9 +3625,6 @@ window.insertVarFromPicker=function(v,targetId){
       bodyEl.selectionStart=bodyEl.selectionEnd=s+v.length;
       STATE.emailBody=bodyEl.value;
     }
-    // reset the picker
-    var pk=document.getElementById('var-picker-sel');if(pk)pk.value='';
-    var pks=document.getElementById('var-picker-subj-sel');if(pks)pks.value='';
     return;
   }
   var start=el.selectionStart!==undefined?el.selectionStart:el.value.length;
@@ -3463,9 +3632,8 @@ window.insertVarFromPicker=function(v,targetId){
   el.value=el.value.slice(0,start)+v+el.value.slice(end2);
   el.selectionStart=el.selectionEnd=start+v.length;
   el.focus();
-  // reset pickers
-  var pk=document.getElementById('var-picker-sel');if(pk)pk.value='';
-  var pks=document.getElementById('var-picker-subj-sel');if(pks)pks.value='';
+  if(el.id==='email-subj')STATE.emailSubj=el.value;
+  else if(el.id==='email-body')STATE.emailBody=el.value;
 };
 
 // Legacy insertVar (kept for any remaining callers) — inserts into email-body textarea
@@ -3514,6 +3682,7 @@ window.loadMailboxSignature=function(userId,emailId){
 window.selectSigEmail=function(emailId){
   if(!emailId||!STATE.user)return;
   STATE.sigEmailId=emailId;
+  STATE.planFromEmailId=emailId;
   if(STATE.emailSignaturesCache&&STATE.emailSignaturesCache[emailId]!==undefined){render();return;}
   loadMailboxSignature(STATE.user.id,emailId);
 };
@@ -3753,8 +3922,9 @@ window.openEditPendingEmail=function(id){
   STATE.modal='<div class="modal modal-w640">'+
     '<div class="mh"><div class="mt">Edit Email \u2014 '+htmlEsc(pe.to_email||'')+'</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
     '<div class="mb_" style="padding:18px 20px">'+
-      '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="edit-pe-subj" value="'+htmlEsc(pe.subject||'')+'"/></div>'+
-      '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" id="edit-pe-body" style="min-height:300px;line-height:1.7">'+htmlEsc(pe.body||'')+'</textarea></div>'+
+      '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="edit-pe-subj" value="'+htmlEsc(pe.subject||'')+'" onfocus="setVarInsertTarget(\'subject\')"/></div>'+
+      '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" id="edit-pe-body" style="min-height:300px;line-height:1.7" onfocus="setVarInsertTarget(\'body\')">'+htmlEsc(pe.body||'')+'</textarea></div>'+
+      renderVarChipBar('edit-pe-subj','edit-pe-body')+
     '</div>'+
     '<div class="mf">'+
       '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
@@ -3935,12 +4105,13 @@ function renderMailMergeModal(){
         '</div>'+
         '<div class="fgrp">'+
           '<label class="flbl">Subject</label>'+
-          '<input class="inp" id="mm-subj" value="'+htmlEsc(current.subj)+'" oninput="mmUpdateSubj(this.value)"/>'+
+          '<input class="inp" id="mm-subj" value="'+htmlEsc(current.subj)+'" oninput="mmUpdateSubj(this.value)" onfocus="setVarInsertTarget(\'subject\')"/>'+
         '</div>'+
         '<div class="fgrp">'+
           '<label class="flbl">Body</label>'+
-          '<textarea class="txta w100" id="mm-body" style="min-height:200px;font-size:13px;line-height:1.6" oninput="mmUpdateBody(this.value)">'+htmlEsc(current.body)+'</textarea>'+
+          '<textarea class="txta w100" id="mm-body" style="min-height:200px;font-size:13px;line-height:1.6" oninput="mmUpdateBody(this.value)" onfocus="setVarInsertTarget(\'body\')">'+htmlEsc(current.body)+'</textarea>'+
         '</div>'+
+        renderVarChipBar('mm-subj','mm-body')+
       '</div>'+
 
       '<div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--card)">'+
@@ -6704,6 +6875,7 @@ function loadAppData(){
         var primary=(emails||[]).find(function(e){return e.is_primary;})||(emails||[])[0];
         if(primary){
           if(!STATE.sigEmailId)STATE.sigEmailId=primary.id;
+          if(!STATE.planFromEmailId)STATE.planFromEmailId=primary.id;
           loadMailboxSignature(STATE.user.id,STATE.sigEmailId||primary.id);
         }
       }).catch(function(){});
