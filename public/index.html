@@ -536,6 +536,7 @@ var STATE = {
   outreachStylePreset: 'standard',
   varInsertTarget: 'body',
   composeTemplatePick: 'outreach',
+  showMoreVarChips: false,
   sigEditing: false,
   sigLayout: 'simple',
   raForm: {
@@ -773,10 +774,33 @@ var OUTREACH_STYLE_PRESETS={
     fu2:{subj:'Re: {{pos}} in {{loc}}',body:"Hi {{fn}},\n\nLast note on {{pos}} in {{loc}} — happy to send profiles when you're ready.\n\nThanks,\n{{sender}}"}
   }
 };
-var MERGE_VAR_CHIPS=[
-  ['{{fn}}','First name'],['{{pos}}','Job title'],['{{loc}}','Location'],
-  ['{{company}}','Company'],['{{skills_line}}','Skills'],['{{salary_line}}','Salary'],
-  ['{{local_line}}','Local req'],['{{sender}}','Your name']
+var MERGE_VAR_GROUPS=[
+  {label:'Contact',chips:[
+    ['{{fn}}','First name','Contact\'s first name'],
+    ['{{ln}}','Last name','Contact\'s last name'],
+    ['{{desig}}','Their job title','Contact\'s designation']
+  ]},
+  {label:'Job & company',chips:[
+    ['{{pos}}','Job title','Open role you\'re hiring for'],
+    ['{{company}}','Company name','Company name'],
+    ['{{loc}}','Location','Job location'],
+    ['{{city}}','City','City from job location'],
+    ['{{ind}}','Industry','Company industry'],
+    ['{{skills_line}}','Skills phrase','Auto phrase from job skills, e.g. " with experience in HVAC"'],
+    ['{{local_line}}','Local requirement','Local/on-site requirement if set']
+  ]},
+  {label:'Compensation',chips:[
+    ['{{salary_line}}','Salary','Salary in parentheses if available'],
+    ['{{salary_range}}','Salary range','Raw salary range text']
+  ]},
+  {label:'Your details',chips:[
+    ['{{sender}}','Your name','Your display name on the sending email']
+  ]}
+];
+var MERGE_VAR_MORE=[
+  ['{{skill_1}}','Skill 1','First matched skill'],
+  ['{{skill_2}}','Skill 2','Second matched skill'],
+  ['{{skill_3}}','Skill 3','Third matched skill']
 ];
 function outreachTmplApiKey(tabKey){return tabKey==='outreach'?'o1':tabKey;}
 function renderSendingEmailCard(userId,myEmails,selectedId,onSelectFn){
@@ -794,21 +818,50 @@ function renderSendingEmailCard(userId,myEmails,selectedId,onSelectFn){
     '<select class="sel" onchange="'+onSelectFn+'(this.value)">'+opts+'</select>'+
   '</div>';
 }
+function mergeVarFriendlyLabel(token){
+  var i,g,c;
+  for(i=0;i<MERGE_VAR_GROUPS.length;i++){
+    for(c=0;c<MERGE_VAR_GROUPS[i].chips.length;c++){
+      if(MERGE_VAR_GROUPS[i].chips[c][0]===token)return MERGE_VAR_GROUPS[i].chips[c][1];
+    }
+  }
+  for(i=0;i<MERGE_VAR_MORE.length;i++){
+    if(MERGE_VAR_MORE[i][0]===token)return MERGE_VAR_MORE[i][1];
+  }
+  return 'Field';
+}
+function renderVarChipBtn(token,label,hint,subjId,bodyId){
+  return '<button type="button" title="'+htmlEsc(hint||label)+'" onclick="insertVarChip(\''+token+'\',\''+subjId+'\',\''+bodyId+'\')" '+
+    'style="font-size:12px;padding:6px 12px;border-radius:20px;border:1px solid var(--border2);background:#fff;color:var(--text);cursor:pointer;white-space:nowrap;font-weight:500" '+
+    'onmouseover="this.style.borderColor=\'var(--accent)\';this.style.background=\'var(--accent-l)\';this.style.color=\'var(--accent)\'" '+
+    'onmouseout="this.style.borderColor=\'var(--border2)\';this.style.background=\'#fff\';this.style.color=\'var(--text)\'">'+htmlEsc(label)+'</button>';
+}
 function renderVarChipBar(subjId,bodyId){
   var target=STATE.varInsertTarget||'body';
-  var chips=MERGE_VAR_CHIPS.map(function(v){
-    return '<button type="button" onclick="insertVarChip(\''+v[0]+'\',\''+subjId+'\',\''+bodyId+'\')" '+
-      'style="font-size:11px;padding:5px 11px;border-radius:20px;border:1px solid var(--border2);background:var(--card);color:var(--text2);cursor:pointer;white-space:nowrap" '+
-      'onmouseover="this.style.borderColor=\'var(--accent)\';this.style.color=\'var(--accent)\'" '+
-      'onmouseout="this.style.borderColor=\'var(--border2)\';this.style.color=\'var(--text2)\'">'+htmlEsc(v[1])+'</button>';
+  var groupHtml=MERGE_VAR_GROUPS.map(function(g){
+    var chips=g.chips.map(function(v){return renderVarChipBtn(v[0],v[1],v[2],subjId,bodyId);}).join('');
+    return '<div style="margin-bottom:10px"><div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">'+htmlEsc(g.label)+'</div>'+
+      '<div style="display:flex;flex-wrap:wrap;gap:6px">'+chips+'</div></div>';
   }).join('');
-  return '<div style="padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r2);margin-top:4px">'+
-    '<div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">Add personalization tags — pick where, then click a tag:</div>'+
-    '<div style="display:flex;gap:6px;margin-bottom:10px">'+
-      '<button type="button" onclick="setVarInsertTarget(\'subject\')" style="padding:5px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:2px solid '+(target==='subject'?'var(--accent)':'var(--border)')+';background:'+(target==='subject'?'var(--accent-l)':'var(--card)')+';color:'+(target==='subject'?'var(--accent)':'var(--text2)')+'">Subject line</button>'+
-      '<button type="button" onclick="setVarInsertTarget(\'body\')" style="padding:5px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:2px solid '+(target==='body'?'var(--accent)':'var(--border)')+';background:'+(target==='body'?'var(--accent-l)':'var(--card)')+';color:'+(target==='body'?'var(--accent)':'var(--text2)')+'">Email body</button>'+
+  var moreHtml='';
+  if(STATE.showMoreVarChips){
+    moreHtml='<div style="margin-bottom:10px"><div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Individual skills</div>'+
+      '<div style="display:flex;flex-wrap:wrap;gap:6px">'+
+      MERGE_VAR_MORE.map(function(v){return renderVarChipBtn(v[0],v[1],v[2],subjId,bodyId);}).join('')+
+      '</div></div>';
+  }
+  return '<div style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r2);margin-top:8px">'+
+    '<div style="font-weight:600;font-size:13px;color:var(--text);margin-bottom:4px">Personalize your message</div>'+
+    '<div style="font-size:12px;color:var(--text3);margin-bottom:12px">Step 1 — choose where to add &nbsp;·&nbsp; Step 2 — click a field below</div>'+
+    '<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">'+
+      '<button type="button" onclick="setVarInsertTarget(\'subject\')" style="padding:7px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:2px solid '+(target==='subject'?'var(--accent)':'var(--border)')+';background:'+(target==='subject'?'var(--accent)':'#fff')+';color:'+(target==='subject'?'#fff':'var(--text2)')+'">① Subject line</button>'+
+      '<button type="button" onclick="setVarInsertTarget(\'body\')" style="padding:7px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:2px solid '+(target==='body'?'var(--accent)':'var(--border)')+';background:'+(target==='body'?'var(--accent)':'#fff')+';color:'+(target==='body'?'#fff':'var(--text2)')+'">② Email body</button>'+
+      '<span style="font-size:11px;color:var(--text3);align-self:center">Adding to: <strong style="color:var(--accent)">'+(target==='subject'?'Subject line':'Email body')+'</strong></span>'+
     '</div>'+
-    '<div style="display:flex;flex-wrap:wrap;gap:6px">'+chips+'</div>'+
+    groupHtml+moreHtml+
+    '<button type="button" onclick="STATE.showMoreVarChips=!STATE.showMoreVarChips;render()" style="font-size:11px;padding:4px 0;border:0;background:transparent;color:var(--accent);cursor:pointer;font-weight:600">'+
+      (STATE.showMoreVarChips?'▲ Hide individual skills':'▼ Show individual skills (Skill 1, 2, 3)')+
+    '</button>'+
   '</div>';
 }
 
@@ -3217,7 +3270,9 @@ window.setVarInsertTarget=function(target){
 window.insertVarChip=function(token,subjId,bodyId){
   if(!token)return;
   var targetId=(STATE.varInsertTarget==='subject')?subjId:bodyId;
+  var where=(STATE.varInsertTarget==='subject')?'subject line':'email body';
   insertVarFromPicker(token,targetId);
+  showToast('Added '+mergeVarFriendlyLabel(token)+' to '+where,'success');
 };
 window.loadComposeTemplate=function(templateKey){
   STATE.composeTemplatePick=templateKey||'outreach';
@@ -3570,9 +3625,6 @@ window.insertVarFromPicker=function(v,targetId){
       bodyEl.selectionStart=bodyEl.selectionEnd=s+v.length;
       STATE.emailBody=bodyEl.value;
     }
-    // reset the picker
-    var pk=document.getElementById('var-picker-sel');if(pk)pk.value='';
-    var pks=document.getElementById('var-picker-subj-sel');if(pks)pks.value='';
     return;
   }
   var start=el.selectionStart!==undefined?el.selectionStart:el.value.length;
@@ -3580,9 +3632,8 @@ window.insertVarFromPicker=function(v,targetId){
   el.value=el.value.slice(0,start)+v+el.value.slice(end2);
   el.selectionStart=el.selectionEnd=start+v.length;
   el.focus();
-  // reset pickers
-  var pk=document.getElementById('var-picker-sel');if(pk)pk.value='';
-  var pks=document.getElementById('var-picker-subj-sel');if(pks)pks.value='';
+  if(el.id==='email-subj')STATE.emailSubj=el.value;
+  else if(el.id==='email-body')STATE.emailBody=el.value;
 };
 
 // Legacy insertVar (kept for any remaining callers) — inserts into email-body textarea
@@ -3871,8 +3922,9 @@ window.openEditPendingEmail=function(id){
   STATE.modal='<div class="modal modal-w640">'+
     '<div class="mh"><div class="mt">Edit Email \u2014 '+htmlEsc(pe.to_email||'')+'</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
     '<div class="mb_" style="padding:18px 20px">'+
-      '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="edit-pe-subj" value="'+htmlEsc(pe.subject||'')+'"/></div>'+
-      '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" id="edit-pe-body" style="min-height:300px;line-height:1.7">'+htmlEsc(pe.body||'')+'</textarea></div>'+
+      '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="edit-pe-subj" value="'+htmlEsc(pe.subject||'')+'" onfocus="setVarInsertTarget(\'subject\')"/></div>'+
+      '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" id="edit-pe-body" style="min-height:300px;line-height:1.7" onfocus="setVarInsertTarget(\'body\')">'+htmlEsc(pe.body||'')+'</textarea></div>'+
+      renderVarChipBar('edit-pe-subj','edit-pe-body')+
     '</div>'+
     '<div class="mf">'+
       '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
@@ -4053,12 +4105,13 @@ function renderMailMergeModal(){
         '</div>'+
         '<div class="fgrp">'+
           '<label class="flbl">Subject</label>'+
-          '<input class="inp" id="mm-subj" value="'+htmlEsc(current.subj)+'" oninput="mmUpdateSubj(this.value)"/>'+
+          '<input class="inp" id="mm-subj" value="'+htmlEsc(current.subj)+'" oninput="mmUpdateSubj(this.value)" onfocus="setVarInsertTarget(\'subject\')"/>'+
         '</div>'+
         '<div class="fgrp">'+
           '<label class="flbl">Body</label>'+
-          '<textarea class="txta w100" id="mm-body" style="min-height:200px;font-size:13px;line-height:1.6" oninput="mmUpdateBody(this.value)">'+htmlEsc(current.body)+'</textarea>'+
+          '<textarea class="txta w100" id="mm-body" style="min-height:200px;font-size:13px;line-height:1.6" oninput="mmUpdateBody(this.value)" onfocus="setVarInsertTarget(\'body\')">'+htmlEsc(current.body)+'</textarea>'+
         '</div>'+
+        renderVarChipBar('mm-subj','mm-body')+
       '</div>'+
 
       '<div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--card)">'+
