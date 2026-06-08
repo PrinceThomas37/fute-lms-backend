@@ -5578,7 +5578,7 @@ function renderResearchSection(j, canEdit){
   if(!canEdit){
     // BD read-only view
     var hasReq=skillsStr||req.salary_display||req.location||req.local_hint||req.travel;
-    var hasData=company.headcount||company.notes||company.tech_stack||outreach.angle||outreach.avoid||hasReq;
+    var hasData=company.headcount||company.notes||outreach.angle||outreach.avoid||hasReq;
     if(!hasData&&!contactIntel.trim())return '';
     return '<div style="background:var(--bg);border:1px solid var(--border2);border-radius:var(--r2);padding:14px;margin-top:14px">'+
       '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">\ud83d\udd2c RA Research</div>'+
@@ -5592,14 +5592,13 @@ function renderResearchSection(j, canEdit){
             (req.travel?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">Travel: '+htmlEsc(req.travel)+'</span>':'')+
           '</div>'+
         '</div>':'')+
-      (company.headcount||company.hiring_volume||company.tech_stack||company.notes?
+      (company.headcount||company.hiring_volume||company.notes?
         '<div style="margin-bottom:10px">'+
           '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Company</div>'+
           '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--text2)">'+
             (company.headcount?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">'+htmlEsc(company.headcount)+' employees</span>':'')+
             (company.hiring_volume?'<span style="background:var(--green-l);color:var(--green);padding:2px 8px;border-radius:6px">Hiring: '+htmlEsc(company.hiring_volume)+'</span>':'')+
           '</div>'+
-          (company.tech_stack?'<div style="font-size:12px;color:var(--text2);margin-top:6px">Tech: '+htmlEsc(company.tech_stack)+'</div>':'')+
           (company.notes?'<div style="font-size:12px;color:var(--text2);margin-top:6px;padding:8px;background:var(--card);border-radius:var(--r)">'+htmlEsc(company.notes)+'</div>':'')+
         '</div>':'')+
       (contactIntel?'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Contacts</div>'+contactIntel+'</div>':'')+
@@ -5621,7 +5620,6 @@ function renderResearchSection(j, canEdit){
       '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Headcount</label><select class="sel" style="font-size:12px" id="res-headcount" onchange="researchUpdate(\''+j.id+'\',\'company\',\'headcount\',this.value)">'+headcountOpts+'</select></div>'+
       '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Hiring volume</label><select class="sel" style="font-size:12px" id="res-hiring" onchange="researchUpdate(\''+j.id+'\',\'company\',\'hiring_volume\',this.value)">'+hiringOpts+'</select></div>'+
     '</div>'+
-    '<div class="fgrp mb3"><label class="flbl">Tech stack (comma separated)</label><input class="inp" style="font-size:12px" id="res-tech" placeholder="e.g. Salesforce, SAP, Oracle" value="'+htmlEsc(company.tech_stack||'')+'" oninput="researchUpdate(\''+j.id+'\',\'company\',\'tech_stack\',this.value)"/></div>'+
     '<div class="fgrp mb4"><label class="flbl">Company notes / recent news</label><textarea class="txta w100" style="min-height:60px;font-size:12px" id="res-notes" oninput="researchUpdate(\''+j.id+'\',\'company\',\'notes\',this.value)" placeholder="Any relevant company news, context...">'+htmlEsc(company.notes||'')+'</textarea></div>'+
 
     (cs.length?
@@ -5632,9 +5630,8 @@ function renderResearchSection(j, canEdit){
     '<div class="fgrp mb2"><label class="flbl">Paste job description</label>'+
       '<textarea class="txta w100" style="min-height:120px;font-size:12px" id="res-jd-raw" placeholder="Paste the full JD here, then click Extract..." oninput="researchUpdate(\''+j.id+'\',\'jd_raw\',\'__root__\',this.value)">'+htmlEsc(jdRaw)+'</textarea>'+
     '</div>'+
-    '<div style="display:flex;gap:8px;margin-bottom:12px">'+
+    '<div style="margin-bottom:12px">'+
       '<button type="button" class="btn btn-outline btn-sm" onclick="parseJobDescription(\''+j.id+'\')">Extract requirements</button>'+
-      '<span style="font-size:11px;color:var(--text3);align-self:center">Regex + skill dictionary — no AI</span>'+
     '</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
       '<div class="fgrp"><label class="flbl">Skills (comma separated)</label><input class="inp" style="font-size:12px" id="res-skills" placeholder="CCH, QuickBooks, trust and estate" value="'+htmlEsc(skillsStr)+'" oninput="researchUpdateRequirements(\''+j.id+'\',\'skills\',this.value)"/></div>'+
