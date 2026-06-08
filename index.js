@@ -352,7 +352,15 @@ function normInd(raw) {
 }
 
 // ── HEALTH ─────────────────────────────────────────────────────
-app.use(express.static('public'));
+app.use(express.static('public', {
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  }
+}));
 // Block all write operations for guest users
 app.use(function(req, res, next) {
   if (['POST','PUT','PATCH','DELETE'].includes(req.method)) {
