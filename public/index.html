@@ -1364,7 +1364,7 @@ function renderJobDetailModal(){
         (canEdit?'<button onclick="openAddContact(\''+j.id+'\')" style="background:var(--accent);color:#fff;border:0;padding:6px 12px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer">+ Add Contact</button>':'')+
       '</div>'+
       contactRows+
-      renderResearchSection(j, u.role==='ra'&&j.created_by===u.id)+
+      renderResearchSection(j, canEditResearch(u,j))+
       (canEdit?'<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border2);display:flex;justify-content:flex-end;gap:8px"><button onclick="deleteJob(\''+j.id+'\')" style="background:transparent;color:#ef4444;border:1px solid #ef4444;padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer">Delete Job</button></div>':'')+
     '</div>'+
   '</div>';
@@ -5520,8 +5520,30 @@ window.submitAssignBDToLead=function(){
 // ════════════════════════════════════════════════
 // RESEARCH SECTION — inside job detail modal
 // ════════════════════════════════════════════════
+function parseResearchObject(raw){
+  if(!raw)return{};
+  if(typeof raw==='string'){
+    try{return JSON.parse(raw)||{};}catch(e){return{};}
+  }
+  return raw||{};
+}
+function getMergedResearch(job){
+  var base=parseResearchObject(job.research);
+  var draft=window._researchDraft&&window._researchDraft[job.id];
+  if(!draft)return base;
+  var merged=Object.assign({},base,draft);
+  if(draft.company)merged.company=Object.assign({},base.company||{},draft.company);
+  if(draft.outreach)merged.outreach=Object.assign({},base.outreach||{},draft.outreach);
+  if(draft.requirements)merged.requirements=Object.assign({},base.requirements||{},draft.requirements);
+  if(draft.contacts)merged.contacts=draft.contacts;
+  if(draft.jd_raw!==undefined)merged.jd_raw=draft.jd_raw;
+  return merged;
+}
+function canEditResearch(u,j){
+  return userHasRole(u,'ra')&&!userHasAnyRole(u,'ra_lead','admin')&&j.created_by===u.id;
+}
 function renderResearchSection(j, canEdit){
-  var r=j.research||{};
+  var r=getMergedResearch(j);
   var company=r.company||{};
   var outreach=r.outreach||{};
   var req=r.requirements||{};
@@ -5578,7 +5600,7 @@ function renderResearchSection(j, canEdit){
   if(!canEdit){
     // BD read-only view
     var hasReq=skillsStr||req.salary_display||req.location||req.local_hint||req.travel;
-    var hasData=company.headcount||company.notes||outreach.angle||outreach.avoid||hasReq;
+    var hasData=company.headcount||company.hiring_volume||company.notes||outreach.angle||outreach.avoid||hasReq||jdRaw;
     if(!hasData&&!contactIntel.trim())return '';
     return '<div style="background:var(--bg);border:1px solid var(--border2);border-radius:var(--r2);padding:14px;margin-top:14px">'+
       '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">\ud83d\udd2c RA Research</div>'+
@@ -5589,6 +5611,7 @@ function renderResearchSection(j, canEdit){
             (skillsStr?'<span style="background:var(--accent-l);color:var(--accent);padding:2px 8px;border-radius:6px">'+htmlEsc(skillsStr)+'</span>':'')+
             (req.salary_display?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">'+htmlEsc(req.salary_display)+'</span>':'')+
             (req.location?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">'+htmlEsc(req.location)+'</span>':'')+
+            (req.local_hint?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">Local: '+htmlEsc(req.local_hint)+'</span>':'')+
             (req.travel?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">Travel: '+htmlEsc(req.travel)+'</span>':'')+
           '</div>'+
         '</div>':'')+
@@ -5634,11 +5657,11 @@ function renderResearchSection(j, canEdit){
       '<button type="button" class="btn btn-outline btn-sm" onclick="parseJobDescription(\''+j.id+'\')">Extract requirements</button>'+
     '</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
-      '<div class="fgrp"><label class="flbl">Skills (comma separated)</label><input class="inp" style="font-size:12px" id="res-skills" placeholder="CCH, QuickBooks, trust and estate" value="'+htmlEsc(skillsStr)+'" oninput="researchUpdateRequirements(\''+j.id+'\',\'skills\',this.value)"/></div>'+
-      '<div class="fgrp"><label class="flbl">Salary range</label><input class="inp" style="font-size:12px" id="res-salary" placeholder="$80K-$100K" value="'+htmlEsc(req.salary_display||'')+'" oninput="researchUpdate(\''+j.id+'\',\'requirements\',\'salary_display\',this.value);researchUpdate(\''+j.id+'\',\'requirements\',\'salary_range\',this.value)"/></div>'+
-      '<div class="fgrp"><label class="flbl">Location</label><input class="inp" style="font-size:12px" id="res-req-loc" placeholder="Dallas, TX" value="'+htmlEsc(req.location||'')+'" oninput="researchUpdate(\''+j.id+'\',\'requirements\',\'location\',this.value)"/></div>'+
-      '<div class="fgrp"><label class="flbl">City / local hint</label><input class="inp" style="font-size:12px" id="res-local" placeholder="Dallas" value="'+htmlEsc(req.local_hint||req.city||'')+'" oninput="researchUpdate(\''+j.id+'\',\'requirements\',\'local_hint\',this.value);researchUpdate(\''+j.id+'\',\'requirements\',\'city\',this.value)"/></div>'+
-      '<div class="fgrp"><label class="flbl">Travel</label><input class="inp" style="font-size:12px" id="res-travel" placeholder="none, required, 25%" value="'+htmlEsc(req.travel||'')+'" oninput="researchUpdate(\''+j.id+'\',\'requirements\',\'travel\',this.value)"/></div>'+
+      '<div class="fgrp"><label class="flbl">Skills (comma separated)</label><input class="inp" style="font-size:12px" id="res-skills" placeholder="" value="'+htmlEsc(skillsStr)+'" oninput="researchUpdateRequirements(\''+j.id+'\',\'skills\',this.value)"/></div>'+
+      '<div class="fgrp"><label class="flbl">Salary range</label><input class="inp" style="font-size:12px" id="res-salary" placeholder="" value="'+htmlEsc(req.salary_display||'')+'" oninput="researchUpdate(\''+j.id+'\',\'requirements\',\'salary_display\',this.value);researchUpdate(\''+j.id+'\',\'requirements\',\'salary_range\',this.value)"/></div>'+
+      '<div class="fgrp"><label class="flbl">Location</label><input class="inp" style="font-size:12px" id="res-req-loc" placeholder="" value="'+htmlEsc(req.location||'')+'" oninput="researchUpdate(\''+j.id+'\',\'requirements\',\'location\',this.value)"/></div>'+
+      '<div class="fgrp"><label class="flbl">City / local hint</label><input class="inp" style="font-size:12px" id="res-local" placeholder="" value="'+htmlEsc(req.local_hint||req.city||'')+'" oninput="researchUpdate(\''+j.id+'\',\'requirements\',\'local_hint\',this.value);researchUpdate(\''+j.id+'\',\'requirements\',\'city\',this.value)"/></div>'+
+      '<div class="fgrp"><label class="flbl">Travel</label><input class="inp" style="font-size:12px" id="res-travel" placeholder="" value="'+htmlEsc(req.travel||'')+'" oninput="researchUpdate(\''+j.id+'\',\'requirements\',\'travel\',this.value)"/></div>'+
     '</div>'+
 
     '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 10px">Outreach Notes</div>'+
@@ -5684,7 +5707,8 @@ window.parseJobDescription=function(jobId){
     if(!window._researchDraft[jobId])window._researchDraft[jobId]=JSON.parse(JSON.stringify(job.research||{}));
     window._researchDraft[jobId].jd_raw=jdText;
     window._researchDraft[jobId].requirements=Object.assign({},window._researchDraft[jobId].requirements||{},parsed);
-    showToast('Requirements extracted — review and save','success');
+    var n=(parsed.skills||[]).length;
+    showToast(n?'Extracted '+n+' skill'+(n!==1?'s':'')+' — review and save':'Extracted — review fields and save','success');
     render();
   }).catch(function(e){showToast('Extract failed: '+e.message,'error');});
 };
@@ -5708,10 +5732,11 @@ window.saveResearch=function(jobId){
   if(draft.jd_raw!==undefined)merged.jd_raw=draft.jd_raw;
   if(draft.contacts)merged.contacts=draft.contacts;
   apiFetch('PATCH','/jobs/'+jobId+'/research',{research:merged}).then(function(res){
-    // Update STATE
-    STATE.jobs=STATE.jobs.map(function(x){return x.id===jobId?Object.assign({},x,{research:merged}):x;});
+    var saved=parseResearchObject((res&&res.research)||merged);
+    STATE.jobs=STATE.jobs.map(function(x){return x.id===jobId?Object.assign({},x,{research:saved}):x;});
     delete window._researchDraft[jobId];
     showToast('Research saved','success');
+    render();
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
@@ -6554,7 +6579,7 @@ function normaliseJob(j){
     timezone:j.timezone||'',freshness:j.freshness||'',industry:j.industry||'',
     bdm_assigned_name:j.bdm_assigned_name||'',
     sending_email_id:j.sending_email_id||null,sending_email:sa.email_address||'',sending_display:sa.display_name||'',
-    research:j.research||null,
+    research:(function(){var r=parseResearchObject(j.research);return Object.keys(r).length?r:null;})(),
     created_date:j.created_date,created_at:j.created_at};
 }
 function flattenContacts(jobs){var out=[];jobs.forEach(function(j){(j.contacts||[]).forEach(function(c){out.push({id:c.id,job_id:c.job_id,first_name:c.first_name,last_name:c.last_name||'',designation:c.designation||'',email:c.email||'',phone:c.phone||'',linkedin:c.linkedin||'',is_primary:!!c.is_primary,email_status:c.email_status||'valid',ooo_until:c.ooo_until||null});});});return out;}

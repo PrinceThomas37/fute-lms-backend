@@ -707,7 +707,7 @@ app.get('/jobs/:id', auth, async (req, res) => {
   try {
     const { data, error } = await supabase.from('jobs').select(JOB_SELECT).eq('id', req.params.id).is('deleted_at', null).single();
     if (error) throw error;
-    if (!hasRole(req, 'admin') && data.created_by !== req.user.id && data.assigned_to !== req.user.id) {
+    if (!hasRole(req, 'admin', 'ra_lead', 'bd_lead') && data.created_by !== req.user.id && data.assigned_to !== req.user.id && data.assigned_to_bd !== req.user.id) {
       return res.status(403).json({ error: 'Forbidden' });
     }
     res.json(data);

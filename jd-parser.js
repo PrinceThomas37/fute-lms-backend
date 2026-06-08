@@ -82,27 +82,87 @@ function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function addSkillMatch(matches, seen, skill, text, lower) {
+  const norm = skill.toLowerCase();
+  if (seen.has(norm)) return;
+  const pattern = new RegExp(`\\b${escapeRegex(skill)}\\b`, 'i');
+  if (pattern.test(text) || lower.includes(norm)) {
+    seen.add(norm);
+    matches.push(skill);
+  }
+}
+
+function matchSkillsFromDict(text, lower, dict, seen, matches, limit) {
+  for (const skill of dict) {
+    if (matches.length >= limit) break;
+    addSkillMatch(matches, seen, skill, text, lower);
+  }
+}
+
+function extractCommaListedSkills(text) {
+  const found = [];
+  const seen = new Set();
+  const sectionRe = /(?:requirements?|qualifications?|skills?|must have|experience (?:with|in)|proficien(?:t|cy) in|knowledge of)[:\s-]*([^\n]+)/gi;
+  let m;
+  while ((m = sectionRe.exec(text)) !== null) {
+    const chunk = m[1].replace(/\band\b/gi, ',');
+    chunk.split(/[,;|•]/).forEach((part) => {
+      const token = part.replace(/^[\s\-•*]+/, '').replace(/[.)]+$/, '').trim();
+      if (!token || token.length < 2 || token.length > 50) return;
+      if (/^(the|a|an|or|and|with|in|for|to|years?|experience)$/i.test(token)) return;
+      const key = token.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        found.push(token);
+      }
+    });
+  }
+  const bulletRe = /(?:^|\n)\s*[-•*]\s+([^\n]+)/g;
+  while ((m = bulletRe.exec(text)) !== null) {
+    const line = m[1].trim();
+    if (line.length < 3 || line.length > 80) continue;
+    if (/^(requirements?|qualifications?|responsibilities|duties)\b/i.test(line)) continue;
+    const key = line.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      found.push(line.length > 40 ? line.slice(0, 40).trim() : line);
+    }
+  }
+  return found;
+}
+
 function matchSkills(text, industry) {
-  const key = normalizeIndustry(industry);
-  const dict = [
-    ...(SKILL_DICTIONARIES[key] || []),
-    ...(key !== 'general' ? SKILL_DICTIONARIES.general : [])
-  ];
   const seen = new Set();
   const matches = [];
   const lower = text.toLowerCase();
+  const key = normalizeIndustry(industry);
 
-  for (const skill of dict) {
-    const norm = skill.toLowerCase();
-    if (seen.has(norm)) continue;
-    const pattern = new RegExp(`\\b${escapeRegex(skill)}\\b`, 'i');
-    if (pattern.test(text) || lower.includes(norm)) {
-      seen.add(norm);
-      matches.push(skill);
+  const primaryDict = [
+    ...(SKILL_DICTIONARIES[key] || []),
+    ...(key !== 'general' ? SKILL_DICTIONARIES.general : [])
+  ];
+  matchSkillsFromDict(text, lower, primaryDict, seen, matches, 3);
+
+  if (matches.length < 3) {
+    for (const dictKey of Object.keys(SKILL_DICTIONARIES)) {
+      if (dictKey === key) continue;
+      matchSkillsFromDict(text, lower, SKILL_DICTIONARIES[dictKey], seen, matches, 3);
+      if (matches.length >= 3) break;
     }
-    if (matches.length >= 3) break;
   }
-  return matches;
+
+  if (matches.length < 3) {
+    for (const token of extractCommaListedSkills(text)) {
+      if (matches.length >= 3) break;
+      const norm = token.toLowerCase();
+      if (!seen.has(norm)) {
+        seen.add(norm);
+        matches.push(token);
+      }
+    }
+  }
+
+  return matches.slice(0, 3);
 }
 
 function extractSalary(text) {
