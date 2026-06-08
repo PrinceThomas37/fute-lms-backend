@@ -1800,7 +1800,8 @@ function renderEmail(){
         var presetNames={simple:'Simple',full:'Professional',block:'Branded block'};
         var previewSender=(sigEmail&&sigEmail.display_name)||'Your Name';
         var previewEmail=(sigEmail&&sigEmail.email_address)||'you@fute-global.com';
-        var previewHtml=sig?(sig.replace(/{{sender}}/g,previewSender).replace(/{{senderemail}}/g,previewEmail)):'<em style="color:var(--text3);font-size:12px">Loading signature…</em>';
+        var previewSource=sig||(SIG_PRESETS&&SIG_PRESETS.full)||'';
+        var previewHtml=previewSource?(previewSource.replace(/{{sender}}/g,previewSender).replace(/{{senderemail}}/g,previewEmail)):'<em style="color:var(--text3);font-size:12px">Loading signature…</em>';
         var emailOpts=myEmails.map(function(e){
           return '<option value="'+e.id+'"'+(e.id===sigEmailId?' selected':'')+'>'+htmlEsc(e.display_name||e.email_address)+' &lt;'+htmlEsc(e.email_address)+'&gt;</option>';
         }).join('');
