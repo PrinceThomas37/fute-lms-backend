@@ -5528,9 +5528,6 @@ function renderResearchSection(j, canEdit){
   var jdRaw=r.jd_raw||'';
   var skillsStr=(req.skills||[]).join(', ');
 
-  var fundingOpts=['','Unknown','Pre-seed','Seed','Series A','Series B','Series C','Series D+','Public','Private/Bootstrapped'].map(function(v){
-    return '<option value="'+v+'"'+(company.funding===v?' selected':'')+'>'+( v||'— Select —')+'</option>';
-  }).join('');
   var headcountOpts=['','1-10','11-50','51-200','201-500','500+'].map(function(v){
     return '<option value="'+v+'"'+(company.headcount===v?' selected':'')+'>'+( v||'— Select —')+'</option>';
   }).join('');
@@ -5581,7 +5578,7 @@ function renderResearchSection(j, canEdit){
   if(!canEdit){
     // BD read-only view
     var hasReq=skillsStr||req.salary_display||req.location||req.local_hint||req.travel;
-    var hasData=company.funding||company.headcount||company.notes||company.tech_stack||outreach.angle||outreach.avoid||hasReq;
+    var hasData=company.headcount||company.notes||company.tech_stack||outreach.angle||outreach.avoid||hasReq;
     if(!hasData&&!contactIntel.trim())return '';
     return '<div style="background:var(--bg);border:1px solid var(--border2);border-radius:var(--r2);padding:14px;margin-top:14px">'+
       '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">\ud83d\udd2c RA Research</div>'+
@@ -5595,11 +5592,10 @@ function renderResearchSection(j, canEdit){
             (req.travel?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">Travel: '+htmlEsc(req.travel)+'</span>':'')+
           '</div>'+
         '</div>':'')+
-      (company.funding||company.headcount||company.hiring_volume||company.tech_stack||company.notes?
+      (company.headcount||company.hiring_volume||company.tech_stack||company.notes?
         '<div style="margin-bottom:10px">'+
           '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Company</div>'+
           '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--text2)">'+
-            (company.funding?'<span style="background:var(--accent-l);color:var(--accent);padding:2px 8px;border-radius:6px">'+htmlEsc(company.funding)+'</span>':'')+
             (company.headcount?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">'+htmlEsc(company.headcount)+' employees</span>':'')+
             (company.hiring_volume?'<span style="background:var(--green-l);color:var(--green);padding:2px 8px;border-radius:6px">Hiring: '+htmlEsc(company.hiring_volume)+'</span>':'')+
           '</div>'+
@@ -5621,8 +5617,7 @@ function renderResearchSection(j, canEdit){
     '<div style="font-weight:700;font-size:13px;margin-bottom:14px">\ud83d\udd2c Research Notes</div>'+
 
     '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Company Intel</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'+
-      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Funding stage</label><select class="sel" style="font-size:12px" id="res-funding" onchange="researchUpdate(\''+j.id+'\',\'company\',\'funding\',this.value)">'+fundingOpts+'</select></div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
       '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Headcount</label><select class="sel" style="font-size:12px" id="res-headcount" onchange="researchUpdate(\''+j.id+'\',\'company\',\'headcount\',this.value)">'+headcountOpts+'</select></div>'+
       '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Hiring volume</label><select class="sel" style="font-size:12px" id="res-hiring" onchange="researchUpdate(\''+j.id+'\',\'company\',\'hiring_volume\',this.value)">'+hiringOpts+'</select></div>'+
     '</div>'+
