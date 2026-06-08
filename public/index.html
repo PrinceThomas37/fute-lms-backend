@@ -528,6 +528,8 @@ var STATE = {
   composeContactId: null,
   composeCompanyId: null,
   composeFromEmailId: null,
+  composeSubj: '',
+  composeBody: '',
   showAIPanel: false,
   signatureHtml: '',
   sigEmailId: null,
@@ -535,7 +537,6 @@ var STATE = {
   planFromEmailId: null,
   outreachStylePreset: 'standard',
   varInsertTarget: 'body',
-  composeTemplatePick: 'outreach',
   showMoreVarChips: false,
   sigEditing: false,
   sigLayout: 'simple',
@@ -2033,113 +2034,37 @@ function renderEmail(){
       '</div>';
     }
 
-    // Preview section — shows genEmail with editable subject/body
-    var previewSection='';
-    if(STATE.genEmail){
-      var ge=STATE.genEmail;
-      previewSection='<div style="margin-top:14px;border:1.5px solid var(--accent);border-radius:var(--r2);overflow:hidden">'+
-        '<div style="padding:10px 14px;background:var(--accent-l);display:flex;justify-content:space-between;align-items:center">'+
-          '<div style="font-size:12px;font-weight:600;color:var(--accent)">\u2728 AI Preview \u2014 edit before sending</div>'+
-          '<button class="btn-icon" onclick="STATE.genEmail=null;render()">'+ico('x',12)+'</button>'+
-        '</div>'+
-        '<div style="padding:12px 14px;border-bottom:1px solid var(--border)">'+
-          '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Subject</label>'+
-          '<input class="inp" id="preview-subj" value="'+htmlEsc(ge.subj||ge.subject||'')+'" oninput="STATE.genEmail.subj=this.value;STATE.genEmail.subject=this.value" style="font-size:13px"/>'+
-        '</div>'+
-        '<div style="padding:12px 14px;border-bottom:1px solid var(--border)">'+
-          '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Body</label>'+
-          '<textarea id="preview-body" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;line-height:1.7;min-height:160px;resize:vertical;font-family:inherit" oninput="STATE.genEmail.body=this.value">'+htmlEsc(ge.body||'')+'</textarea>'+
-        '</div>'+
-        '<div style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center">'+
-          '<button class="btn btn-outline btn-sm" onclick="STATE.genEmail=null;render()">Discard</button>'+
-          '<button class="btn btn-primary btn-sm" onclick="sendEmail()">'+ico('send',12)+' Send this email</button>'+
-        '</div>'+
-      '</div>';
+    var composeFromOpts='';
+    var composeEmails=(STATE.userEmailsCache&&STATE.userEmailsCache[u.id]||[]).filter(function(e){return e.is_active;});
+    var composeFromId=STATE.composeFromEmailId||(composeEmails.find(function(e){return e.is_primary;})||composeEmails[0]||{}).id;
+    if(composeFromId&&!STATE.composeFromEmailId)STATE.composeFromEmailId=composeFromId;
+    if(composeEmails.length){
+      composeFromOpts=composeEmails.map(function(e){
+        return '<option value="'+e.id+'"'+(e.id===composeFromId?' selected':'')+'>'+htmlEsc(e.display_name||e.email_address)+' &lt;'+htmlEsc(e.email_address)+'&gt;</option>';
+      }).join('');
     }
 
-    // AI panel
-    var aiSection='';
-    if(STATE.showAIPanel){
-      aiSection='<div style="margin-top:12px;padding:14px;background:var(--purple-l);border:1.5px solid rgba(124,58,237,.2);border-radius:var(--r2)">'+
-        '<div style="font-size:12px;font-weight:600;color:var(--purple);margin-bottom:8px">\u2728 AI instructions</div>'+
-        '<textarea class="txta w100" style="min-height:80px;font-size:12.5px;background:rgba(255,255,255,.7)" id="ai-prompt-inp" oninput="STATE.aiPrompt=this.value" placeholder="e.g. Be very concise, 3 lines only...">'+htmlEsc(STATE.aiPrompt||STATE.aiPromptDefault)+'</textarea>'+
-        '<div class="flex gap1 flex-wrap mt2">'+
-          ['Very concise (3 lines)','Formal tone','Friendly tone','Focus on urgency','Ask for referral'].map(function(s){
-            return '<span onclick="appendPrompt(\''+s+'\')" style="font-size:11px;padding:3px 8px;background:rgba(124,58,237,.1);color:var(--purple);border-radius:10px;cursor:pointer;border:1px solid rgba(124,58,237,.15)">+\u202f'+s+'</span>';
-          }).join('')+
-        '</div>'+
-        '<div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">'+
-          '<button class="btn btn-outline btn-sm" onclick="resetAIPrompt()">Reset</button>'+
-          '<button class="btn btn-sm" style="background:var(--purple);color:#fff" onclick="generateAI()">'+
-            (STATE.aiGenerating?'Generating\u2026':'Generate email')+
-          '</button>'+
-        '</div>'+
-      '</div>';
-    }
-
-    composeHtml='<div style="max-width:640px">'+
+    composeHtml='<div style="max-width:520px">'+
       '<div class="card cp mb3">'+
-        '<div class="fw6 mb2" style="font-size:13px">Recipient</div>'+
-
-        // Step 1 — pick company
-        '<div style="margin-bottom:10px">'+
-          '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Step 1 \u2014 Select company</label>'+
-          '<select class="sel" onchange="STATE.composeCompanyId=this.value;STATE.composeContactId=null;STATE.genEmail=null;render()">'+coOpts+'</select>'+
-        '</div>'+
-
-        // Step 2 — pick contact (only shown if company selected)
+        '<div class="fw6 mb2" style="font-size:13px">To</div>'+
+        '<select class="sel mb2" onchange="STATE.composeCompanyId=this.value;STATE.composeContactId=null;render()">'+coOpts+'</select>'+
         (STATE.composeCompanyId?
-          '<div style="margin-bottom:10px">'+
-            '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Step 2 \u2014 Select contact / POC</label>'+
-            '<select class="sel" onchange="STATE.composeContactId=this.value;STATE.manualEmail=null;STATE.genEmail=null;render()">'+pocOpts+'</select>'+
-          '</div>':'')+
-
-        // Divider
-        '<div style="display:flex;align-items:center;gap:8px;margin:10px 0">'+
-          '<div style="flex:1;height:1px;background:var(--border)"></div>'+
-          '<span style="font-size:11px;color:var(--text3)">or type email directly</span>'+
-          '<div style="flex:1;height:1px;background:var(--border)"></div>'+
-        '</div>'+
-        '<input class="inp" placeholder="someone@company.com" id="manual-email-inp" value="'+htmlEsc(STATE.manualEmail||'')+'" oninput="STATE.manualEmail=this.value||null;STATE.composeContactId=null;STATE.composeCompanyId=null;STATE.genEmail=null"/>'+
+          '<select class="sel" onchange="STATE.composeContactId=this.value;STATE.manualEmail=null;render()">'+pocOpts+'</select>':'')+
+        '<div style="text-align:center;font-size:11px;color:var(--text3);margin:10px 0">or enter an email</div>'+
+        '<input class="inp" placeholder="name@company.com" id="manual-email-inp" value="'+htmlEsc(STATE.manualEmail||'')+'" oninput="STATE.manualEmail=this.value||null;STATE.composeContactId=null;STATE.composeCompanyId=null;render()"/>'+
         recipientBadge+
       '</div>'+
-
-      (function(){
-        var myEmails=(STATE.userEmailsCache&&STATE.userEmailsCache[u.id]||[]).filter(function(e){return e.is_active;});
-        var fromId=STATE.composeFromEmailId||STATE.planFromEmailId||(myEmails.find(function(e){return e.is_primary;})||myEmails[0]||{}).id;
-        if(fromId&&!STATE.composeFromEmailId)STATE.composeFromEmailId=fromId;
-        return renderSendingEmailCard(u.id,myEmails,fromId,'selectComposeFromEmail');
-      })()+
-
       '<div class="card cp mb3">'+
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">'+
-          '<div class="fw6" style="font-size:13px">Message</div>'+
-          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
-            '<select class="sel" style="max-width:200px;font-size:12px" onchange="loadComposeTemplate(this.value)">'+
-              '<option value="outreach"'+(STATE.composeTemplatePick==='outreach'?' selected':'')+'>Outreach 1 template</option>'+
-              '<option value="fu1"'+(STATE.composeTemplatePick==='fu1'?' selected':'')+'>Follow-up 1 template</option>'+
-              '<option value="fu2"'+(STATE.composeTemplatePick==='fu2'?' selected':'')+'>Follow-up 2 template</option>'+
-            '</select>'+
-            '<button onclick="STATE.showAIPanel=!STATE.showAIPanel;render()" style="font-size:12px;padding:5px 11px;border:1px solid rgba(124,58,237,.3);background:'+(STATE.showAIPanel?'var(--purple)':'var(--purple-l)')+';color:'+(STATE.showAIPanel?'#fff':'var(--purple)')+';border-radius:7px;cursor:pointer">\u2728 AI</button>'+
-            '<div class="flex gap1">'+
-              '<button class="fc'+(u.plt==='Gmail'?' on':'')+'" onclick="setPlatform(\'Gmail\')">Gmail</button>'+
-              '<button class="fc'+(u.plt==='Outlook'?' on':'')+'" onclick="setPlatform(\'Outlook\')">Outlook</button>'+
-            '</div>'+
-          '</div>'+
+        (composeEmails.length?
+          '<div class="fgrp" style="margin-bottom:0"><label class="flbl">From</label><select class="sel" onchange="selectComposeFromEmail(this.value)">'+composeFromOpts+'</select></div>'
+          :'<div style="font-size:12px;color:var(--amber)">No sending email ID assigned — ask your admin to add one.</div>')+
+      '</div>'+
+      '<div class="card cp mb3">'+
+        '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="email-subj" value="'+htmlEsc(STATE.composeSubj)+'" oninput="STATE.composeSubj=this.value" placeholder="Email subject"/></div>'+
+        '<div class="fgrp"><label class="flbl">Message</label><textarea class="txta w100" style="min-height:180px" id="email-body" oninput="STATE.composeBody=this.value" placeholder="Write your message here...">'+htmlEsc(STATE.composeBody)+'</textarea></div>'+
+        '<div style="display:flex;justify-content:flex-end;margin-top:12px">'+
+          '<button class="btn btn-primary" onclick="sendEmail()" '+((hasRecipient&&composeEmails.length)?'':'disabled style="opacity:.5;cursor:not-allowed"')+'>'+ico('send',13)+' Send</button>'+
         '</div>'+
-        '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="email-subj" value="'+htmlEsc(STATE.emailSubj)+'" oninput="STATE.emailSubj=this.value" onfocus="setVarInsertTarget(\'subject\')"/></div>'+
-        '<div class="fgrp"><label class="flbl">Body</label><textarea class="txta w100" style="min-height:140px" id="email-body" oninput="STATE.emailBody=this.value" onfocus="setVarInsertTarget(\'body\')">'+htmlEsc(STATE.emailBody)+'</textarea></div>'+
-        renderVarChipBar('email-subj','email-body')+
-        aiSection+
-        (hasRecipient&&!STATE.genEmail?
-          '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
-            '<button class="btn btn-outline" onclick="openEmailPreviewModal()">\ud83d\udc41 Preview</button>'+
-            '<button class="btn btn-primary" onclick="sendEmail()">'+ico('send',13)+' Send</button>'+
-          '</div>':
-          '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
-            '<button class="btn btn-primary" '+(hasRecipient?'':'disabled style="opacity:.5;cursor:not-allowed"')+' onclick="sendEmail()">'+ico('send',13)+' Send</button>'+
-          '</div>')+
-        previewSection+
       '</div>'+
     '</div>';
   }
@@ -2191,7 +2116,7 @@ function renderEmail(){
     (oooCards?'<div style="padding:0 24px;padding-top:16px">'+oooCards+'</div>':'')+
     (bdSummaryCard?'<div style="padding:0 24px;padding-top:16px">'+bdSummaryCard+'</div>':'')+
     '<div class="ph"><div class="ptitle">Email</div>'+
-      '<div class="psub">'+(isBD?'Compose one-off emails or set up your outreach plan':'Email outreach')+' · '+u.name+'</div>'+
+      '<div class="psub">'+(isBD?'Compose emails or manage your outreach plan':'Email')+' · '+u.name+'</div>'+
     '</div>'+
     progressBar+
     '<div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:18px;overflow-x:auto">'+tabBar+'</div>'+
@@ -3274,19 +3199,6 @@ window.insertVarChip=function(token,subjId,bodyId){
   insertVarFromPicker(token,targetId);
   showToast('Added '+mergeVarFriendlyLabel(token)+' to '+where,'success');
 };
-window.loadComposeTemplate=function(templateKey){
-  STATE.composeTemplatePick=templateKey||'outreach';
-  var subj=STATE.emailSubj,body=STATE.emailBody;
-  if(templateKey==='fu1'){subj=STATE.fu1Subj;body=STATE.fu1Body;}
-  else if(templateKey==='fu2'){subj=STATE.fu2Subj;body=STATE.fu2Body;}
-  STATE.emailSubj=subj||'';STATE.emailBody=body||'';
-  var sEl=document.getElementById('email-subj');
-  var bEl=document.getElementById('email-body');
-  if(sEl)sEl.value=STATE.emailSubj;
-  if(bEl)bEl.value=STATE.emailBody;
-  showToast('Loaded '+(templateKey==='fu1'?'Follow-up 1':templateKey==='fu2'?'Follow-up 2':'Outreach 1')+' template','success');
-  render();
-};
 window.saveOutreachTemplate=function(key,subjId,bodyId){
   var subj=(document.getElementById(subjId)||{}).value||'';
   var body=(document.getElementById(bodyId)||{}).value||'';
@@ -3552,19 +3464,45 @@ window.generateAI=function(){
   }
 };
 
+function resolveComposeRecipient(){
+  if(STATE.composeContactId){
+    var parts=STATE.composeContactId.split('|');
+    var cc=STATE.contacts.find(function(c){return c.id===parts[0];});
+    var cj=STATE.jobs.find(function(j){return j.id===parts[1];});
+    if(cc&&cc.email){
+      return{
+        to:((cc.first_name||'')+' '+(cc.last_name||'')).trim(),
+        email:cc.email,
+        lid:parts[1]||null,
+        lead:{fn:cc.first_name||'',ln:cc.last_name||'',email:cc.email,desig:cc.designation||'',pos:(cj&&cj.position)||''},
+        co:{name:(cj&&cj.company_name)||'',ind:(cj&&cj.industry)||'',loc:(cj&&cj.location)||''}
+      };
+    }
+  }
+  if(STATE.manualEmail&&STATE.manualEmail.includes('@')){
+    return{to:STATE.manualEmail,email:STATE.manualEmail,lid:null,lead:null,co:null};
+  }
+  return null;
+}
 window.sendEmail=function(){
   if(STATE.user&&STATE.user.isGuest){guestSimulate('sendEmail',{to:(STATE.genEmail&&STATE.genEmail.email)||'contact'});return;}
-  // If no generated email, build one from template + current recipient
   var ge=STATE.genEmail;
   if(!ge){
-    var toEmail=STATE.manualEmail||(STATE.mergeLeadId?STATE.leads.find(function(l){return l.id===STATE.mergeLeadId}):null);
-    if(!toEmail){showToast("Select a recipient first","warning");return;}
-    if(typeof toEmail==="object"){
-      var l=toEmail;var co=STATE.companies.find(function(c){return c.id===l.coid})||{};
-      ge={to:l.fn+" "+l.ln,email:l.email,subj:fillEmail(STATE.emailSubj,l,co,STATE.user.name),body:fillEmail(STATE.emailBody,l,co,STATE.user.name),lid:l.id};
-    } else {
-      ge={to:STATE.manualEmailName||STATE.manualEmail,email:STATE.manualEmail,subj:STATE.emailSubj.replace(/{{[\w]+}}/g,""),body:STATE.emailBody.replace(/{{[\w]+}}/g,""),lid:null};
+    var recip=resolveComposeRecipient();
+    if(!recip){showToast('Select a contact or enter an email address','warning');return;}
+    var subjEl=document.getElementById('email-subj');
+    var bodyEl=document.getElementById('email-body');
+    var subj=(subjEl&&subjEl.value)||STATE.composeSubj||'';
+    var body=(bodyEl&&bodyEl.value)||STATE.composeBody||'';
+    if(!subj.trim()){showToast('Add a subject line','warning');return;}
+    if(!body.trim()){showToast('Write a message','warning');return;}
+    var fromEmForName=STATE.composeFromEmailId?(STATE.userEmailsCache[STATE.user.id]||[]).find(function(e){return e.id===STATE.composeFromEmailId;}):null;
+    var senderName=(fromEmForName&&fromEmForName.display_name)||STATE.user.name||'';
+    if(recip.lead){
+      subj=fillEmail(subj,recip.lead,recip.co,senderName);
+      body=fillEmail(body,recip.lead,recip.co,senderName);
     }
+    ge={to:recip.to,email:recip.email,subj:subj,body:body,lid:recip.lid};
   }
   // Attach from email if selected
   var fromEmail=null;
@@ -3632,8 +3570,8 @@ window.insertVarFromPicker=function(v,targetId){
   el.value=el.value.slice(0,start)+v+el.value.slice(end2);
   el.selectionStart=el.selectionEnd=start+v.length;
   el.focus();
-  if(el.id==='email-subj')STATE.emailSubj=el.value;
-  else if(el.id==='email-body')STATE.emailBody=el.value;
+  if(el.id==='email-subj')STATE.composeSubj=el.value;
+  else if(el.id==='email-body')STATE.composeBody=el.value;
 };
 
 // Legacy insertVar (kept for any remaining callers) — inserts into email-body textarea
