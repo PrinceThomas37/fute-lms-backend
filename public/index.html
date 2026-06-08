@@ -530,6 +530,8 @@ var STATE = {
   composeFromEmailId: null,
   showAIPanel: false,
   signatureHtml: '',
+  sigEmailId: null,
+  emailSignaturesCache: {},
   sigEditing: false,
   sigLayout: 'simple',
   raForm: {
@@ -1781,21 +1783,38 @@ function renderEmail(){
         '<button class="btn btn-primary mt2" onclick="saveOutreachTemplate(\''+activeTmpl.key+'\',\''+activeTmpl.subjId+'\',\''+activeTmpl.bodyId+'\')" >Save template</button>'+
       '</div>'+
 
-      // ── SIGNATURE EDITOR ──────────────────────────────────────
+      // ── SIGNATURE EDITOR (per sending email ID) ───────────────
       (function(){
-        var sig=STATE.myOutreachPlan&&STATE.myOutreachPlan['signature_html']||STATE.signatureHtml||'';
+        var myEmails=(STATE.userEmailsCache&&STATE.userEmailsCache[u.id]||[]).filter(function(e){return e.is_active;});
+        var sigEmailId=STATE.sigEmailId||(myEmails.find(function(e){return e.is_primary;})||myEmails[0]||{}).id;
+        if(sigEmailId&&!STATE.sigEmailId)STATE.sigEmailId=sigEmailId;
+        var sigEmail=myEmails.find(function(e){return e.id===sigEmailId;});
+        var sig='';
+        if(sigEmailId&&STATE.emailSignaturesCache&&STATE.emailSignaturesCache[sigEmailId]!==undefined){
+          sig=STATE.emailSignaturesCache[sigEmailId];
+        } else if(sigEmailId){
+          loadMailboxSignature(u.id,sigEmailId);
+        }
         var editing=STATE.sigEditing;
         var presets=SIG_PRESETS;
         var presetNames={simple:'Simple',full:'Professional',block:'Branded block'};
-        var previewHtml=sig?(sig.replace(/{{sender}}/g,STATE.user&&STATE.user.name||'Your Name').replace(/{{senderemail}}/g,STATE.user&&STATE.user.email||'you@fute-global.com')):'<em style="color:var(--text3);font-size:12px">No signature set</em>';
+        var previewSender=(sigEmail&&sigEmail.display_name)||'Your Name';
+        var previewEmail=(sigEmail&&sigEmail.email_address)||'you@fute-global.com';
+        var previewHtml=sig?(sig.replace(/{{sender}}/g,previewSender).replace(/{{senderemail}}/g,previewEmail)):'<em style="color:var(--text3);font-size:12px">Loading signature…</em>';
+        var emailOpts=myEmails.map(function(e){
+          return '<option value="'+e.id+'"'+(e.id===sigEmailId?' selected':'')+'>'+htmlEsc(e.display_name||e.email_address)+' &lt;'+htmlEsc(e.email_address)+'&gt;</option>';
+        }).join('');
         return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);margin-top:16px;overflow:hidden">'+
-          '<div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'+
+          '<div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">'+
             '<div>'+
               '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Email Signature</div>'+
-              '<div style="font-size:11.5px;color:var(--text3);margin-top:2px">Appended automatically to all outbound emails as HTML</div>'+
+              '<div style="font-size:11.5px;color:var(--text3);margin-top:2px">Per sending email ID — appended to outbound mail from that address</div>'+
             '</div>'+
             '<button onclick="STATE.sigEditing=!STATE.sigEditing;render()" style="font-size:12px;padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:var(--bg);cursor:pointer;color:var(--text2)">'+(editing?'Close editor':'Edit signature')+'</button>'+
           '</div>'+
+          (myEmails.length?
+            '<div style="padding:12px 16px 0"><div class="fgrp" style="margin-bottom:0"><label class="flbl">Signature for</label><select class="sel" onchange="selectSigEmail(this.value)">'+emailOpts+'</select></div></div>'
+          :'<div style="padding:12px 16px 0;font-size:12px;color:var(--amber)">Add a sending email ID in Admin → your profile before setting a signature.</div>')+
           (editing?
             '<div style="padding:16px">'+
               '<div style="margin-bottom:12px">'+
@@ -1807,7 +1826,7 @@ function renderEmail(){
                 '</div>'+
               '</div>'+
               '<div style="margin-bottom:10px">'+
-                '<div style="font-size:11.5px;font-weight:600;color:var(--text2);margin-bottom:6px">Signature HTML <span style="font-weight:400;color:var(--text3)">(use {{sender}} and {{senderemail}} as variables)</span></div>'+
+                '<div style="font-size:11.5px;font-weight:600;color:var(--text2);margin-bottom:6px">Signature HTML <span style="font-weight:400;color:var(--text3)">({{sender}} = display name, {{senderemail}} = this email ID)</span></div>'+
                 '<textarea id="sig-html-input" style="width:100%;min-height:110px;padding:10px;border:1.5px solid var(--border2);border-radius:8px;font-family:var(--mono);font-size:12px;line-height:1.6;resize:vertical;color:var(--text);background:var(--bg)" placeholder="<p>Best regards,<br><strong>{{sender}}</strong></p>">'+htmlEsc(sig)+'</textarea>'+
               '</div>'+
               '<div style="margin-bottom:12px">'+
@@ -1968,7 +1987,7 @@ function renderEmail(){
         }).join('');
         return '<div class="card cp mb3">'
           +'<div class="fw6 mb2" style="font-size:13px">From</div>'
-          +'<select class="sel" onchange="STATE.composeFromEmailId=this.value;render()">'
+          +'<select class="sel" onchange="STATE.composeFromEmailId=this.value;if(this.value)loadMailboxSignature(\''+u.id+'\',this.value);render()">'
             +'<option value="">— Select sending email —</option>'+fromOpts
           +'</select>'
           +(STATE.composeFromEmailId?'':'<div style="font-size:11px;color:var(--amber);margin-top:6px">Select a sending email to enable send</div>')
@@ -3384,9 +3403,11 @@ window.sendEmail=function(){
   var plt=STATE.user.plt||"Gmail";
   var gmailFrom=fromEmail||STATE.user.email||'';
   // Build body for sending — HTML with signature for Outlook, plain text for Gmail deeplink
-  var sigHtml=STATE.myOutreachPlan&&STATE.myOutreachPlan['signature_html']||STATE.signatureHtml||'';
-  var senderName=STATE.user.name||'';
-  var senderEmail=fromEmailAddress||STATE.user.email||'';
+  var sigEmailId=STATE.composeFromEmailId||STATE.sigEmailId;
+  var sigHtml=(sigEmailId&&STATE.emailSignaturesCache&&STATE.emailSignaturesCache[sigEmailId])||'';
+  var fromEmForSig=sigEmailId?(STATE.userEmailsCache[STATE.user.id]||[]).find(function(e){return e.id===sigEmailId;}):null;
+  var senderName=(fromEmForSig&&fromEmForSig.display_name)||STATE.user.name||'';
+  var senderEmail=(fromEmForSig&&fromEmForSig.email_address)||fromEmailAddress||STATE.user.email||'';
   var plainBody=ge.body||'';
   var url;
   if(plt==="Gmail"){
@@ -3465,12 +3486,36 @@ window.applySigPreset=function(pk){
   var el=document.getElementById('sig-html-input');
   if(el){el.value=html;updateSigPreview(html);}
 };
+function getSigPreviewIdentity(){
+  var uid=STATE.user&&STATE.user.id;
+  var emails=(uid&&STATE.userEmailsCache&&STATE.userEmailsCache[uid])||[];
+  var sigEmail=emails.find(function(e){return e.id===STATE.sigEmailId;})||emails.find(function(e){return e.is_primary;})||emails[0];
+  return {
+    name:(sigEmail&&sigEmail.display_name)||'Your Name',
+    email:(sigEmail&&sigEmail.email_address)||'you@fute-global.com'
+  };
+}
 function updateSigPreview(html){
   var prev=document.getElementById('sig-live-preview');
   if(!prev)return;
-  var filled=html.replace(/{{sender}}/g,(STATE.user&&STATE.user.name)||'Your Name').replace(/{{senderemail}}/g,(STATE.user&&STATE.user.email)||'you@fute-global.com');
+  var id=getSigPreviewIdentity();
+  var filled=html.replace(/{{sender}}/g,id.name).replace(/{{senderemail}}/g,id.email);
   prev.innerHTML=filled||'<em style="color:#94A3B8;font-size:12px">Preview will appear here</em>';
 }
+window.loadMailboxSignature=function(userId,emailId){
+  if(!userId||!emailId)return;
+  apiGet('/users/'+userId+'/emails/'+emailId+'/signature').then(function(d){
+    STATE.emailSignaturesCache=STATE.emailSignaturesCache||{};
+    STATE.emailSignaturesCache[emailId]=d.signature_html||'';
+    render();
+  }).catch(function(){});
+};
+window.selectSigEmail=function(emailId){
+  if(!emailId||!STATE.user)return;
+  STATE.sigEmailId=emailId;
+  if(STATE.emailSignaturesCache&&STATE.emailSignaturesCache[emailId]!==undefined){render();return;}
+  loadMailboxSignature(STATE.user.id,emailId);
+};
 // Wire live preview on input (called via oninput on the textarea via a delegated approach)
 document.addEventListener('input',function(e){
   if(e.target&&e.target.id==='sig-html-input'){updateSigPreview(e.target.value);}
@@ -3478,21 +3523,23 @@ document.addEventListener('input',function(e){
 window.saveSig=function(){
   var el=document.getElementById('sig-html-input');
   var html=(el&&el.value)||'';
-  STATE.signatureHtml=html;
-  STATE.myOutreachPlan=STATE.myOutreachPlan||{};
-  STATE.myOutreachPlan['signature_html']=html;
+  var emailId=STATE.sigEmailId;
+  if(!emailId||!STATE.user){showToast('Select a sending email first','warning');return;}
+  STATE.emailSignaturesCache=STATE.emailSignaturesCache||{};
+  STATE.emailSignaturesCache[emailId]=html;
   STATE.sigEditing=false;
-  apiPost('/outreach-plan',{key:'signature_html',value:html}).then(function(){
-    showToast('Signature saved','success');render();
+  apiPut('/users/'+STATE.user.id+'/emails/'+emailId+'/signature',{signature_html:html}).then(function(){
+    showToast('Signature saved for this email ID','success');render();
   }).catch(function(e){showToast('Save failed: '+e.message,'error');});
 };
 window.clearSig=function(){
-  STATE.signatureHtml='';
-  STATE.myOutreachPlan=STATE.myOutreachPlan||{};
-  STATE.myOutreachPlan['signature_html']='';
+  var emailId=STATE.sigEmailId;
+  if(!emailId||!STATE.user){showToast('Select a sending email first','warning');return;}
+  STATE.emailSignaturesCache=STATE.emailSignaturesCache||{};
+  STATE.emailSignaturesCache[emailId]='';
   STATE.sigEditing=false;
-  apiPost('/outreach-plan',{key:'signature_html',value:''}).then(function(){
-    showToast('Signature cleared','success');render();
+  apiPut('/users/'+STATE.user.id+'/emails/'+emailId+'/signature',{signature_html:''}).then(function(){
+    showToast('Signature cleared — default will be used on send','success');render();
   }).catch(function(e){showToast('Failed: '+e.message,'error');});
 };
 
@@ -6648,8 +6695,16 @@ function loadAppData(){
         STATE.fu1Body=plan['tmpl_fu1_body']||STATE.fu1Body;
         STATE.fu2Subj=plan['tmpl_fu2_subject']||STATE.fu2Subj;
         STATE.fu2Body=plan['tmpl_fu2_body']||STATE.fu2Body;
-        if(plan['signature_html']!==undefined)STATE.signatureHtml=plan['signature_html']||'';
         render();
+      }).catch(function(){});
+      apiGet('/users/'+STATE.user.id+'/emails').then(function(emails){
+        STATE.userEmailsCache=STATE.userEmailsCache||{};
+        STATE.userEmailsCache[STATE.user.id]=emails||[];
+        var primary=(emails||[]).find(function(e){return e.is_primary;})||(emails||[])[0];
+        if(primary){
+          if(!STATE.sigEmailId)STATE.sigEmailId=primary.id;
+          loadMailboxSignature(STATE.user.id,STATE.sigEmailId||primary.id);
+        }
       }).catch(function(){});
     }
     // Load team assignments for admin/bd_lead
