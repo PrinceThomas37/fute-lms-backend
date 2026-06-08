@@ -84,9 +84,35 @@ function buildEmailVars({ job, contact, senderDisplayName }) {
   };
 }
 
+/** Fingerprints of pre-Daniel Fute Global outreach templates saved in app_settings. */
+const LEGACY_TEMPLATE_MARKERS = [
+  /I came across/i,
+  /At Fute Global/i,
+  /Fute Global LLC/i,
+  /specializ(e|ing) in connecting/i,
+  /15-?\s*minute call/i,
+  /Opportunity regarding/i,
+  /Hope you had a great break/i
+];
+
+function isLegacyTemplate(text) {
+  const val = String(text || '').trim();
+  if (!val) return false;
+  return LEGACY_TEMPLATE_MARKERS.some(re => re.test(val));
+}
+
+/** Return saved template or Daniel default when empty / legacy. */
+function resolveTemplate(saved, templateKey) {
+  const val = String(saved || '').trim();
+  if (!val || isLegacyTemplate(val)) return DEFAULT_TEMPLATES[templateKey] || '';
+  return val;
+}
+
 module.exports = {
   DEFAULT_TEMPLATES,
   buildEmailVars,
   fillTemplate,
-  formatSkillsLine
+  formatSkillsLine,
+  isLegacyTemplate,
+  resolveTemplate
 };

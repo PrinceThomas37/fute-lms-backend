@@ -4141,6 +4141,7 @@ var COL_MAP=[
   [["source","leadsource","foundon","platform"],"source"],
   [["date","leaddate","dateadded","createdon"],"date"],
   [["notes","note","comments","remarks"],"notes"],
+  [["jobdescription","jobdesc","jd","description","requirements","jobdetails","jobposting","posting"],"jdText"],
   [["analystname","analyst","raname","researchanalyst","ra"],"analystName"],
   [["bdmassigned","bdm","bdmanager","managername","assignedto"],"bdmAssigned"],
   [["salaryrange","salary","compensation","pay","salaryband"],"salaryRange"],
@@ -4253,9 +4254,19 @@ function groupImportRows(mapped){
         jobOpenedDate:(r.jobOpenedDate||"").trim(),
         bdmAssigned:(r.bdmAssigned||"").trim(),
         analystName:(r.analystName||"").trim(),
+        notes:"",
+        jdText:"",
         contacts:[]
       };
       order.push(key);
+    }
+    if(r.notes){
+      var noteText=(r.notes||"").trim();
+      if(noteText){groups[key].notes=groups[key].notes?(groups[key].notes+"\n"+noteText):noteText;}
+    }
+    if(r.jdText){
+      var jd=(r.jdText||"").trim();
+      if(jd){groups[key].jdText=groups[key].jdText?(groups[key].jdText+"\n"+jd):jd;}
     }
     if(r.firstName||r.email){
       groups[key].contacts.push({
@@ -4401,6 +4412,8 @@ window.doImportProcess=function(toProcess,dupEmailMap){
       if(g.jobCreatedDate)payload.job_created_date=parseExcelDateToISO(g.jobCreatedDate);
       if(g.jobOpenedDate)payload.job_opened_date=parseExcelDateToISO(g.jobOpenedDate);
       if(g.bdmAssigned)payload.bdm_assigned_name=g.bdmAssigned;
+      if(g.notes)payload.notes=g.notes;
+      if(g.jdText)payload.jd_text=g.jdText;
       return payload;
     }).filter(Boolean);
 
@@ -6629,12 +6642,12 @@ function loadAppData(){
     if(STATE.user&&userHasAnyRole(STATE.user,'bd','bd_lead','admin')){
       apiGet('/outreach-plan').then(function(plan){
         STATE.myOutreachPlan=plan||{};
-        if(plan['tmpl_o1_subject'])STATE.emailSubj=plan['tmpl_o1_subject'];
-        if(plan['tmpl_o1_body'])STATE.emailBody=plan['tmpl_o1_body'];
-        if(plan['tmpl_fu1_subject'])STATE.fu1Subj=plan['tmpl_fu1_subject'];
-        if(plan['tmpl_fu1_body'])STATE.fu1Body=plan['tmpl_fu1_body'];
-        if(plan['tmpl_fu2_subject'])STATE.fu2Subj=plan['tmpl_fu2_subject'];
-        if(plan['tmpl_fu2_body'])STATE.fu2Body=plan['tmpl_fu2_body'];
+        STATE.emailSubj=plan['tmpl_o1_subject']||STATE.emailSubj;
+        STATE.emailBody=plan['tmpl_o1_body']||STATE.emailBody;
+        STATE.fu1Subj=plan['tmpl_fu1_subject']||STATE.fu1Subj;
+        STATE.fu1Body=plan['tmpl_fu1_body']||STATE.fu1Body;
+        STATE.fu2Subj=plan['tmpl_fu2_subject']||STATE.fu2Subj;
+        STATE.fu2Body=plan['tmpl_fu2_body']||STATE.fu2Body;
         if(plan['signature_html']!==undefined)STATE.signatureHtml=plan['signature_html']||'';
         render();
       }).catch(function(){});

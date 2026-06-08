@@ -4,8 +4,8 @@ const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { parseJobDescription } = require('./jd-parser');
-const { DEFAULT_TEMPLATES, buildEmailVars, fillTemplate } = require('./email-vars');
+const { parseJobDescription, buildResearchFromLeadData } = require('./jd-parser');
+const { DEFAULT_TEMPLATES, buildEmailVars, fillTemplate, resolveTemplate } = require('./email-vars');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -734,7 +734,38 @@ app.post('/jobs/bulk', auth, async (req, res) => {
       const days = Math.floor((new Date() - new Date(ref)) / 86400000);
       if (days <= 3) return 'New'; if (days <= 10) return 'Normal'; return 'Old';
     }
-    const jobRows = filteredJobs.map(j => ({ company_id: j.company_id, position: j.position || '(unknown)', location: j.location || null, source: j.source || 'Import', job_url: j.job_url || null, stage: 'Unassigned', notes: '', created_by: req.user.id, assigned_to: null, is_duplicate: j.is_duplicate || false, duplicate_of: j.duplicate_of || null, salary_range: j.salary_range || null, job_created_date: j.job_created_date || null, job_opened_date: j.job_opened_date || null, timezone: getTimezoneFromLocation(j.location), freshness: getFreshness(j.job_opened_date, j.job_created_date), bdm_assigned_name: j.bdm_assigned_name || null, industry: j.industry || null }));
+    const jobRows = filteredJobs.map(j => {
+      const research = buildResearchFromLeadData({
+        notes: j.notes,
+        jdText: j.jd_text,
+        position: j.position,
+        location: j.location,
+        salaryRange: j.salary_range,
+        industry: j.industry
+      });
+      const row = {
+        company_id: j.company_id,
+        position: j.position || '(unknown)',
+        location: j.location || null,
+        source: j.source || 'Import',
+        job_url: j.job_url || null,
+        stage: 'Unassigned',
+        notes: j.notes || '',
+        created_by: req.user.id,
+        assigned_to: null,
+        is_duplicate: j.is_duplicate || false,
+        duplicate_of: j.duplicate_of || null,
+        salary_range: j.salary_range || null,
+        job_created_date: j.job_created_date || null,
+        job_opened_date: j.job_opened_date || null,
+        timezone: getTimezoneFromLocation(j.location),
+        freshness: getFreshness(j.job_opened_date, j.job_created_date),
+        bdm_assigned_name: j.bdm_assigned_name || null,
+        industry: j.industry || null
+      };
+      if (research) row.research = research;
+      return row;
+    });
     if (!jobRows.length) return res.status(200).json({ imported: 0, contacts: 0, skipped, message: `All ${skipped} companies are in a 21-day cooldown period.` });
     const { data: insertedJobs, error: jobErr } = await supabase.from('jobs').insert(jobRows).select('id');
     if (jobErr) throw jobErr;
@@ -1124,10 +1155,8 @@ async function generateEmailsForJobs(job_ids, callerUserId) {
       contactsSkipped++;
       continue;
     }
-    const savedSubj = tmplSettings[`u_${bd.id}_tmpl_o1_subject`] || '';
-    const savedBody = tmplSettings[`u_${bd.id}_tmpl_o1_body`] || '';
-    const subjTmpl = savedSubj || DEFAULT_TEMPLATES.o1_subject;
-    const bodyTmpl = savedBody || DEFAULT_TEMPLATES.o1_body;
+    const subjTmpl = resolveTemplate(tmplSettings[`u_${bd.id}_tmpl_o1_subject`], 'o1_subject');
+    const bodyTmpl = resolveTemplate(tmplSettings[`u_${bd.id}_tmpl_o1_body`], 'o1_body');
     for (const contact of contacts) {
       try {
         const senderDisplayName = job.sending_email?.display_name || bdPrimaryEmailMap[bd.id]?.display_name || bd.name || '';
@@ -1196,10 +1225,8 @@ app.post('/emails/generate', auth, async (req, res) => {
       const bd = bdMap[job.assigned_to_bd] || { id: req.user.id, name: req.user.name, email: req.user.email };
       const contacts = (job.contacts || []).filter(c => isValidEmail(c.email));
 
-      const savedSubj = tmplSettings[`u_${bd.id}_tmpl_o1_subject`] || '';
-      const savedBody = tmplSettings[`u_${bd.id}_tmpl_o1_body`] || '';
-      const subjTmpl = savedSubj || DEFAULT_TEMPLATES.o1_subject;
-      const bodyTmpl = savedBody || DEFAULT_TEMPLATES.o1_body;
+      const subjTmpl = resolveTemplate(tmplSettings[`u_${bd.id}_tmpl_o1_subject`], 'o1_subject');
+      const bodyTmpl = resolveTemplate(tmplSettings[`u_${bd.id}_tmpl_o1_body`], 'o1_body');
 
       for (const contact of contacts) {
         try {
@@ -2323,6 +2350,24 @@ app.get('/outreach-plan', auth, async (req, res) => {
     const { data } = await supabase.from('app_settings').select('key,value').in('key', keys);
     const plan = {};
     (data || []).forEach(r => { plan[r.key.replace(`u_${uid}_`, '')] = r.value; });
+
+    const tmplFields = ['tmpl_o1_subject', 'tmpl_o1_body', 'tmpl_fu1_subject', 'tmpl_fu1_body', 'tmpl_fu2_subject', 'tmpl_fu2_body'];
+    const migrations = [];
+    tmplFields.forEach(field => {
+      const shortKey = field.replace('tmpl_', '');
+      const resolved = resolveTemplate(plan[field], shortKey);
+      if (plan[field] && resolved !== plan[field]) {
+        plan[field] = resolved;
+        migrations.push({ key: `u_${uid}_${field}`, value: resolved });
+      }
+    });
+    if (migrations.length) {
+      await supabase.from('app_settings').upsert(
+        migrations.map(m => ({ key: m.key, value: m.value, updated_at: new Date() })),
+        { onConflict: 'key' }
+      );
+    }
+
     res.json(plan);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2382,7 +2427,9 @@ async function runFollowupEngine() {
     (settingsRows || []).forEach(r => { settings[r.key] = r.value; });
 
     function getBDTemplate(bdId, key, globalKey, fallback) {
-      return settings[`u_${bdId}_${key}`] || settings[globalKey] || fallback;
+      const shortKey = key.replace('tmpl_', '');
+      const saved = settings[`u_${bdId}_${key}`] || settings[globalKey] || '';
+      return resolveTemplate(saved, shortKey) || fallback;
     }
     const { data: sendLogs } = await supabase.from('email_send_log').select('user_email_id,emails_sent').eq('send_date', todayDate);
     const sentToday = {};
