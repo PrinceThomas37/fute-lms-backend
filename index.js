@@ -6,6 +6,13 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { parseJobDescription, buildResearchFromLeadData } = require('./jd-parser');
 const { DEFAULT_TEMPLATES, buildEmailVars, fillTemplate, resolveTemplate } = require('./email-vars');
+const {
+  DEFAULT_SIGNATURE_HTML,
+  mailboxSignatureKey,
+  legacyUserSignatureKey,
+  fillSignatureHtml,
+  resolveSignatureHtml
+} = require('./email-signature');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -198,6 +205,43 @@ async function loadMailboxQuotaState(mailboxIds) {
     }
   }
   return { limits, sentToday, delays, settings };
+}
+
+async function loadMailboxSignatures(mailboxIds, userId) {
+  const ids = [...new Set(mailboxIds.filter(Boolean))];
+  const map = {};
+  if (!ids.length) return map;
+
+  const keys = ids.map(mailboxSignatureKey);
+  const { data: rows } = await supabase.from('app_settings').select('key,value').in('key', keys);
+  (rows || []).forEach(r => {
+    const id = r.key.replace(/^ue_/, '').replace(/_signature_html$/, '');
+    map[id] = r.value;
+  });
+
+  let legacyUserSig = '';
+  if (userId) {
+    const { data: leg } = await supabase.from('app_settings').select('value').eq('key', legacyUserSignatureKey(userId)).maybeSingle();
+    legacyUserSig = leg?.value || '';
+  }
+
+  const migrations = [];
+  for (const id of ids) {
+    if (!map[id] && legacyUserSig) {
+      map[id] = legacyUserSig;
+      migrations.push({ key: mailboxSignatureKey(id), value: legacyUserSig, updated_at: new Date() });
+    }
+    if (!map[id]) map[id] = DEFAULT_SIGNATURE_HTML;
+  }
+  if (migrations.length) {
+    await supabase.from('app_settings').upsert(migrations, { onConflict: 'key' });
+  }
+  return map;
+}
+
+async function getMailboxSignature(userEmailId, userId) {
+  const map = await loadMailboxSignatures([userEmailId], userId);
+  return resolveSignatureHtml(map[userEmailId]);
 }
 
 function interleaveByMailbox(emails) {
@@ -514,6 +558,33 @@ app.delete('/users/:id/emails/:eid', auth, async (req, res) => {
     if (!hasRole(req, 'admin', 'bd_lead') && req.user.id !== req.params.id) return res.status(403).json({ error: 'Forbidden' });
     await supabase.from('user_emails').delete().eq('id', req.params.eid).eq('user_id', req.params.id);
     res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/users/:id/emails/:eid/signature', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'bd_lead') && req.user.id !== req.params.id) return res.status(403).json({ error: 'Forbidden' });
+    const { data: mailbox, error } = await supabase.from('user_emails').select('id,user_id,email_address,display_name').eq('id', req.params.eid).eq('user_id', req.params.id).single();
+    if (error || !mailbox) return res.status(404).json({ error: 'Email ID not found' });
+    const signature_html = await getMailboxSignature(mailbox.id, mailbox.user_id);
+    res.json({ signature_html, display_name: mailbox.display_name, email_address: mailbox.email_address });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/users/:id/emails/:eid/signature', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'bd_lead', 'bd') && req.user.id !== req.params.id) return res.status(403).json({ error: 'Forbidden' });
+    const { signature_html } = req.body;
+    if (signature_html === undefined) return res.status(400).json({ error: 'signature_html required' });
+    const { data: mailbox, error } = await supabase.from('user_emails').select('id,user_id').eq('id', req.params.eid).eq('user_id', req.params.id).single();
+    if (error || !mailbox) return res.status(404).json({ error: 'Email ID not found' });
+    const key = mailboxSignatureKey(mailbox.id);
+    const { error: upsertErr } = await supabase.from('app_settings').upsert(
+      { key, value: String(signature_html), updated_at: new Date() },
+      { onConflict: 'key' }
+    );
+    if (upsertErr) throw upsertErr;
+    res.json({ success: true, signature_html: String(signature_html) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1780,8 +1851,12 @@ async function persistGraphIds(emailId, graph) {
   }
 }
 
-async function deliverOutboundEmail(email, userEmailId, signatureHtml) {
-  const htmlBody = buildHtmlEmailBody(email.body, signatureHtml);
+async function deliverOutboundEmail(email, userEmailId, signatureHtml, sendingEmail) {
+  const filledSig = fillSignatureHtml(signatureHtml, {
+    displayName: sendingEmail?.display_name || '',
+    emailAddress: sendingEmail?.email_address || email.from_email || ''
+  });
+  const htmlBody = buildHtmlEmailBody(email.body, filledSig);
   const isFollowup = email.followup_type === 'fu1' || email.followup_type === 'fu2';
   if (!isFollowup) {
     return sendMicrosoftNewMessage(userEmailId, { to: email.to_email, subject: email.subject, htmlBody });
@@ -1825,15 +1900,12 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
   const failDetails = [], sentContactIds = [], sentJobIds = [];
   const startedAt = new Date().toISOString();
 
-  // Load this user's HTML signature (stored in app_settings as u_{uid}_signature_html)
-  let userSignatureHtml = '';
-  try {
-    const { data: sigRow } = await supabase.from('app_settings').select('value').eq('key', `u_${userId}_signature_html`).single();
-    userSignatureHtml = sigRow?.value || '';
-  } catch (_) {}
-
   const mailboxIds = [...new Set(pendingEmails.map(e => e.job?.sending_email_id).filter(Boolean))];
-  const { limits, sentToday, delays, settings } = await loadMailboxQuotaState(mailboxIds);
+  const [mailboxSignatures, quotaState] = await Promise.all([
+    loadMailboxSignatures(mailboxIds, userId),
+    loadMailboxQuotaState(mailboxIds)
+  ]);
+  const { limits, sentToday, delays, settings } = quotaState;
   const lastSendAtByMailbox = {};
   const domainTimestamps = {};
   let sendAttempts = 0;
@@ -1913,7 +1985,8 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
 
     try {
       sendAttempts++;
-      const graph = await deliverOutboundEmail(email, userEmailId, email._sigHtml || userSignatureHtml);
+      const sigTemplate = resolveSignatureHtml(email._sigHtml || mailboxSignatures[userEmailId]);
+      const graph = await deliverOutboundEmail(email, userEmailId, sigTemplate, sendingEmail);
       await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email.id);
       await persistGraphIds(email.id, graph);
       const todayDate = today();
@@ -2669,8 +2742,14 @@ app.post('/emails/send-microsoft', auth, async (req, res) => {
   try {
     const { user_email_id, to_email, subject, body, email_id, signature_html } = req.body;
     if (!user_email_id || !to_email || !subject || !body) return res.status(400).json({ error: 'user_email_id, to_email, subject, body required' });
+    const { data: mailbox } = await supabase.from('user_emails').select('id,user_id,email_address,display_name').eq('id', user_email_id).single();
+    const sigTemplate = resolveSignatureHtml(signature_html || await getMailboxSignature(user_email_id, mailbox?.user_id || req.user.id));
+    const filledSig = fillSignatureHtml(sigTemplate, {
+      displayName: mailbox?.display_name || '',
+      emailAddress: mailbox?.email_address || ''
+    });
     const accessToken = await getMicrosoftToken(user_email_id);
-    const htmlContent = buildHtmlEmailBody(body, signature_html || '');
+    const htmlContent = buildHtmlEmailBody(body, filledSig);
     const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', { method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: { subject, body: { contentType: 'HTML', content: htmlContent }, toRecipients: [{ emailAddress: { address: to_email } }] }, saveToSentItems: true }) });
     if (!sendRes.ok) { const errData = await sendRes.json().catch(() => ({})); throw new Error(errData?.error?.message || `Send failed: ${sendRes.status}`); }
     if (email_id) await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email_id);
