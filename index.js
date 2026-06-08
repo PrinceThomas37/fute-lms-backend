@@ -319,6 +319,7 @@ app.use(function(req, res, next) {
 });
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.get('/health', (req, res) => res.json({ ok: true }));
+app.get('/industries', auth, (req, res) => res.json(INDUSTRIES));
 
 // ══════════════════════════════════════════════════════════════
 // AUTH

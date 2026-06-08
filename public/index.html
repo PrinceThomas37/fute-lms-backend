@@ -437,6 +437,16 @@ function jobContacts(jid){
 function jobById(id){ return STATE.jobs.find(function(j){return j.id===id;}); }
 function escAttr(v){ return String(v==null?"":v).replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
 function escHtml(v){ return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function getIndustriesList(){
+  return (STATE.industriesList&&STATE.industriesList.length)?STATE.industriesList:[];
+}
+function buildIndustrySelectOptions(selected){
+  var list=getIndustriesList().slice();
+  if(selected&&list.indexOf(selected)===-1)list.unshift(selected);
+  return [''].concat(list).map(function(v){
+    return '<option value="'+escAttr(v)+'"'+(selected===v?' selected':'')+'>'+(v||'— Select Industry —')+'</option>';
+  }).join('');
+}
 
 var STATE = {
 
@@ -497,6 +507,7 @@ var STATE = {
   jobs: [],
   contacts: [],
   detailJob: null,
+  industriesList: [],
   jobsFilter: {search:"",stages:[],industries:[],dateRange:"all",dateFrom:"",dateTo:""},
   openDrop: null,
   assignSel: {},
@@ -1183,7 +1194,7 @@ function renderJobs(){
   }
 
   var allStagesList=['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'];
-  var allIndustriesList=['Engineering','Healthcare','Legal','Accounting','Management','Other'];
+  var allIndustriesList=getIndustriesList();
   var stageActive=f.stages&&f.stages.length>0;
   var indActive=f.industries&&f.industries.length>0;
   var dateActive=f.dateRange&&f.dateRange!=='all';
@@ -2506,7 +2517,7 @@ function renderAddLeadModal(){
   var bds=u.role==="ra"?STATE.users.filter(function(x){return x.id===u.bdm}):STATE.users.filter(function(x){return x.role==="bd"||x.role==="admin"});
   var ras=u.role==="ra"?[u]:STATE.users.filter(function(x){return x.role==="ra"&&(u.role==="admin"||x.bdm===u.id)});
   var cos=STATE.companies;
-  var indOpts=INDUSTRIES.map(function(i){return'<option>'+i+'</option>'}).join("");
+  var indOpts=(getIndustriesList().length?getIndustriesList():INDUSTRIES).map(function(i){return'<option>'+htmlEsc(i)+'</option>'}).join("");
   var srcOpts=SOURCES.map(function(s){return'<option>'+s+'</option>'}).join("");
   var raOpts=ras.map(function(r){return'<option value="'+r.id+'">'+r.name+'</option>'}).join("");
   var bdOpts=bds.map(function(b){return'<option value="'+b.id+'">'+b.name+'</option>'}).join("");
@@ -4463,9 +4474,7 @@ window.doImportProcess=function(toProcess,dupEmailMap){
 function renderRALeadForm(){
   var f=STATE.raForm;
   var isEditing=!!f.editJobId;
-  var indOpts=['','Engineering','Healthcare','Legal','Accounting','Management'].map(function(v){
-    return '<option value="'+v+'"'+(f.industry===v?' selected':'')+'>'+( v||'— Select Industry —')+'</option>';
-  }).join('');
+  var indOpts=buildIndustrySelectOptions(f.industry||'');
 
   // Company info banner
   var coBanner='';
@@ -6560,7 +6569,7 @@ function flattenContacts(jobs){var out=[];jobs.forEach(function(j){(j.contacts||
 
 function loadAppData(){
   STATE.loading=true;render();
-  var calls=[apiGet('/users'),apiGet('/jobs'),apiGet('/companies'),apiGet('/reminders')];
+  var calls=[apiGet('/users'),apiGet('/jobs'),apiGet('/companies'),apiGet('/reminders'),apiGet('/industries')];
   var u=STATE.user;
   var isBD=(u&&(u.role==='bd'||u.role==='bd_lead'||u.role==='admin'||u.role==='ra_lead'));
   if(isBD)calls.push(apiGet('/emails?status=pending'));
@@ -6571,6 +6580,7 @@ function loadAppData(){
     STATE.contacts=flattenContacts(r[1]);
     STATE.companies=r[2].map(function(c){return{id:c.id,name:c.name,web:c.website,ind:c.industry,loc:c.location};});
     STATE.reminders=r[3]||[];
+    STATE.industriesList=r[4]||[];
     STATE.emailAccounts=[];
     // Load pool stats for ra_lead/admin
     if(STATE.user&&(STATE.user.role==='ra_lead'||STATE.user.role==='admin')){
@@ -6581,8 +6591,8 @@ function loadAppData(){
       apiGet('/distribute/today-summary').then(function(d){STATE.todaySummary=d;render();}).catch(function(){});
     }
     if(isBD){
-      STATE.pendingEmails=(r[4]||[]);
-      STATE.emails=(r[5]||[]);
+      STATE.pendingEmails=(r[5]||[]);
+      STATE.emails=(r[6]||[]);
       apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];render();}).catch(function(){STATE.sentEmails=[];});
     }
     // Load app settings (global send times)
