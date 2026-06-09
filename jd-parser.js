@@ -10,6 +10,83 @@
  */
 
 const { SKILL_DICTIONARIES } = require('./skill-dictionaries');
+const { loadLearnedSkills } = require('./learned-skills');
+
+const MAX_SUGGESTED_SKILLS = 8;
+
+/** Related industry clusters — scan neighbors after primary industry */
+const RELATED_INDUSTRIES = {
+  logistics: ['importexport', 'retail', 'manufacturing', 'automotive'],
+  importexport: ['logistics', 'retail', 'manufacturing'],
+  accounting: ['banking', 'mortgage', 'consulting'],
+  banking: ['accounting', 'securities', 'mortgage', 'insurance'],
+  healthcare: ['insurance', 'medicaldevice', 'nonprofit', 'education'],
+  construction: ['realestate', 'manufacturing', 'energy'],
+  technology: ['electronics', 'consulting', 'telecom', 'defense'],
+  manufacturing: ['logistics', 'chemical', 'electronics', 'automotive'],
+  retail: ['logistics', 'ecommerce', 'sales', 'food'],
+  staffing: ['sales', 'consulting', 'technology'],
+  legal: ['government', 'insurance', 'consulting'],
+  hvac: ['construction', 'energy', 'manufacturing'],
+  automotive: ['manufacturing', 'retail', 'logistics'],
+  hospitality: ['food', 'travel', 'retail', 'entertainment'],
+  education: ['nonprofit', 'healthcare', 'government'],
+  sales: ['advertising', 'ecommerce', 'retail', 'consulting'],
+  ecommerce: ['retail', 'advertising', 'technology', 'sales'],
+  energy: ['chemical', 'construction', 'manufacturing', 'environmental'],
+  biotech: ['healthcare', 'medicaldevice', 'chemical'],
+  realestate: ['construction', 'banking', 'sales'],
+  insurance: ['healthcare', 'banking', 'legal'],
+  defense: ['technology', 'aviation', 'government', 'logistics'],
+  aviation: ['logistics', 'defense', 'importexport']
+};
+
+const JD_SECTION_HEADERS = [
+  'requirements?', 'qualifications?', 'skills?', 'responsibilities', 'duties',
+  'what you(?:\'ll| will) need', 'what we(?:\'re| are) looking for', 'you bring',
+  'must have', 'minimum qualifications?', 'preferred qualifications?',
+  'nice to have', 'bonus points', 'ideal candidate', 'knowledge & experience',
+  'education & experience', 'experience required', 'technical skills'
+].join('|');
+
+/** Certifications / licenses commonly seen in staffing JDs */
+const CERTIFICATION_PATTERNS = [
+  { label: 'CPA', re: /\b(?:CPA|C\.P\.A\.)(?:\s+certified|\s+license)?\b/i },
+  { label: 'RN', re: /\b(?:RN|R\.N\.|registered nurse)\b/i },
+  { label: 'LPN', re: /\b(?:LPN|L\.P\.N\.|licensed practical nurse)\b/i },
+  { label: 'CNA', re: /\bCNA\b/i },
+  { label: 'CDL', re: /\bCDL(?:\s+Class\s+[AB])?\b/i },
+  { label: 'CDL Class A', re: /\bCDL\s+Class\s+A\b/i },
+  { label: 'CDL Class B', re: /\bCDL\s+Class\s+B\b/i },
+  { label: 'OSHA 10', re: /\bOSHA\s*10\b/i },
+  { label: 'OSHA 30', re: /\bOSHA\s*30\b/i },
+  { label: 'EPA 608', re: /\bEPA\s*608\b/i },
+  { label: 'NATE', re: /\bNATE(?:\s+certified)?\b/i },
+  { label: 'PMP', re: /\bPMP\b/i },
+  { label: 'Six Sigma', re: /\bSix\s+Sigma(?:\s+Green\s+Belt|\s+Black\s+Belt)?\b/i },
+  { label: 'AWS Certified', re: /\bAWS\s+Certified\b/i },
+  { label: 'Series 7', re: /\bSeries\s+7\b/i },
+  { label: 'Series 63', re: /\bSeries\s+63\b/i },
+  { label: 'NMLS', re: /\bNMLS\b/i },
+  { label: 'ServSafe', re: /\bServSafe\b/i },
+  { label: 'HAZMAT certification', re: /\bHAZMAT(?:\s+certification|\s+certified)?\b/i },
+  { label: 'forklift certification', re: /\bforklift(?:\s+certification|\s+certified)\b/i },
+  { label: 'ASE certification', re: /\bASE(?:\s+certification|\s+certified)\b/i },
+  { label: 'BLS', re: /\bBLS\b/i },
+  { label: 'ACLS', re: /\bACLS\b/i },
+  { label: 'Security clearance', re: /\b(?:active\s+)?security\s+clearance\b/i },
+  { label: 'real estate license', re: /\breal\s+estate\s+license\b/i }
+];
+
+/** Known acronyms — only extract if present as whole word in JD */
+const KNOWN_ACRONYMS = [
+  'WMS', 'TMS', 'ERP', 'CRM', 'ATS', 'EHR', 'EMR', 'EMR', 'HRIS', 'LMS', 'POS', 'BAS', 'VFD',
+  'PLC', 'CNC', 'GIS', 'DOT', 'FDA', 'EPA', 'HIPAA', 'SOX', 'AML', 'KYC', 'BSA', 'FP&A',
+  'ICD-10', 'CPT', '3PL', 'LTL', 'FTL', 'MRO', 'HVAC', 'BIM', 'MEP', 'RFI', 'GMP', 'SOP', 'HR',
+  'APQP', 'PPAP', 'FMEA', 'MRP', 'TPM', 'SPC', 'GD&T', 'CMMC', 'ITAR', 'FAR', 'DFARS',
+  'IATA', 'CBP', 'HS', 'ERP', 'SAP', 'SQL', 'API', 'CI/CD', 'OSHA', 'EHS', 'PPE', 'SKU',
+  'OTA', 'STR', 'PMS', 'F&B', 'DMS', 'F&I', 'OBD-II', 'ELISA', 'PCR', 'HPLC', 'IND', 'NDA'
+];
 
 const SOFT_SKILLS = new Set([
   'communication', 'communication skills', 'leadership', 'customer service',
@@ -142,7 +219,7 @@ function cleanSkillPhrase(raw) {
   t = t.replace(/\b(?:experience with|experience in|proficien(?:t|cy) in|knowledge of|familiarity with|ability to|understanding of)\s+/gi, '');
   t = t.replace(/\b(?:required|preferred|is a plus|a plus|plus|desired|nice to have)\b/gi, '').trim();
   t = t.replace(/\s{2,}/g, ' ').trim();
-  if (t.length < 2 || t.length > 60) return '';
+  if (t.length < 2 || t.length > 80) return '';
   if (/^(the|a|an|or|and|with|in|for|to|years?|year|experience)$/i.test(t)) return '';
   if (/^\d+\+?\s*years?/i.test(t)) return '';
   return t;
@@ -155,6 +232,46 @@ function addSkillMatch(matches, seen, skill) {
   if (seen.has(norm)) return;
   seen.add(norm);
   matches.push(cleaned);
+}
+
+function getIndustrySkillList(industryKey) {
+  if (!industryKey) return [];
+  const base = SKILL_DICTIONARIES[industryKey] || [];
+  const learned = loadLearnedSkills()[industryKey] || [];
+  return [...base, ...learned];
+}
+
+function getRelatedIndustryKeys(industryKey) {
+  if (!industryKey) return [];
+  return RELATED_INDUSTRIES[industryKey] || [];
+}
+
+function extractCertifications(text) {
+  const found = [];
+  const seen = new Set();
+  for (const { label, re } of CERTIFICATION_PATTERNS) {
+    if (!re.test(text)) continue;
+    const key = label.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      found.push(label);
+    }
+  }
+  return found;
+}
+
+function extractKnownAcronyms(text) {
+  const found = [];
+  const seen = new Set();
+  for (const acr of KNOWN_ACRONYMS) {
+    if (!skillInText(acr, text)) continue;
+    const key = acr.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      found.push(acr);
+    }
+  }
+  return found;
 }
 
 function matchSkillsFromDict(text, dict, seen, matches, limit) {
@@ -170,8 +287,8 @@ function extractInlineSkillPhrases(text) {
   const found = [];
   const seen = new Set();
   const patterns = [
-    /(?:experience with|experience in|proficien(?:t|cy) in|knowledge of|familiarity with|skilled in)\s+([^.,;\n]+)/gi,
-    /(?:must have|required|preferred)\s*:?\s*([^.,;\n]+)/gi
+    /(?:experience with|experience in|proficien(?:t|cy) in|knowledge of|familiarity with|skilled in|working knowledge of|hands-on with|background in|expertise in)\s+([^.,;\n]+)/gi,
+    /(?:must have|required|preferred|nice to have)\s*:?\s*([^.,;\n]+)/gi
   ];
   for (const re of patterns) {
     let m;
@@ -195,7 +312,7 @@ function extractCommaListedSkills(text) {
   const found = [];
   const seen = new Set();
 
-  const sectionHeaders = /(?:^|\n)\s*(?:requirements?|qualifications?|skills?|what you(?:'ll| will) need|must have|minimum qualifications?|preferred qualifications?)\s*:?\s*\n([\s\S]*?)(?=\n\s*\n|\n\s*[A-Z][^\n]{0,40}:|$)/gi;
+  const sectionHeaders = new RegExp(`(?:^|\\n)\\s*(?:${JD_SECTION_HEADERS})\\s*:?\\s*\\n([\\s\\S]*?)(?=\\n\\s*\\n|\\n\\s*[A-Z][^\\n]{0,50}:|$)`, 'gi');
   let m;
   while ((m = sectionHeaders.exec(text)) !== null) {
     const block = m[1];
@@ -248,12 +365,12 @@ function skillScore(skill, industry, text) {
   let score = 0;
   const lower = skill.toLowerCase();
   if (isSoftSkill(skill)) score += 100;
-  if (industry && SKILL_DICTIONARIES[industry]) {
-    const inDict = SKILL_DICTIONARIES[industry].some((s) => s.toLowerCase() === lower || skillInText(s, skill) || skillInText(skill, s));
-    if (inDict) score -= 30;
-  }
+  if (industry && getIndustrySkillList(industry).some((s) => s.toLowerCase() === lower)) score -= 35;
+  if (getRelatedIndustryKeys(industry).some((rel) => getIndustrySkillList(rel).some((s) => s.toLowerCase() === lower))) score -= 20;
   if (SHARED_TOOLS.some((s) => s.toLowerCase() === lower)) score -= 20;
-  if (skillInText(skill, text) && lower.length <= 20) score -= 5;
+  if (CERTIFICATION_PATTERNS.some((c) => c.label.toLowerCase() === lower)) score -= 25;
+  if (KNOWN_ACRONYMS.some((a) => a.toLowerCase() === lower)) score -= 15;
+  if (skillInText(skill, text) && lower.length <= 24) score -= 5;
   return score;
 }
 
@@ -268,31 +385,29 @@ function rankSkills(matches, industry, text) {
 function matchSkills(text, industry) {
   const seen = new Set();
   const matches = [];
-  const limit = 3;
 
   const resolvedIndustry = normalizeIndustry(industry) || inferIndustryFromText(text) || 'general';
 
-  for (const token of extractCommaListedSkills(text)) {
-    addSkillMatch(matches, seen, token);
+  for (const token of extractCommaListedSkills(text)) addSkillMatch(matches, seen, token);
+  for (const token of extractInlineSkillPhrases(text)) addSkillMatch(matches, seen, token);
+  for (const token of extractCertifications(text)) addSkillMatch(matches, seen, token);
+  for (const token of extractKnownAcronyms(text)) addSkillMatch(matches, seen, token);
+
+  matchSkillsFromDict(text, getIndustrySkillList(resolvedIndustry), seen, matches, 80);
+
+  for (const relatedKey of getRelatedIndustryKeys(resolvedIndustry)) {
+    matchSkillsFromDict(text, getIndustrySkillList(relatedKey), seen, matches, 80);
   }
 
-  for (const token of extractInlineSkillPhrases(text)) {
-    addSkillMatch(matches, seen, token);
-  }
-
-  if (resolvedIndustry && SKILL_DICTIONARIES[resolvedIndustry]) {
-    matchSkillsFromDict(text, SKILL_DICTIONARIES[resolvedIndustry], seen, matches, 50);
-  }
-
-  matchSkillsFromDict(text, SHARED_TOOLS, seen, matches, 50);
+  matchSkillsFromDict(text, SHARED_TOOLS, seen, matches, 80);
 
   if (resolvedIndustry !== 'general') {
-    matchSkillsFromDict(text, SKILL_DICTIONARIES.general, seen, matches, 50);
+    matchSkillsFromDict(text, getIndustrySkillList('general'), seen, matches, 80);
   }
 
-  matchSkillsFromDict(text, [...SOFT_SKILLS], seen, matches, 50);
+  matchSkillsFromDict(text, [...SOFT_SKILLS], seen, matches, 80);
 
-  return rankSkills(matches, resolvedIndustry, text).slice(0, limit);
+  return rankSkills(matches, resolvedIndustry, text).slice(0, MAX_SUGGESTED_SKILLS);
 }
 
 function extractSalary(text) {
@@ -388,8 +503,10 @@ function parseJobDescription(text, industry) {
   if (!jd) {
     return {
       skills: [],
+      suggested_skills: [],
       skill_1: '',
       skill_2: '',
+      skill_3: '',
       salary_display: '',
       salary_range: '',
       salary_min: null,
@@ -413,8 +530,10 @@ function parseJobDescription(text, industry) {
 
   return {
     skills,
+    suggested_skills: skills,
     skill_1: skills[0] || '',
     skill_2: skills[1] || '',
+    skill_3: skills[2] || '',
     salary_display: salary.salary_display,
     salary_range: salary.salary_range,
     salary_min: salaryBounds.salary_min,
@@ -463,8 +582,11 @@ module.exports = {
   parseJobDescription,
   normalizeIndustry,
   inferIndustryFromText,
+  matchSkills,
   SKILL_DICTIONARIES,
   SOFT_SKILLS,
   SHARED_TOOLS,
-  buildResearchFromLeadData
+  RELATED_INDUSTRIES,
+  buildResearchFromLeadData,
+  MAX_SUGGESTED_SKILLS
 };

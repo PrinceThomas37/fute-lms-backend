@@ -552,7 +552,7 @@ var STATE = {
     coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',
     position:'',jobUrl:'',jobCreatedDate:'',salaryRange:'',source:'',editJobId:null,
     contacts:[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}],
-    research:{jd_raw:'',company:{expertise:'',notes:'',headcount:'',hiring_volume:''},outreach:{angle:'',avoid:''},requirements:{skill_1:'',skill_2:'',salary_min:null,salary_max:null,salary_period:'year',salary_display:'',location:'',local_hint:'',travel:''},contacts:[]}
+    research:{jd_raw:'',suggested_skills:[],company:{expertise:'',notes:'',headcount:'',hiring_volume:''},outreach:{angle:'',avoid:''},requirements:{skill_1:'',skill_2:'',skill_3:'',salary_min:null,salary_max:null,salary_period:'year',salary_display:'',location:'',local_hint:'',travel:''},contacts:[]}
   },
   raFormCoSuggestions:[],
   raFormZipSuggestions:[],
@@ -745,6 +745,7 @@ function buildClientEmailVars(l,co,sender){
   var skills=Array.isArray(req.skills)?req.skills:[];
   if(req.skill_1)skills[0]=req.skill_1;
   if(req.skill_2)skills[1]=req.skill_2;
+  if(req.skill_3)skills[2]=req.skill_3;
   skills=skills.filter(Boolean).slice(0,3);
   var companyExpertise=(job&&job.research&&job.research.company&&job.research.company.expertise)||"";
   var loc=(job&&job.location)||(co?co.loc:"")||req.location||"";
@@ -4728,7 +4729,33 @@ window.doImportProcess=function(toProcess,dupEmailMap){
 // RA LEAD ENTRY FORM — Drop P
 // ════════════════════════════════════════════════
 function defaultRaFormResearch(){
-  return{jd_raw:'',company:{expertise:'',notes:'',headcount:'',hiring_volume:''},outreach:{angle:'',avoid:''},requirements:{skill_1:'',skill_2:'',salary_min:null,salary_max:null,salary_period:'year',salary_display:'',location:'',local_hint:'',travel:''},contacts:[]};
+  return{jd_raw:'',suggested_skills:[],company:{expertise:'',notes:'',headcount:'',hiring_volume:''},outreach:{angle:'',avoid:''},requirements:{skill_1:'',skill_2:'',skill_3:'',salary_min:null,salary_max:null,salary_period:'year',salary_display:'',location:'',local_hint:'',travel:''},contacts:[]};
+}
+function renderSuggestedSkillChips(suggested,assignHandler){
+  assignHandler=assignHandler||'raFormAssignSkill';
+  if(!suggested||!suggested.length)return '';
+  var unique=[],seen={};
+  suggested.forEach(function(s){
+    var k=String(s||'').trim().toLowerCase();
+    if(!k||seen[k])return;
+    seen[k]=1;
+    unique.push(String(s).trim());
+  });
+  if(!unique.length)return '';
+  return '<div class="mb3" style="padding:10px 12px;background:var(--bg);border:1px solid var(--border2);border-radius:var(--r2)">'+
+    '<div style="font-size:11px;color:var(--text3);margin-bottom:8px">Suggested skills — click 1, 2, or 3 to assign</div>'+
+    '<div style="display:flex;flex-direction:column;gap:8px">'+
+    unique.map(function(sk){
+      var esc=htmlEsc(sk);
+      return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+
+        '<span style="font-size:12px;color:var(--text);flex:1;min-width:140px">'+esc+'</span>'+
+        '<span style="display:inline-flex;gap:4px">'+
+          [1,2,3].map(function(slot){
+            return '<button type="button" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:10px;min-width:28px" onclick="'+assignHandler+'(this)" data-skill="'+esc.replace(/"/g,'&quot;')+'" data-slot="'+slot+'">'+slot+'</button>';
+          }).join('')+
+        '</span></div>';
+    }).join('')+
+    '</div></div>';
 }
 function raFormEnsureResearch(){
   if(!STATE.raForm.research)STATE.raForm.research=defaultRaFormResearch();
@@ -4746,12 +4773,12 @@ function buildRaFormResearchPayload(){
     req.salary_display=req.salary_display||buildSalaryDisplay(req.salary_min,req.salary_max,req.salary_period||'year');
     req.salary_range=req.salary_display;
   }
-  var hasReq=req.skill_1||req.skill_2||req.salary_display||req.location||req.local_hint||req.travel;
+  var hasReq=req.skill_1||req.skill_2||req.skill_3||req.salary_display||req.location||req.local_hint||req.travel;
   var hasCo=r.company.expertise||r.company.notes||r.company.headcount||r.company.hiring_volume;
   var hasOut=r.outreach.angle||r.outreach.avoid;
   var hasContacts=(r.contacts||[]).some(function(c){return c.seniority||c.decision_maker||c.best_time||c.notes;});
   if(!r.jd_raw&&!hasReq&&!hasCo&&!hasOut&&!hasContacts)return null;
-  return{jd_raw:r.jd_raw||null,company:Object.assign({},r.company),outreach:Object.assign({},r.outreach),requirements:req,contacts:(r.contacts||[]).slice()};
+  return{jd_raw:r.jd_raw||null,suggested_skills:(r.suggested_skills||[]).slice(),company:Object.assign({},r.company),outreach:Object.assign({},r.outreach),requirements:req,contacts:(r.contacts||[]).slice()};
 }
 function renderRaFormSalaryRange(req){
   return renderSalaryRangeControl('ra-form',req,'raForm');
@@ -4919,9 +4946,11 @@ function renderRALeadForm(){
     '<div style="margin-bottom:12px">'+
       '<button type="button" class="btn btn-outline btn-sm" onclick="raFormParseJD()">Extract requirements</button>'+
     '</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
+    renderSuggestedSkillChips(r.suggested_skills||[],'raFormAssignSkill')+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'+
       '<div class="fgrp"><label class="flbl">Skill 1</label><input class="inp" style="font-size:12px" placeholder="Primary skill from JD" value="'+htmlEsc(req.skill_1||'')+'" oninput="raFormUpdateRequirements(\'skill_1\',this.value)"/></div>'+
       '<div class="fgrp"><label class="flbl">Skill 2</label><input class="inp" style="font-size:12px" placeholder="Secondary skill" value="'+htmlEsc(req.skill_2||'')+'" oninput="raFormUpdateRequirements(\'skill_2\',this.value)"/></div>'+
+      '<div class="fgrp"><label class="flbl">Skill 3</label><input class="inp" style="font-size:12px" placeholder="Third skill (optional)" value="'+htmlEsc(req.skill_3||'')+'" oninput="raFormUpdateRequirements(\'skill_3\',this.value)"/></div>'+
       renderRaFormSalaryRange(req)+
       '<div class="fgrp"><label class="flbl">Location</label><input class="inp" style="font-size:12px" placeholder="" value="'+htmlEsc(req.location||'')+'" oninput="raFormUpdateRequirements(\'location\',this.value)"/></div>'+
       '<div class="fgrp"><label class="flbl">City / local hint</label><input class="inp" style="font-size:12px" placeholder="" value="'+htmlEsc(req.local_hint||'')+'" oninput="raFormUpdateRequirements(\'local_hint\',this.value)"/></div>'+
@@ -4967,7 +4996,17 @@ window.raFormUpdateRequirements=function(field,val){
   var r=raFormEnsureResearch();
   if(!r.requirements)r.requirements={};
   r.requirements[field]=val;
-  if(field==='skill_1'||field==='skill_2')syncResearchSkillsArray(r.requirements);
+  if(field==='skill_1'||field==='skill_2'||field==='skill_3')syncResearchSkillsArray(r.requirements);
+};
+window.raFormAssignSkill=function(btn){
+  var skill=btn.getAttribute('data-skill');
+  var slot=Number(btn.getAttribute('data-slot'));
+  if(!skill||!slot)return;
+  var r=raFormEnsureResearch();
+  if(!r.requirements)r.requirements={};
+  r.requirements['skill_'+slot]=skill;
+  syncResearchSkillsArray(r.requirements);
+  render();
 };
 window.raFormUpdateContactIntel=function(idx,field,val){
   var r=raFormEnsureResearch();
@@ -5024,9 +5063,11 @@ window.raFormParseJD=function(){
   apiPost('/parse-jd',{jd_text:jdText,industry:STATE.raForm.industry||''}).then(function(parsed){
     r.jd_raw=jdText;
     r.requirements=Object.assign({},r.requirements||{},parsed);
-    var skills=parsed.skills||[];
+    r.suggested_skills=parsed.suggested_skills||parsed.skills||[];
+    var skills=r.suggested_skills;
     if(skills[0])r.requirements.skill_1=skills[0];
     if(skills[1])r.requirements.skill_2=skills[1];
+    if(skills[2])r.requirements.skill_3=skills[2];
     syncResearchSkillsArray(r.requirements);
     if(parsed.travel&&!['none','25%','required'].includes(parsed.travel)){
       r.requirements.travel=parsed.travel.indexOf('25')>-1?'25%':'required';
@@ -6013,8 +6054,8 @@ function buildSalaryDisplay(min,max,period){
 }
 function syncResearchSkillsArray(req){
   if(!req)return;
-  var list=[req.skill_1,req.skill_2].map(function(s){return String(s||'').trim();}).filter(Boolean);
-  req.skills=list.slice(0,2);
+  var list=[req.skill_1,req.skill_2,req.skill_3].map(function(s){return String(s||'').trim();}).filter(Boolean);
+  req.skills=list.slice(0,3);
 }
 function renderSalaryRangeControl(idPrefix,req,handlerMode){
   handlerMode=handlerMode||'research';
@@ -6104,7 +6145,7 @@ function renderResearchSection(j, canEdit){
 
   if(!canEdit){
     // BD read-only view
-    var hasReq=req.skill_1||req.skill_2||(req.skills||[]).length||req.salary_display||req.location||req.local_hint||req.travel;
+    var hasReq=req.skill_1||req.skill_2||req.skill_3||(req.skills||[]).length||req.salary_display||req.location||req.local_hint||req.travel;
     var hasData=company.headcount||company.hiring_volume||company.notes||outreach.angle||outreach.avoid||hasReq||jdRaw;
     if(!hasData&&!contactIntel.trim())return '';
     return '<div style="background:var(--bg);border:1px solid var(--border2);border-radius:var(--r2);padding:14px;margin-top:14px">'+
@@ -6115,6 +6156,7 @@ function renderResearchSection(j, canEdit){
           '<div style="display:flex;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--text2)">'+
             (req.skill_1?'<span style="background:var(--accent-l);color:var(--accent);padding:2px 8px;border-radius:6px">'+htmlEsc(req.skill_1)+'</span>':'')+
             (req.skill_2?'<span style="background:var(--accent-l);color:var(--accent);padding:2px 8px;border-radius:6px">'+htmlEsc(req.skill_2)+'</span>':'')+
+            (req.skill_3?'<span style="background:var(--accent-l);color:var(--accent);padding:2px 8px;border-radius:6px">'+htmlEsc(req.skill_3)+'</span>':'')+
             (req.salary_display?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">'+htmlEsc(req.salary_display)+'</span>':'')+
             (req.location?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">'+htmlEsc(req.location)+'</span>':'')+
             (req.local_hint?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">Local: '+htmlEsc(req.local_hint)+'</span>':'')+
@@ -6187,7 +6229,7 @@ window.researchUpdateRequirements=function(jobId,field,val){
   if(!window._researchDraft[jobId])window._researchDraft[jobId]=JSON.parse(JSON.stringify((STATE.jobs.find(function(j){return j.id===jobId;})||{}).research||{}));
   if(!window._researchDraft[jobId].requirements)window._researchDraft[jobId].requirements={};
   window._researchDraft[jobId].requirements[field]=val;
-  if(field==='skill_1'||field==='skill_2')syncResearchSkillsArray(window._researchDraft[jobId].requirements);
+  if(field==='skill_1'||field==='skill_2'||field==='skill_3')syncResearchSkillsArray(window._researchDraft[jobId].requirements);
 };
 function researchRefreshSalaryUi(jobId){
   var draft=window._researchDraft[jobId]||{};
@@ -6246,8 +6288,11 @@ window.parseJobDescription=function(jobId){
     window._researchDraft[jobId].jd_raw=jdText;
     window._researchDraft[jobId].requirements=Object.assign({},window._researchDraft[jobId].requirements||{},parsed);
     var skills=parsed.skills||[];
+    window._researchDraft[jobId].suggested_skills=parsed.suggested_skills||parsed.skills||[];
+    var skills=window._researchDraft[jobId].suggested_skills;
     if(skills[0])window._researchDraft[jobId].requirements.skill_1=skills[0];
     if(skills[1])window._researchDraft[jobId].requirements.skill_2=skills[1];
+    if(skills[2])window._researchDraft[jobId].requirements.skill_3=skills[2];
     syncResearchSkillsArray(window._researchDraft[jobId].requirements);
     if(parsed.travel&&!['none','25%','required'].includes(parsed.travel)){
       window._researchDraft[jobId].requirements.travel=parsed.travel.indexOf('25')>-1?'25%':'required';
@@ -6276,6 +6321,7 @@ window.saveResearch=function(jobId){
   if(draft.requirements)merged.requirements=Object.assign({},(j.research&&j.research.requirements)||{},draft.requirements);
   if(draft.jd_raw!==undefined)merged.jd_raw=draft.jd_raw;
   if(draft.contacts)merged.contacts=draft.contacts;
+  if(draft.suggested_skills)merged.suggested_skills=draft.suggested_skills;
   if(merged.requirements){
     syncResearchSkillsArray(merged.requirements);
     if(!merged.requirements.salary_display&&merged.requirements.salary_min!=null&&merged.requirements.salary_max!=null){
