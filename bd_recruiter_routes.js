@@ -135,6 +135,12 @@ module.exports = function (app, deps) {
         .insert(jobRow).select(JOB_ORDER_SELECT).single();
       if (error) throw error;
 
+      const openedDate = new Date().toISOString().slice(0, 10);
+      await supabase.from('jobs').update({
+        job_opened_date: openedDate,
+        updated_at: new Date()
+      }).eq('id', lead.id);
+
       res.status(201).json(jobOrder);
     } catch (err) { res.status(500).json({ error: err.message }); }
   });

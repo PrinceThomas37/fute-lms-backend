@@ -223,10 +223,28 @@ function extractLocation(text) {
 
 function extractTravel(text) {
   if (/\b(no travel|minimal travel|0% travel)\b/i.test(text)) return 'none';
-  const pct = text.match(/(\d{1,3})\s*%\s*travel/i);
-  if (pct) return `${pct[1]}%`;
+  if (/\b25\s*%\s*travel\b/i.test(text)) return '25%';
   if (/\b(travel required|must travel|willing to travel|extensive travel)\b/i.test(text)) return 'required';
+  const pct = text.match(/(\d{1,3})\s*%\s*travel/i);
+  if (pct && pct[1] === '25') return '25%';
+  if (pct) return 'required';
   return '';
+}
+
+function detectSalaryPeriod(text) {
+  if (/\b(per\s*hour|\/\s*hr|hourly)\b/i.test(text)) return 'hour';
+  if (/\b(per\s*week|weekly|\/\s*wk)\b/i.test(text)) return 'week';
+  return 'year';
+}
+
+function parseSalaryBounds(salaryDisplay, period = 'year') {
+  const nums = String(salaryDisplay || '').replace(/,/g, '').match(/\d+/g);
+  if (!nums || !nums.length) return { salary_min: null, salary_max: null };
+  let values = nums.map(Number);
+  if (period === 'year' && values.every(v => v < 1000)) values = values.map(v => v * 1000);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return { salary_min: min, salary_max: max };
 }
 
 function extractLocalRequirement(text) {
@@ -246,8 +264,13 @@ function parseJobDescription(text, industry) {
   if (!jd) {
     return {
       skills: [],
+      skill_1: '',
+      skill_2: '',
       salary_display: '',
       salary_range: '',
+      salary_min: null,
+      salary_max: null,
+      salary_period: 'year',
       location: '',
       city: '',
       local_hint: '',
@@ -258,14 +281,21 @@ function parseJobDescription(text, industry) {
 
   const skills = matchSkills(jd, industry);
   const salary = extractSalary(jd);
+  const salaryPeriod = detectSalaryPeriod(jd);
+  const salaryBounds = parseSalaryBounds(salary.salary_display, salaryPeriod);
   const loc = extractLocation(jd);
   const travel = extractTravel(jd);
   const localRequired = extractLocalRequirement(jd);
 
   return {
     skills,
+    skill_1: skills[0] || '',
+    skill_2: skills[1] || '',
     salary_display: salary.salary_display,
     salary_range: salary.salary_range,
+    salary_min: salaryBounds.salary_min,
+    salary_max: salaryBounds.salary_max,
+    salary_period: salaryPeriod,
     location: loc.location,
     city: loc.city,
     local_hint: localRequired === true ? (loc.local_hint || loc.city) : (loc.local_hint || ''),
