@@ -5,14 +5,17 @@
  * 1. Requirements / qualification lines from the JD (highest priority)
  * 2. Industry dictionary (from form industry or inferred from JD text)
  * 3. Shared tools (SAP, Excel, Sage ERP, etc.)
- * 4. Soft skills (communication, leadership, …) — only if nothing technical found
+ * 4. General professional tools
+ * 5. Soft skills (communication, leadership, …) — only if nothing technical found
  */
+
+const { SKILL_DICTIONARIES } = require('./skill-dictionaries');
 
 const SOFT_SKILLS = new Set([
   'communication', 'communication skills', 'leadership', 'customer service',
   'time management', 'teamwork', 'problem solving', 'attention to detail',
   'interpersonal skills', 'organizational skills', 'multitasking', 'work ethic',
-  'verbal communication', 'written communication'
+  'verbal communication', 'written communication', 'project management', 'team management'
 ]);
 
 /** Cross-industry tools — matched after industry dict, before soft skills */
@@ -23,78 +26,6 @@ const SHARED_TOOLS = [
   'SharePoint', 'NetSuite', 'QuickBooks', 'Sage ERP', 'Sage 100', 'Sage Intacct',
   'Sage', 'Xero', 'Slack', 'Teams', 'Zoom'
 ];
-
-const SKILL_DICTIONARIES = {
-  accounting: [
-    'CCH', 'CCH Axcess', 'CCH ProSystem', 'QuickBooks', 'Quickbooks', 'CPA', 'GAAP',
-    'tax preparation', 'tax accounting', 'trust and estate', 'bookkeeping', 'audit',
-    'Sage ERP', 'Sage 100', 'Sage Intacct', 'Sage', 'Xero', 'ProSeries', 'Lacerte',
-    'UltraTax', 'payroll', 'accounts payable', 'accounts receivable', 'financial reporting',
-    'general ledger', 'GL', 'month-end close', 'bank reconciliation', '1099', 'W-2',
-    'Excel', 'pivot tables', 'VLOOKUP'
-  ],
-  hvac: [
-    'EPA 608', 'EPA 609', 'NATE', 'refrigeration', 'HVAC', 'commercial HVAC',
-    'residential HVAC', 'chiller', 'boiler', 'VFD', 'BAS', 'ductwork', 'sheet metal',
-    'controls', 'RTU', 'split system', 'heat pump', 'refrigerant', 'combustion analysis',
-    'preventive maintenance', 'Troubleshooting'
-  ],
-  construction: [
-    'OSHA 30', 'OSHA 10', 'blueprint reading', 'estimating', 'Procore', 'PlanGrid',
-    'heavy equipment', 'commercial construction', 'residential construction',
-    'project superintendent', 'site superintendent', 'framing', 'concrete', 'civil',
-    'sitework', 'grading', 'excavation', 'safety management', 'RFI', 'submittals',
-    'AutoCAD', 'Revit', 'BIM'
-  ],
-  technology: [
-    'JavaScript', 'TypeScript', 'Python', 'Java', 'React', 'Node.js', 'AWS', 'Azure',
-    'GCP', 'SQL', 'PostgreSQL', 'MySQL', 'Kubernetes', 'Docker', 'DevOps', 'CI/CD',
-    '.NET', 'C#', 'Angular', 'Vue', 'REST API', 'GraphQL', 'Linux', 'Git',
-    'machine learning', 'data engineering', 'cybersecurity', 'SOC 2'
-  ],
-  healthcare: [
-    'RN', 'LPN', 'BLS', 'ACLS', 'PALS', 'EHR', 'Epic', 'Cerner', 'Meditech',
-    'med-surg', 'ICU', 'CNA', 'patient care', 'clinical', 'phlebotomy', 'HIPAA',
-    'vital signs', 'EMR', 'home health', 'hospice', 'case management'
-  ],
-  finance: [
-    'Excel', 'financial modeling', 'Bloomberg', 'CFA', 'FP&A', 'audit', 'SOX',
-    'accounts payable', 'accounts receivable', 'SAP', 'Oracle', 'Hyperion',
-    'variance analysis', 'budgeting', 'forecasting', 'P&L', 'balance sheet',
-    'treasury', 'credit analysis', 'KYC', 'AML'
-  ],
-  manufacturing: [
-    'lean manufacturing', 'Six Sigma', '5S', 'Kaizen', 'CNC', 'PLC', 'ISO 9001',
-    'quality control', 'production', 'assembly', 'maintenance', 'TPM', 'GMP',
-    'SPC', 'root cause analysis', 'preventive maintenance', 'blueprint reading',
-    'welding', 'machining', 'injection molding'
-  ],
-  logistics: [
-    'CDL', 'CDL Class A', 'CDL Class B', 'forklift', 'forklift certification',
-    'reach truck', 'cherry picker', 'order picker', 'WMS', 'warehouse management system',
-    'TMS', 'transportation management', 'supply chain', 'inventory management',
-    'order fulfillment', 'shipping', 'receiving', 'pick and pack', 'dispatch',
-    'DOT', 'HAZMAT', 'HAZMAT certification', 'warehouse operations', '3PL',
-    'cross-docking', 'RF scanner', 'barcode scanning', 'load planning',
-    'route planning', 'last mile', 'freight', 'LTL', 'FTL', 'drayage',
-    'SAP TM', 'Manhattan', 'Blue Yonder', 'logistics coordination'
-  ],
-  legal: [
-    'litigation', 'corporate law', 'contracts', 'paralegal', 'e-discovery',
-    'compliance', 'legal research', 'Westlaw', 'LexisNexis', 'case management',
-    'discovery', 'brief writing', 'contract review', 'NDA', 'MSA'
-  ],
-  retail: [
-    'POS', 'point of sale', 'inventory', 'merchandising', 'store management',
-    'loss prevention', 'visual merchandising', 'planogram', 'cash handling',
-    'inventory control', 'shrink reduction', 'retail operations'
-  ],
-  /** Fallback when industry unknown — professional tools only, NOT soft skills */
-  general: [
-    'Microsoft Office', 'Excel', 'Word', 'Outlook', 'PowerPoint', 'Google Workspace',
-    'data entry', 'typing', 'reporting', 'scheduling', 'documentation'
-  ]
-};
 
 const US_STATES = {
   AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
@@ -111,31 +42,71 @@ const US_STATES = {
 };
 
 const INDUSTRY_INFERENCE_RULES = [
-  { key: 'logistics', re: /\b(logistics|warehouse|supply chain|fulfillment|dispatch|freight|WMS|TMS|forklift|CDL|3PL|distribution center)\b/i },
-  { key: 'accounting', re: /\b(accounting|bookkeep|CPA|tax prep|audit|payroll|GL|general ledger|accounts payable)\b/i },
+  { key: 'logistics', re: /\b(logistics|warehouse|supply chain|fulfillment|WMS|TMS|forklift|CDL|3PL|distribution center|pick and pack)\b/i },
+  { key: 'accounting', re: /\b(accounting|bookkeep|CPA|tax prep|audit|payroll|general ledger|accounts payable)\b/i },
+  { key: 'healthcare', re: /\b(RN|LPN|nurse|clinical|patient care|hospital|EHR|Epic|Cerner|medical coding)\b/i },
   { key: 'hvac', re: /\b(HVAC|refrigeration|EPA 608|chiller|boiler|ductwork)\b/i },
   { key: 'construction', re: /\b(construction|superintendent|contractor|framing|concrete|Procore|OSHA 30)\b/i },
   { key: 'technology', re: /\b(software|developer|engineer|JavaScript|Python|React|DevOps|AWS|SQL)\b/i },
-  { key: 'healthcare', re: /\b(RN|LPN|nurse|clinical|patient care|hospital|EHR|Epic|Cerner)\b/i },
-  { key: 'finance', re: /\b(financial modeling|FP&A|investment banking|treasury|Bloomberg|CFA)\b/i },
+  { key: 'staffing', re: /\b(recruiting|talent acquisition|ATS|Bullhorn|staffing|sourcing candidates)\b/i },
+  { key: 'banking', re: /\b(banking|loan origination|teller|core banking|commercial banking)\b/i },
   { key: 'manufacturing', re: /\b(manufacturing|production line|CNC|PLC|Six Sigma|assembly line)\b/i },
   { key: 'legal', re: /\b(paralegal|litigation|attorney|e-discovery|Westlaw|LexisNexis)\b/i },
-  { key: 'retail', re: /\b(retail|store manager|merchandising|POS|cashier)\b/i }
+  { key: 'retail', re: /\b(retail|store manager|merchandising|POS|cashier)\b/i },
+  { key: 'importexport', re: /\b(import compliance|export compliance|customs brokerage|freight forwarding|Incoterms)\b/i },
+  { key: 'automotive', re: /\b(ASE certification|dealership|OBD-II|automotive technician)\b/i },
+  { key: 'education', re: /\b(curriculum development|classroom management|IEP|instructional design)\b/i },
+  { key: 'insurance', re: /\b(underwriting|claims adjuster|Guidewire|actuarial)\b/i }
 ];
 
 function normalizeIndustry(industry) {
   if (!industry) return null;
   const lower = String(industry).toLowerCase();
-  if (/account|tax|bookkeep|cpa|audit/.test(lower)) return 'accounting';
+  if (/account|tax|bookkeep|cpa/.test(lower)) return 'accounting';
+  if (/advertis|public relations|\bpr\b|marketing agency/.test(lower)) return 'advertising';
+  if (/agricultur|farm|crop|agronomy/.test(lower)) return 'agriculture';
+  if (/logistic|warehouse|fulfillment|distribution center|3pl/.test(lower)) return 'logistics';
+  if (/airline|aviation|airport|aircraft|aerospace/.test(lower)) return 'aviation';
+  if (/architect|construct|building material|infra|contractor/.test(lower)) return 'construction';
+  if (/art|photo|journalism/.test(lower) && !/telecom/.test(lower)) return 'creative';
+  if (/automotive|motor vehicle|dealership|auto repair/.test(lower)) return 'automotive';
+  if (/banking|financial services/.test(lower)) return 'banking';
+  if (/biotech|pharmaceutical|pharma|biopharma/.test(lower)) return 'biotech';
+  if (/broadcast|media|printing/.test(lower)) return 'media';
+  if (/chemical|industrial/.test(lower) && !/manufactur/.test(lower)) return 'chemical';
+  if (/computer|software|hardware|tech|it\b|engineer|developer|data/.test(lower)) return 'technology';
+  if (/consult/.test(lower)) return 'consulting';
+  if (/consumer product|retail/.test(lower)) return 'retail';
+  if (/credit|loan|mortgage|collection/.test(lower)) return 'mortgage';
+  if (/defense|military|aerospace/.test(lower)) return 'defense';
+  if (/education|training|library|school|universit/.test(lower)) return 'education';
+  if (/electron|semiconductor/.test(lower)) return 'electronics';
+  if (/employ|recruit|staffing/.test(lower)) return 'staffing';
+  if (/energy|utilities|oil|petroleum|gas/.test(lower)) return 'energy';
+  if (/entertain|recreation|sport|gaming/.test(lower)) return 'entertainment';
+  if (/environ/.test(lower)) return 'environmental';
+  if (/fashion|apparel|textile|cloth/.test(lower)) return 'fashion';
+  if (/food|restaurant|culinary|beverage/.test(lower)) return 'food';
+  if (/funeral|cemetery|mortuary/.test(lower)) return 'funeral';
+  if (/government|civil service|public sector|federal|municipal/.test(lower)) return 'government';
+  if (/health|medical|nurs|clinic|hospital|health service/.test(lower)) return 'healthcare';
+  if (/homebuilding|real estate|property/.test(lower)) return 'realestate';
+  if (/hotel|resort|lodging|hospitality/.test(lower)) return 'hospitality';
   if (/hvac|heating|cooling|refrigerat/.test(lower)) return 'hvac';
-  if (/construct|infra|build|contractor/.test(lower)) return 'construction';
-  if (/tech|software|it\b|engineer|developer|data/.test(lower)) return 'technology';
-  if (/health|medical|nurs|clinic|hospital/.test(lower)) return 'healthcare';
-  if (/financ|bank|capital|invest/.test(lower)) return 'finance';
-  if (/manufact|production|factory/.test(lower)) return 'manufacturing';
-  if (/logistic|transport|warehouse|supply|distribution/.test(lower)) return 'logistics';
-  if (/legal|law\b|attorney|paralegal/.test(lower)) return 'legal';
-  if (/retail|store|merchand/.test(lower)) return 'retail';
+  if (/import|export|customs/.test(lower)) return 'importexport';
+  if (/insurance|managed care/.test(lower)) return 'insurance';
+  if (/internet|ecommerce|e-commerce/.test(lower)) return 'ecommerce';
+  if (/landscap|horticulture|lawn/.test(lower)) return 'landscaping';
+  if (/law enforcement|legal|law\b|attorney|paralegal|security service/.test(lower)) return 'legal';
+  if (/manufactur|factory/.test(lower)) return 'manufacturing';
+  if (/medical equipment|medical device/.test(lower)) return 'medicaldevice';
+  if (/nonprofit|not for profit|social service|ngo/.test(lower)) return 'nonprofit';
+  if (/office suppli|office equipment/.test(lower)) return 'officesupplies';
+  if (/packag/.test(lower)) return 'packaging';
+  if (/sales|marketing/.test(lower)) return 'sales';
+  if (/securit(?:ies)|investment|brokerage|wealth/.test(lower)) return 'securities';
+  if (/telecom|wireless|social media|telecommunicat/.test(lower)) return 'telecom';
+  if (/travel|tourism/.test(lower)) return 'travel';
   return null;
 }
 
@@ -299,7 +270,7 @@ function matchSkills(text, industry) {
   const matches = [];
   const limit = 3;
 
-  const resolvedIndustry = normalizeIndustry(industry) || inferIndustryFromText(text);
+  const resolvedIndustry = normalizeIndustry(industry) || inferIndustryFromText(text) || 'general';
 
   for (const token of extractCommaListedSkills(text)) {
     addSkillMatch(matches, seen, token);
