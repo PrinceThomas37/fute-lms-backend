@@ -6,33 +6,43 @@ const DEFAULT_TEMPLATES = {
   o1_subject: 'Assistance for {{pos}} in {{loc}}',
   o1_body: `Hi {{fn}},
 
-I'm reaching out about your {{pos}} opening in {{loc}}.
-I have a few qualified profiles{{skills_line}} — I'd like to check before sending anything over.
+We are yet to be introduced, but I am {{sender}}, BD Manager at Fute Global LLC.
 
-Are you still open to reviewing external candidates?
-There's no charge to review resumes; we only charge if you hire.
+I came across your job opening for a {{pos}} in {{loc}}. I have gone through the job description, and we have several candidates who are experienced in {{job_resp}} for {{company_service}} projects. They are a good fit for the position. These candidates are open to direct hire and yet to be screened for your current open position.
 
-Thanks & Regards,
-{{sender}}`,
+Would you like to review the resumes?
+
+I look forward to hearing from you.`,
   fu1_subject: 'Re: Assistance for {{pos}} in {{loc}}',
   fu1_body: `Hi {{fn}},
 
-Just checking in on my note about your {{pos}} opening in {{loc}}.
-I still have a few relevant profiles{{skills_line}} if you're reviewing candidates.
+Just following up on my note about your {{pos}} opening in {{loc}}. I still have candidates experienced in {{job_resp}} for {{company_service}} projects who may be a good fit.
 
-No pressure — just let me know if you'd like to see any.
+Would you still like to review their resumes?
 
-Thanks,
-{{sender}}`,
+I look forward to hearing from you.`,
   fu2_subject: 'Re: Assistance for {{pos}} in {{loc}}',
   fu2_body: `Hi {{fn}},
 
-Last quick note on the {{pos}} role in {{loc}}.
-Happy to send profiles when timing works — no charge to review.
+Last quick note on the {{pos}} role in {{loc}}. I still have screened-ready candidates with {{job_resp}} experience on {{company_service}} projects whenever timing works for you.
 
-Thanks,
-{{sender}}`
+Would you like me to share a few resumes?
+
+I look forward to hearing from you.`
 };
+
+function formatJobResp(skills) {
+  const list = (skills || []).filter(Boolean).slice(0, 3);
+  if (!list.length) return 'the key requirements';
+  if (list.length === 1) return list[0];
+  if (list.length === 2) return `${list[0]} and ${list[1]}`;
+  return `${list.slice(0, -1).join(', ')}, and ${list[list.length - 1]}`;
+}
+
+function formatCompanyService(industry) {
+  const val = String(industry || '').trim();
+  return val || 'relevant';
+}
 
 function formatSkillsLine(skills) {
   const list = (skills || []).filter(Boolean).slice(0, 3);
@@ -77,6 +87,8 @@ function buildEmailVars({ job, contact, senderDisplayName }) {
     skill_2: skills[1] || '',
     skill_3: skills[2] || '',
     skills_line: formatSkillsLine(skills),
+    job_resp: formatJobResp(skills),
+    company_service: formatCompanyService(job?.company?.industry || job?.industry || ''),
     salary_range: salaryDisplay,
     salary_line: salaryLine,
     local_line: localLine,
@@ -84,11 +96,12 @@ function buildEmailVars({ job, contact, senderDisplayName }) {
   };
 }
 
-/** Fingerprints of pre-Daniel Fute Global outreach templates saved in app_settings. */
+/** Fingerprints of outdated outreach templates saved in app_settings. */
 const LEGACY_TEMPLATE_MARKERS = [
-  /I came across/i,
+  /I'd like to check before sending/i,
+  /I'm reaching out about your {{pos}} opening/i,
+  /There's no charge to review resumes/i,
   /At Fute Global/i,
-  /Fute Global LLC/i,
   /specializ(e|ing) in connecting/i,
   /15-?\s*minute call/i,
   /Opportunity regarding/i,
@@ -113,6 +126,8 @@ module.exports = {
   buildEmailVars,
   fillTemplate,
   formatSkillsLine,
+  formatJobResp,
+  formatCompanyService,
   isLegacyTemplate,
   resolveTemplate
 };
