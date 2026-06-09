@@ -551,7 +551,8 @@ var STATE = {
   raForm: {
     coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',
     position:'',jobUrl:'',jobCreatedDate:'',salaryRange:'',source:'',editJobId:null,
-    contacts:[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}]
+    contacts:[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}],
+    research:{jd_raw:'',company:{expertise:'',notes:'',headcount:'',hiring_volume:''},outreach:{angle:'',avoid:''},requirements:{skill_1:'',skill_2:'',salary_min:null,salary_max:null,salary_period:'year',salary_display:'',location:'',local_hint:'',travel:''},contacts:[]}
   },
   raFormCoSuggestions:[],
   raFormZipSuggestions:[],
@@ -4726,10 +4727,72 @@ window.doImportProcess=function(toProcess,dupEmailMap){
 // ════════════════════════════════════════════════
 // RA LEAD ENTRY FORM — Drop P
 // ════════════════════════════════════════════════
+function defaultRaFormResearch(){
+  return{jd_raw:'',company:{expertise:'',notes:'',headcount:'',hiring_volume:''},outreach:{angle:'',avoid:''},requirements:{skill_1:'',skill_2:'',salary_min:null,salary_max:null,salary_period:'year',salary_display:'',location:'',local_hint:'',travel:''},contacts:[]};
+}
+function raFormEnsureResearch(){
+  if(!STATE.raForm.research)STATE.raForm.research=defaultRaFormResearch();
+  if(!STATE.raForm.research.company)STATE.raForm.research.company={};
+  if(!STATE.raForm.research.outreach)STATE.raForm.research.outreach={};
+  if(!STATE.raForm.research.requirements)STATE.raForm.research.requirements={};
+  if(!STATE.raForm.research.contacts)STATE.raForm.research.contacts=[];
+  return STATE.raForm.research;
+}
+function buildRaFormResearchPayload(){
+  var r=raFormEnsureResearch();
+  var req=Object.assign({},r.requirements||{});
+  syncResearchSkillsArray(req);
+  if(req.salary_min!=null&&req.salary_max!=null){
+    req.salary_display=req.salary_display||buildSalaryDisplay(req.salary_min,req.salary_max,req.salary_period||'year');
+    req.salary_range=req.salary_display;
+  }
+  var hasReq=req.skill_1||req.skill_2||req.salary_display||req.location||req.local_hint||req.travel;
+  var hasCo=r.company.expertise||r.company.notes||r.company.headcount||r.company.hiring_volume;
+  var hasOut=r.outreach.angle||r.outreach.avoid;
+  var hasContacts=(r.contacts||[]).some(function(c){return c.seniority||c.decision_maker||c.best_time||c.notes;});
+  if(!r.jd_raw&&!hasReq&&!hasCo&&!hasOut&&!hasContacts)return null;
+  return{jd_raw:r.jd_raw||null,company:Object.assign({},r.company),outreach:Object.assign({},r.outreach),requirements:req,contacts:(r.contacts||[]).slice()};
+}
+function renderRaFormSalaryRange(req){
+  return renderSalaryRangeControl('ra-form',req,'raForm');
+}
+function renderRaFormContactIntel(f){
+  var r=raFormEnsureResearch();
+  return f.contacts.map(function(c,idx){
+    var ci=(r.contacts[idx])||{};
+    var cName=htmlEsc(((c.firstName||'')+' '+(c.lastName||'')).trim())||('Contact '+(idx+1));
+    var senOpts=['','Junior','Mid','Senior','Director','VP','C-Level'].map(function(v){
+      return '<option value="'+v+'"'+(ci.seniority===v?' selected':'')+'>'+(v||'— Select —')+'</option>';
+    }).join('');
+    var dmOpts=['','Yes','No','Unknown'].map(function(v){
+      return '<option value="'+v+'"'+(ci.decision_maker===v?' selected':'')+'>'+(v||'— Select —')+'</option>';
+    }).join('');
+    var timeOpts=['','Morning','Afternoon','Evening'].map(function(v){
+      return '<option value="'+v+'"'+(ci.best_time===v?' selected':'')+'>'+(v||'— Select —')+'</option>';
+    }).join('');
+    return '<div style="padding:10px 0;border-bottom:1px solid var(--border)">'+
+      '<div style="font-weight:500;font-size:12px;margin-bottom:8px;color:var(--text2)">'+cName+'</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:6px">'+
+        '<div><label style="font-size:10px;color:var(--text3)">Seniority</label><select class="sel" style="font-size:12px;padding:5px 8px" onchange="raFormUpdateContactIntel('+idx+',\'seniority\',this.value)">'+senOpts+'</select></div>'+
+        '<div><label style="font-size:10px;color:var(--text3)">Decision maker?</label><select class="sel" style="font-size:12px;padding:5px 8px" onchange="raFormUpdateContactIntel('+idx+',\'decision_maker\',this.value)">'+dmOpts+'</select></div>'+
+        '<div><label style="font-size:10px;color:var(--text3)">Best time</label><select class="sel" style="font-size:12px;padding:5px 8px" onchange="raFormUpdateContactIntel('+idx+',\'best_time\',this.value)">'+timeOpts+'</select></div>'+
+      '</div>'+
+      '<input class="inp" style="font-size:12px" placeholder="Notes about this contact..." value="'+htmlEsc(ci.notes||'')+'" oninput="raFormUpdateContactIntel('+idx+',\'notes\',this.value)"/>'+
+    '</div>';
+  }).join('');
+}
 function renderRALeadForm(){
   var f=STATE.raForm;
   var isEditing=!!f.editJobId;
+  var r=raFormEnsureResearch();
+  var req=r.requirements||{};
   var indOpts=buildIndustrySelectOptions(f.industry||'');
+  var headcountOpts=['','1-10','11-50','51-200','201-500','500+'].map(function(v){
+    return '<option value="'+v+'"'+(r.company.headcount===v?' selected':'')+'>'+(v||'— Select —')+'</option>';
+  }).join('');
+  var hiringOpts=['','Low','Medium','High'].map(function(v){
+    return '<option value="'+v+'"'+(r.company.hiring_volume===v?' selected':'')+'>'+(v||'— Select —')+'</option>';
+  }).join('');
 
   // Company info banner
   var coBanner='';
@@ -4822,10 +4885,11 @@ function renderRALeadForm(){
         '<div style="font-size:11px;color:var(--text3);margin-top:3px">Type zip to auto-fill location</div>'+
       '</div>'+
     '</div>'+
-    '<div style="margin-bottom:16px">'+
+    '<div style="margin-bottom:10px">'+
       '<input class="inp" id="ra-location" placeholder="Location (City, State) *" value="'+htmlEsc(f.location||'')+'" oninput="raFormSet(\'location\',this.value)" style="border-color:'+(f.location?'var(--border)':'')+'"/>'+
       (!f.location?'<div style="font-size:11px;color:var(--red);margin-top:3px">Location is required</div>':'')+
     '</div>'+
+    '<div class="fgrp mb4"><label class="flbl">Company expertise</label><input class="inp" placeholder="e.g. Healthcare staffing, ERP implementations..." value="'+htmlEsc(r.company.expertise||'')+'" oninput="raFormUpdateResearch(\'company\',\'expertise\',this.value)"/></div>'+
 
     // ── Job ──
     '<div style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Job Details</div>'+
@@ -4833,8 +4897,7 @@ function renderRALeadForm(){
       '<input class="inp" placeholder="Job title *" value="'+htmlEsc(f.position||'')+'" oninput="raFormSet(\'position\',this.value)"/>'+
       '<input class="inp" placeholder="Job URL" value="'+htmlEsc(f.jobUrl||'')+'" oninput="raFormSet(\'jobUrl\',this.value)"/>'+
     '</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
-      '<input class="inp" placeholder="Salary range (e.g. $80,000)" value="'+htmlEsc(f.salaryRange||'')+'" oninput="raFormSet(\'salaryRange\',this.value)"/>'+
+    '<div style="margin-bottom:10px">'+
       '<input class="inp" placeholder="Source (LinkedIn, Indeed...)" value="'+htmlEsc(f.source||'')+'" oninput="raFormSet(\'source\',this.value)"/>'+
     '</div>'+
     '<div style="margin-bottom:16px;max-width:280px">'+
@@ -4848,6 +4911,43 @@ function renderRALeadForm(){
     contactRows+
     '<button onclick="raFormAddContact()" style="background:transparent;border:1.5px dashed var(--border2);color:var(--text3);padding:8px 16px;border-radius:8px;font-size:12px;cursor:pointer;width:100%;margin-bottom:16px">+ Add another contact</button>'+
 
+    // ── Job Description (requirements) ──
+    '<div style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Job Description</div>'+
+    '<div class="fgrp mb2"><label class="flbl">Paste job description</label>'+
+      '<textarea class="txta w100" style="min-height:120px;font-size:12px" id="ra-jd-raw" placeholder="Paste the full JD here, then click Extract..." oninput="raFormUpdateResearch(\'jd_raw\',\'__root__\',this.value)">'+htmlEsc(r.jd_raw||'')+'</textarea>'+
+    '</div>'+
+    '<div style="margin-bottom:12px">'+
+      '<button type="button" class="btn btn-outline btn-sm" onclick="raFormParseJD()">Extract requirements</button>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
+      '<div class="fgrp"><label class="flbl">Skill 1</label><input class="inp" style="font-size:12px" placeholder="Primary skill from JD" value="'+htmlEsc(req.skill_1||'')+'" oninput="raFormUpdateRequirements(\'skill_1\',this.value)"/></div>'+
+      '<div class="fgrp"><label class="flbl">Skill 2</label><input class="inp" style="font-size:12px" placeholder="Secondary skill" value="'+htmlEsc(req.skill_2||'')+'" oninput="raFormUpdateRequirements(\'skill_2\',this.value)"/></div>'+
+      renderRaFormSalaryRange(req)+
+      '<div class="fgrp"><label class="flbl">Location</label><input class="inp" style="font-size:12px" placeholder="" value="'+htmlEsc(req.location||'')+'" oninput="raFormUpdateRequirements(\'location\',this.value)"/></div>'+
+      '<div class="fgrp"><label class="flbl">City / local hint</label><input class="inp" style="font-size:12px" placeholder="" value="'+htmlEsc(req.local_hint||'')+'" oninput="raFormUpdateRequirements(\'local_hint\',this.value)"/></div>'+
+      '<div class="fgrp"><label class="flbl">Travel</label><select class="sel" style="font-size:12px" onchange="raFormUpdateRequirements(\'travel\',this.value)">'+
+        ['','none','25%','required'].map(function(v){
+          var labels={'':'— Select —','none':'None','25%':'25%','required':'Required'};
+          return '<option value="'+v+'"'+(req.travel===v?' selected':'')+'>'+labels[v]+'</option>';
+        }).join('')+
+      '</select></div>'+
+    '</div>'+
+
+    // ── Contact Intel ──
+    '<div style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 10px">Contact Intel</div>'+
+    renderRaFormContactIntel(f)+
+
+    // ── Company Research ──
+    '<div style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 10px">Company Research</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
+      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Headcount</label><select class="sel" style="font-size:12px" onchange="raFormUpdateResearch(\'company\',\'headcount\',this.value)">'+headcountOpts+'</select></div>'+
+      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Hiring volume</label><select class="sel" style="font-size:12px" onchange="raFormUpdateResearch(\'company\',\'hiring_volume\',this.value)">'+hiringOpts+'</select></div>'+
+    '</div>'+
+    '<div class="fgrp mb2"><label class="flbl">Company notes / recent news</label><textarea class="txta w100" style="min-height:60px;font-size:12px" placeholder="Any relevant company news, context..." oninput="raFormUpdateResearch(\'company\',\'notes\',this.value)">'+htmlEsc(r.company.notes||'')+'</textarea></div>'+
+    '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 10px">Outreach Notes</div>'+
+    '<div class="fgrp mb2"><label class="flbl">Recommended angle</label><input class="inp" style="font-size:12px" placeholder="What angle to use in outreach..." value="'+htmlEsc(r.outreach.angle||'')+'" oninput="raFormUpdateResearch(\'outreach\',\'angle\',this.value)"/></div>'+
+    '<div class="fgrp mb4"><label class="flbl">What to avoid</label><input class="inp" style="font-size:12px" placeholder="Topics or approaches to avoid..." value="'+htmlEsc(r.outreach.avoid||'')+'" oninput="raFormUpdateResearch(\'outreach\',\'avoid\',this.value)"/></div>'+
+
     // ── Actions ──
     '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;border-top:1px solid var(--border)">'+
       '<button onclick="raFormClear()" style="background:transparent;border:1px solid var(--border);color:var(--text3);padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer">'+(isEditing?'Cancel edit':'Clear form')+'</button>'+
@@ -4857,6 +4957,86 @@ function renderRALeadForm(){
 }
 
 // ── RA Form actions ──────────────────────────────
+window.raFormUpdateResearch=function(section,field,val){
+  var r=raFormEnsureResearch();
+  if(section==='jd_raw'&&field==='__root__'){r.jd_raw=val;return;}
+  if(!r[section])r[section]={};
+  r[section][field]=val;
+};
+window.raFormUpdateRequirements=function(field,val){
+  var r=raFormEnsureResearch();
+  if(!r.requirements)r.requirements={};
+  r.requirements[field]=val;
+  if(field==='skill_1'||field==='skill_2')syncResearchSkillsArray(r.requirements);
+};
+window.raFormUpdateContactIntel=function(idx,field,val){
+  var r=raFormEnsureResearch();
+  while(r.contacts.length<=idx)r.contacts.push({});
+  r.contacts[idx][field]=val;
+};
+function raFormRefreshSalaryUi(){
+  var r=raFormEnsureResearch();
+  var req=r.requirements||{};
+  var st=getSalaryReqState(req);
+  var displayEl=document.getElementById('salary-display-ra-form');
+  var fillEl=document.getElementById('salary-fill-ra-form');
+  var minEl=document.getElementById('salary-min-ra-form');
+  var maxEl=document.getElementById('salary-max-ra-form');
+  if(displayEl)displayEl.textContent=req.salary_display||buildSalaryDisplay(st.min,st.max,st.period);
+  if(fillEl){
+    var leftPct=((st.min-st.cfg.min)/(st.cfg.max-st.cfg.min))*100;
+    var widthPct=((st.max-st.min)/(st.cfg.max-st.cfg.min))*100;
+    fillEl.style.left=leftPct+'%';
+    fillEl.style.width=widthPct+'%';
+  }
+  if(minEl){minEl.min=st.cfg.min;minEl.max=st.cfg.max;minEl.step=st.cfg.step;minEl.value=st.min;}
+  if(maxEl){maxEl.min=st.cfg.min;maxEl.max=st.cfg.max;maxEl.step=st.cfg.step;maxEl.value=st.max;}
+}
+window.raFormUpdateSalaryRange=function(which,val){
+  var r=raFormEnsureResearch();
+  if(!r.requirements)r.requirements={};
+  var req=r.requirements;
+  var st=getSalaryReqState(req);
+  var num=Number(val);
+  if(which==='min')req.salary_min=Math.min(num,st.max);
+  else req.salary_max=Math.max(num,st.min);
+  req.salary_display=buildSalaryDisplay(req.salary_min,req.salary_max,req.salary_period||st.period);
+  req.salary_range=req.salary_display;
+  raFormRefreshSalaryUi();
+};
+window.raFormUpdateSalaryPeriod=function(period){
+  var r=raFormEnsureResearch();
+  if(!r.requirements)r.requirements={};
+  var req=r.requirements;
+  req.salary_period=period;
+  var st=getSalaryReqState(req);
+  req.salary_min=st.min;
+  req.salary_max=st.max;
+  req.salary_display=buildSalaryDisplay(st.min,st.max,period);
+  req.salary_range=req.salary_display;
+  render();
+};
+window.raFormParseJD=function(){
+  var r=raFormEnsureResearch();
+  var jdEl=document.getElementById('ra-jd-raw');
+  var jdText=jdEl?jdEl.value:(r.jd_raw||'');
+  if(!jdText||!jdText.trim()){showToast('Paste a job description first','warning');return;}
+  apiPost('/parse-jd',{jd_text:jdText,industry:STATE.raForm.industry||''}).then(function(parsed){
+    r.jd_raw=jdText;
+    r.requirements=Object.assign({},r.requirements||{},parsed);
+    var skills=parsed.skills||[];
+    if(skills[0])r.requirements.skill_1=skills[0];
+    if(skills[1])r.requirements.skill_2=skills[1];
+    syncResearchSkillsArray(r.requirements);
+    if(parsed.travel&&!['none','25%','required'].includes(parsed.travel)){
+      r.requirements.travel=parsed.travel.indexOf('25')>-1?'25%':'required';
+    }
+    if(parsed.salary_display)STATE.raForm.salaryRange=parsed.salary_display;
+    var n=skills.length;
+    showToast(n?'Extracted '+n+' skill'+(n!==1?'s':'')+' — review before submit':'Extracted — review fields before submit','success');
+    render();
+  }).catch(function(e){showToast('Extract failed: '+e.message,'error');});
+};
 window.raFormSet=function(field,val){
   STATE.raForm[field]=val;
 };
@@ -4878,6 +5058,7 @@ window.raFormEdit=function(jobId){
   var cs=STATE.contacts.filter(function(c){return c.job_id===jobId;})
     .sort(function(a,b){return (b.is_primary?1:0)-(a.is_primary?1:0);});
   var co=STATE.companies.find(function(c){return c.id===j.company_id;})||{};
+  var savedResearch=parseResearchObject(j.research)||defaultRaFormResearch();
   STATE.raForm={
     editJobId:jobId,
     coName:j.company_name||'',coId:j.company_id,coInfo:null,
@@ -4889,7 +5070,8 @@ window.raFormEdit=function(jobId){
     contacts:cs.length?cs.map(function(c){
       return{firstName:c.first_name,lastName:c.last_name,designation:c.designation,
              email:c.email,phone:c.phone,linkedin:c.linkedin,emailStatus:'',emailDupInfo:null};
-    }):[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}]
+    }):[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}],
+    research:JSON.parse(JSON.stringify(savedResearch))
   };
   STATE.raFormCoSuggestions=[];
   STATE.raFormZipSuggestions=[];
@@ -5000,16 +5182,19 @@ window.raFormUpdateContact=function(idx,field,val){
 
 window.raFormAddContact=function(){
   STATE.raForm.contacts.push({firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null});
+  raFormEnsureResearch().contacts.push({});
   render();
 };
 
 window.raFormRemoveContact=function(idx){
   STATE.raForm.contacts.splice(idx,1);
+  var r=raFormEnsureResearch();
+  if(r.contacts)r.contacts.splice(idx,1);
   render();
 };
 
 window.raFormClear=function(){
-  STATE.raForm={coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',position:'',jobUrl:'',jobCreatedDate:'',salaryRange:'',source:'',editJobId:null,contacts:[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}]};
+  STATE.raForm={coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',position:'',jobUrl:'',jobCreatedDate:'',salaryRange:'',source:'',editJobId:null,contacts:[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}],research:defaultRaFormResearch()};
   STATE.raFormCoSuggestions=[];
   STATE.raFormZipSuggestions=[];
   render();
@@ -5031,6 +5216,8 @@ window.raFormSubmit=function(){
 
   function doSave(coId){
     var hasDup=validContacts.some(function(c){return c.emailDupInfo&&c.emailDupInfo.duplicate;});
+    var researchPayload=buildRaFormResearchPayload();
+    var salaryFromReq=researchPayload&&researchPayload.requirements&&researchPayload.requirements.salary_display;
     var payload={
       company_id:coId,
       position:f.position,
@@ -5038,10 +5225,11 @@ window.raFormSubmit=function(){
       source:f.source||'Manual',
       location:f.location||undefined,
       industry:f.industry||undefined,
-      salary_range:f.salaryRange||undefined,
+      salary_range:salaryFromReq||f.salaryRange||undefined,
       job_created_date:f.jobCreatedDate||undefined,
       job_url:f.jobUrl||undefined,
       is_duplicate:hasDup,
+      research:researchPayload||undefined,
       contacts:validContacts.map(function(c){
         return{first_name:c.firstName,last_name:c.lastName,designation:c.designation,email:c.email,phone:c.phone,linkedin:c.linkedin};
       })
@@ -5828,7 +6016,8 @@ function syncResearchSkillsArray(req){
   var list=[req.skill_1,req.skill_2].map(function(s){return String(s||'').trim();}).filter(Boolean);
   req.skills=list.slice(0,2);
 }
-function renderSalaryRangeControl(jobId,req){
+function renderSalaryRangeControl(idPrefix,req,handlerMode){
+  handlerMode=handlerMode||'research';
   var st=getSalaryReqState(req);
   var display=req.salary_display||buildSalaryDisplay(st.min,st.max,st.period);
   var periodOpts=['year','week','hour'].map(function(p){
@@ -5837,16 +6026,19 @@ function renderSalaryRangeControl(jobId,req){
   }).join('');
   var leftPct=((st.min-st.cfg.min)/(st.cfg.max-st.cfg.min))*100;
   var widthPct=((st.max-st.min)/(st.cfg.max-st.cfg.min))*100;
+  var onPeriod=handlerMode==='raForm'?'raFormUpdateSalaryPeriod(this.value)':'researchUpdateSalaryPeriod(\''+idPrefix+'\',this.value)';
+  var onMin=handlerMode==='raForm'?'raFormUpdateSalaryRange(\'min\',this.value)':'researchUpdateSalaryRange(\''+idPrefix+'\',\'min\',this.value)';
+  var onMax=handlerMode==='raForm'?'raFormUpdateSalaryRange(\'max\',this.value)':'researchUpdateSalaryRange(\''+idPrefix+'\',\'max\',this.value)';
   return '<div class="salary-range-wrap" style="grid-column:1/-1">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">'+
       '<label class="flbl" style="margin:0">Salary range</label>'+
-      '<select class="sel" style="font-size:12px;max-width:160px" onchange="researchUpdateSalaryPeriod(\''+jobId+'\',this.value)">'+periodOpts+'</select>'+
+      '<select class="sel" style="font-size:12px;max-width:160px" onchange="'+onPeriod+'">'+periodOpts+'</select>'+
     '</div>'+
-    '<div id="salary-display-'+jobId+'" style="font-size:15px;font-weight:600;color:var(--accent);margin-top:6px">'+htmlEsc(display)+'</div>'+
-    '<div class="salary-range-track" id="salary-track-'+jobId+'">'+
-      '<div class="salary-range-fill" id="salary-fill-'+jobId+'" style="left:'+leftPct+'%;width:'+widthPct+'%"></div>'+
-      '<input type="range" id="salary-min-'+jobId+'" min="'+st.cfg.min+'" max="'+st.cfg.max+'" step="'+st.cfg.step+'" value="'+st.min+'" oninput="researchUpdateSalaryRange(\''+jobId+'\',\'min\',this.value)"/>'+
-      '<input type="range" id="salary-max-'+jobId+'" min="'+st.cfg.min+'" max="'+st.cfg.max+'" step="'+st.cfg.step+'" value="'+st.max+'" oninput="researchUpdateSalaryRange(\''+jobId+'\',\'max\',this.value)"/>'+
+    '<div id="salary-display-'+idPrefix+'" style="font-size:15px;font-weight:600;color:var(--accent);margin-top:6px">'+htmlEsc(display)+'</div>'+
+    '<div class="salary-range-track" id="salary-track-'+idPrefix+'">'+
+      '<div class="salary-range-fill" id="salary-fill-'+idPrefix+'" style="left:'+leftPct+'%;width:'+widthPct+'%"></div>'+
+      '<input type="range" id="salary-min-'+idPrefix+'" min="'+st.cfg.min+'" max="'+st.cfg.max+'" step="'+st.cfg.step+'" value="'+st.min+'" oninput="'+onMin+'"/>'+
+      '<input type="range" id="salary-max-'+idPrefix+'" min="'+st.cfg.min+'" max="'+st.cfg.max+'" step="'+st.cfg.step+'" value="'+st.max+'" oninput="'+onMax+'"/>'+
     '</div>'+
     '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3)">'+
       '<span>'+formatSalaryMoney(st.cfg.min,st.period)+'</span>'+
@@ -5929,17 +6121,21 @@ function renderResearchSection(j, canEdit){
             (req.travel?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">Travel: '+htmlEsc(req.travel)+'</span>':'')+
           '</div>'+
         '</div>':'')+
-      (company.headcount||company.hiring_volume||company.expertise||company.notes?
+      (company.expertise?
         '<div style="margin-bottom:10px">'+
-          '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Company</div>'+
+          '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Company expertise</div>'+
+          '<div style="font-size:12px;color:var(--text2)">'+htmlEsc(company.expertise)+'</div>'+
+        '</div>':'')+
+      (contactIntel?'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Contact Intel</div>'+contactIntel+'</div>':'')+
+      (company.headcount||company.hiring_volume||company.notes?
+        '<div style="margin-bottom:10px">'+
+          '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Company Research</div>'+
           '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--text2)">'+
             (company.headcount?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">'+htmlEsc(company.headcount)+' employees</span>':'')+
             (company.hiring_volume?'<span style="background:var(--green-l);color:var(--green);padding:2px 8px;border-radius:6px">Hiring: '+htmlEsc(company.hiring_volume)+'</span>':'')+
-            (company.expertise?'<span style="background:var(--accent-l);color:var(--accent);padding:2px 8px;border-radius:6px">'+htmlEsc(company.expertise)+'</span>':'')+
           '</div>'+
           (company.notes?'<div style="font-size:12px;color:var(--text2);margin-top:6px;padding:8px;background:var(--card);border-radius:var(--r)">'+htmlEsc(company.notes)+'</div>':'')+
         '</div>':'')+
-      (contactIntel?'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Contacts</div>'+contactIntel+'</div>':'')+
       (outreach.angle||outreach.avoid?
         '<div>'+
           '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Outreach notes</div>'+
@@ -5949,43 +6145,21 @@ function renderResearchSection(j, canEdit){
     '</div>';
   }
 
-  // RA editable view
+  // RA editable view — JD/requirements live on lead form; here: contact intel + company research only
   return '<div style="border-top:2px solid var(--border2);margin-top:18px;padding-top:16px">'+
     '<div style="font-weight:700;font-size:13px;margin-bottom:14px">\ud83d\udd2c Research Notes</div>'+
-
-    '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Company Intel</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
-      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Headcount</label><select class="sel" style="font-size:12px" id="res-headcount" onchange="researchUpdate(\''+j.id+'\',\'company\',\'headcount\',this.value)">'+headcountOpts+'</select></div>'+
-      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Hiring volume</label><select class="sel" style="font-size:12px" id="res-hiring" onchange="researchUpdate(\''+j.id+'\',\'company\',\'hiring_volume\',this.value)">'+hiringOpts+'</select></div>'+
-    '</div>'+
-    '<div class="fgrp mb2"><label class="flbl">Company expertise</label><input class="inp" style="font-size:12px" id="res-expertise" placeholder="e.g. Healthcare staffing, ERP implementations..." value="'+htmlEsc(company.expertise||'')+'" oninput="researchUpdate(\''+j.id+'\',\'company\',\'expertise\',this.value)"/></div>'+
-    '<div class="fgrp mb4"><label class="flbl">Company notes / recent news</label><textarea class="txta w100" style="min-height:60px;font-size:12px" id="res-notes" oninput="researchUpdate(\''+j.id+'\',\'company\',\'notes\',this.value)" placeholder="Any relevant company news, context...">'+htmlEsc(company.notes||'')+'</textarea></div>'+
+    '<div style="font-size:12px;color:var(--text3);margin-bottom:14px">Job description and requirements are edited on the lead form. Use this section for contact intel and company research.</div>'+
 
     (cs.length?
       '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Contact Intel</div>'+
       contactIntel:'') +
 
-    '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 10px">Job Description</div>'+
-    '<div class="fgrp mb2"><label class="flbl">Paste job description</label>'+
-      '<textarea class="txta w100" style="min-height:120px;font-size:12px" id="res-jd-raw" placeholder="Paste the full JD here, then click Extract..." oninput="researchUpdate(\''+j.id+'\',\'jd_raw\',\'__root__\',this.value)">'+htmlEsc(jdRaw)+'</textarea>'+
-    '</div>'+
-    '<div style="margin-bottom:12px">'+
-      '<button type="button" class="btn btn-outline btn-sm" onclick="parseJobDescription(\''+j.id+'\')">Extract requirements</button>'+
-    '</div>'+
+    '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 10px">Company Research</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
-      '<div class="fgrp"><label class="flbl">Skill 1</label><input class="inp" style="font-size:12px" id="res-skill1" placeholder="Primary skill from JD" value="'+htmlEsc(req.skill_1||(req.skills&&req.skills[0])||'')+'" oninput="researchUpdateRequirements(\''+j.id+'\',\'skill_1\',this.value)"/></div>'+
-      '<div class="fgrp"><label class="flbl">Skill 2</label><input class="inp" style="font-size:12px" id="res-skill2" placeholder="Secondary skill" value="'+htmlEsc(req.skill_2||(req.skills&&req.skills[1])||'')+'" oninput="researchUpdateRequirements(\''+j.id+'\',\'skill_2\',this.value)"/></div>'+
-      renderSalaryRangeControl(j.id,req)+
-      '<div class="fgrp"><label class="flbl">Location</label><input class="inp" style="font-size:12px" id="res-req-loc" placeholder="" value="'+htmlEsc(req.location||'')+'" oninput="researchUpdate(\''+j.id+'\',\'requirements\',\'location\',this.value)"/></div>'+
-      '<div class="fgrp"><label class="flbl">City / local hint</label><input class="inp" style="font-size:12px" id="res-local" placeholder="" value="'+htmlEsc(req.local_hint||req.city||'')+'" oninput="researchUpdate(\''+j.id+'\',\'requirements\',\'local_hint\',this.value);researchUpdate(\''+j.id+'\',\'requirements\',\'city\',this.value)"/></div>'+
-      '<div class="fgrp"><label class="flbl">Travel</label><select class="sel" style="font-size:12px" id="res-travel" onchange="researchUpdate(\''+j.id+'\',\'requirements\',\'travel\',this.value)">'+
-        ['','none','25%','required'].map(function(v){
-          var labels={'':'— Select —','none':'None','25%':'25%','required':'Required'};
-          return '<option value="'+v+'"'+(req.travel===v?' selected':'')+'>'+labels[v]+'</option>';
-        }).join('')+
-      '</select></div>'+
+      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Headcount</label><select class="sel" style="font-size:12px" id="res-headcount" onchange="researchUpdate(\''+j.id+'\',\'company\',\'headcount\',this.value)">'+headcountOpts+'</select></div>'+
+      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Hiring volume</label><select class="sel" style="font-size:12px" id="res-hiring" onchange="researchUpdate(\''+j.id+'\',\'company\',\'hiring_volume\',this.value)">'+hiringOpts+'</select></div>'+
     '</div>'+
-
+    '<div class="fgrp mb2"><label class="flbl">Company notes / recent news</label><textarea class="txta w100" style="min-height:60px;font-size:12px" id="res-notes" oninput="researchUpdate(\''+j.id+'\',\'company\',\'notes\',this.value)" placeholder="Any relevant company news, context...">'+htmlEsc(company.notes||'')+'</textarea></div>'+
     '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 10px">Outreach Notes</div>'+
     '<div class="fgrp mb2"><label class="flbl">Recommended angle</label><input class="inp" style="font-size:12px" placeholder="What angle to use in outreach..." value="'+htmlEsc(outreach.angle||'')+'" oninput="researchUpdate(\''+j.id+'\',\'outreach\',\'angle\',this.value)"/></div>'+
     '<div class="fgrp mb3"><label class="flbl">What to avoid</label><input class="inp" style="font-size:12px" placeholder="Topics or approaches to avoid..." value="'+htmlEsc(outreach.avoid||'')+'" oninput="researchUpdate(\''+j.id+'\',\'outreach\',\'avoid\',this.value)"/></div>'+
