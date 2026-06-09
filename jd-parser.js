@@ -1,50 +1,98 @@
 /**
  * Non-AI job description parser — regex + industry skill dictionaries.
+ *
+ * Skill extraction order:
+ * 1. Requirements / qualification lines from the JD (highest priority)
+ * 2. Industry dictionary (from form industry or inferred from JD text)
+ * 3. Shared tools (SAP, Excel, Sage ERP, etc.)
+ * 4. Soft skills (communication, leadership, …) — only if nothing technical found
  */
+
+const SOFT_SKILLS = new Set([
+  'communication', 'communication skills', 'leadership', 'customer service',
+  'time management', 'teamwork', 'problem solving', 'attention to detail',
+  'interpersonal skills', 'organizational skills', 'multitasking', 'work ethic',
+  'verbal communication', 'written communication'
+]);
+
+/** Cross-industry tools — matched after industry dict, before soft skills */
+const SHARED_TOOLS = [
+  'Microsoft Office', 'Microsoft Excel', 'Microsoft Word', 'Microsoft Outlook',
+  'Excel', 'Word', 'Outlook', 'PowerPoint', 'Google Workspace', 'Google Sheets',
+  'SAP', 'SAP ERP', 'Oracle', 'Oracle ERP', 'Salesforce', 'Workday', 'ServiceNow',
+  'SharePoint', 'NetSuite', 'QuickBooks', 'Sage ERP', 'Sage 100', 'Sage Intacct',
+  'Sage', 'Xero', 'Slack', 'Teams', 'Zoom'
+];
 
 const SKILL_DICTIONARIES = {
   accounting: [
-    'CCH', 'QuickBooks', 'Quickbooks', 'CPA', 'GAAP', 'tax preparation', 'trust and estate',
-    'bookkeeping', 'audit', 'Sage', 'Xero', 'ProSeries', 'Lacerte', 'UltraTax', 'payroll',
-    'accounts payable', 'accounts receivable', 'financial reporting', 'Excel'
+    'CCH', 'CCH Axcess', 'CCH ProSystem', 'QuickBooks', 'Quickbooks', 'CPA', 'GAAP',
+    'tax preparation', 'tax accounting', 'trust and estate', 'bookkeeping', 'audit',
+    'Sage ERP', 'Sage 100', 'Sage Intacct', 'Sage', 'Xero', 'ProSeries', 'Lacerte',
+    'UltraTax', 'payroll', 'accounts payable', 'accounts receivable', 'financial reporting',
+    'general ledger', 'GL', 'month-end close', 'bank reconciliation', '1099', 'W-2',
+    'Excel', 'pivot tables', 'VLOOKUP'
   ],
   hvac: [
-    'EPA 608', 'NATE', 'refrigeration', 'HVAC', 'commercial HVAC', 'residential HVAC',
-    'chiller', 'boiler', 'VFD', 'BAS', 'ductwork', 'sheet metal', 'controls'
+    'EPA 608', 'EPA 609', 'NATE', 'refrigeration', 'HVAC', 'commercial HVAC',
+    'residential HVAC', 'chiller', 'boiler', 'VFD', 'BAS', 'ductwork', 'sheet metal',
+    'controls', 'RTU', 'split system', 'heat pump', 'refrigerant', 'combustion analysis',
+    'preventive maintenance', 'Troubleshooting'
   ],
   construction: [
-    'OSHA 30', 'OSHA 10', 'blueprint reading', 'estimating', 'Procore', 'heavy equipment',
-    'commercial construction', 'residential construction', 'project superintendent',
-    'site superintendent', 'framing', 'concrete', 'civil'
+    'OSHA 30', 'OSHA 10', 'blueprint reading', 'estimating', 'Procore', 'PlanGrid',
+    'heavy equipment', 'commercial construction', 'residential construction',
+    'project superintendent', 'site superintendent', 'framing', 'concrete', 'civil',
+    'sitework', 'grading', 'excavation', 'safety management', 'RFI', 'submittals',
+    'AutoCAD', 'Revit', 'BIM'
   ],
   technology: [
-    'JavaScript', 'Python', 'Java', 'React', 'Node.js', 'AWS', 'Azure', 'SQL', 'Kubernetes',
-    'Docker', 'TypeScript', '.NET', 'C#', 'Angular', 'Vue', 'DevOps', 'CI/CD'
+    'JavaScript', 'TypeScript', 'Python', 'Java', 'React', 'Node.js', 'AWS', 'Azure',
+    'GCP', 'SQL', 'PostgreSQL', 'MySQL', 'Kubernetes', 'Docker', 'DevOps', 'CI/CD',
+    '.NET', 'C#', 'Angular', 'Vue', 'REST API', 'GraphQL', 'Linux', 'Git',
+    'machine learning', 'data engineering', 'cybersecurity', 'SOC 2'
   ],
   healthcare: [
-    'RN', 'LPN', 'BLS', 'ACLS', 'EHR', 'Epic', 'Cerner', 'med-surg', 'ICU', 'CNA',
-    'patient care', 'clinical', 'phlebotomy'
+    'RN', 'LPN', 'BLS', 'ACLS', 'PALS', 'EHR', 'Epic', 'Cerner', 'Meditech',
+    'med-surg', 'ICU', 'CNA', 'patient care', 'clinical', 'phlebotomy', 'HIPAA',
+    'vital signs', 'EMR', 'home health', 'hospice', 'case management'
   ],
   finance: [
     'Excel', 'financial modeling', 'Bloomberg', 'CFA', 'FP&A', 'audit', 'SOX',
-    'accounts payable', 'accounts receivable', 'SAP', 'Oracle'
+    'accounts payable', 'accounts receivable', 'SAP', 'Oracle', 'Hyperion',
+    'variance analysis', 'budgeting', 'forecasting', 'P&L', 'balance sheet',
+    'treasury', 'credit analysis', 'KYC', 'AML'
   ],
   manufacturing: [
-    'lean manufacturing', 'Six Sigma', 'CNC', 'PLC', 'ISO 9001', 'quality control',
-    'production', 'assembly', 'maintenance'
+    'lean manufacturing', 'Six Sigma', '5S', 'Kaizen', 'CNC', 'PLC', 'ISO 9001',
+    'quality control', 'production', 'assembly', 'maintenance', 'TPM', 'GMP',
+    'SPC', 'root cause analysis', 'preventive maintenance', 'blueprint reading',
+    'welding', 'machining', 'injection molding'
   ],
   logistics: [
-    'CDL', 'forklift', 'WMS', 'supply chain', 'DOT', 'HAZMAT', 'warehouse', 'dispatch'
+    'CDL', 'CDL Class A', 'CDL Class B', 'forklift', 'forklift certification',
+    'reach truck', 'cherry picker', 'order picker', 'WMS', 'warehouse management system',
+    'TMS', 'transportation management', 'supply chain', 'inventory management',
+    'order fulfillment', 'shipping', 'receiving', 'pick and pack', 'dispatch',
+    'DOT', 'HAZMAT', 'HAZMAT certification', 'warehouse operations', '3PL',
+    'cross-docking', 'RF scanner', 'barcode scanning', 'load planning',
+    'route planning', 'last mile', 'freight', 'LTL', 'FTL', 'drayage',
+    'SAP TM', 'Manhattan', 'Blue Yonder', 'logistics coordination'
   ],
   legal: [
-    'litigation', 'corporate law', 'contracts', 'paralegal', 'e-discovery', 'compliance'
+    'litigation', 'corporate law', 'contracts', 'paralegal', 'e-discovery',
+    'compliance', 'legal research', 'Westlaw', 'LexisNexis', 'case management',
+    'discovery', 'brief writing', 'contract review', 'NDA', 'MSA'
   ],
   retail: [
-    'POS', 'inventory', 'merchandising', 'customer service', 'store management'
+    'POS', 'point of sale', 'inventory', 'merchandising', 'store management',
+    'loss prevention', 'visual merchandising', 'planogram', 'cash handling',
+    'inventory control', 'shrink reduction', 'retail operations'
   ],
+  /** Fallback when industry unknown — professional tools only, NOT soft skills */
   general: [
-    'Microsoft Office', 'communication', 'leadership', 'project management',
-    'customer service', 'Excel', 'time management'
+    'Microsoft Office', 'Excel', 'Word', 'Outlook', 'PowerPoint', 'Google Workspace',
+    'data entry', 'typing', 'reporting', 'scheduling', 'documentation'
   ]
 };
 
@@ -62,8 +110,21 @@ const US_STATES = {
   DC: 'District of Columbia'
 };
 
+const INDUSTRY_INFERENCE_RULES = [
+  { key: 'logistics', re: /\b(logistics|warehouse|supply chain|fulfillment|dispatch|freight|WMS|TMS|forklift|CDL|3PL|distribution center)\b/i },
+  { key: 'accounting', re: /\b(accounting|bookkeep|CPA|tax prep|audit|payroll|GL|general ledger|accounts payable)\b/i },
+  { key: 'hvac', re: /\b(HVAC|refrigeration|EPA 608|chiller|boiler|ductwork)\b/i },
+  { key: 'construction', re: /\b(construction|superintendent|contractor|framing|concrete|Procore|OSHA 30)\b/i },
+  { key: 'technology', re: /\b(software|developer|engineer|JavaScript|Python|React|DevOps|AWS|SQL)\b/i },
+  { key: 'healthcare', re: /\b(RN|LPN|nurse|clinical|patient care|hospital|EHR|Epic|Cerner)\b/i },
+  { key: 'finance', re: /\b(financial modeling|FP&A|investment banking|treasury|Bloomberg|CFA)\b/i },
+  { key: 'manufacturing', re: /\b(manufacturing|production line|CNC|PLC|Six Sigma|assembly line)\b/i },
+  { key: 'legal', re: /\b(paralegal|litigation|attorney|e-discovery|Westlaw|LexisNexis)\b/i },
+  { key: 'retail', re: /\b(retail|store manager|merchandising|POS|cashier)\b/i }
+];
+
 function normalizeIndustry(industry) {
-  if (!industry) return 'general';
+  if (!industry) return null;
   const lower = String(industry).toLowerCase();
   if (/account|tax|bookkeep|cpa|audit/.test(lower)) return 'accounting';
   if (/hvac|heating|cooling|refrigerat/.test(lower)) return 'hvac';
@@ -72,44 +133,123 @@ function normalizeIndustry(industry) {
   if (/health|medical|nurs|clinic|hospital/.test(lower)) return 'healthcare';
   if (/financ|bank|capital|invest/.test(lower)) return 'finance';
   if (/manufact|production|factory/.test(lower)) return 'manufacturing';
-  if (/logistic|transport|warehouse|supply/.test(lower)) return 'logistics';
+  if (/logistic|transport|warehouse|supply|distribution/.test(lower)) return 'logistics';
   if (/legal|law\b|attorney|paralegal/.test(lower)) return 'legal';
   if (/retail|store|merchand/.test(lower)) return 'retail';
-  return 'general';
+  return null;
+}
+
+function inferIndustryFromText(text) {
+  for (const rule of INDUSTRY_INFERENCE_RULES) {
+    if (rule.re.test(text)) return rule.key;
+  }
+  return null;
 }
 
 function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function addSkillMatch(matches, seen, skill, text, lower) {
-  const norm = skill.toLowerCase();
-  if (seen.has(norm)) return;
+function skillInText(skill, text) {
   const pattern = new RegExp(`\\b${escapeRegex(skill)}\\b`, 'i');
-  if (pattern.test(text) || lower.includes(norm)) {
-    seen.add(norm);
-    matches.push(skill);
+  return pattern.test(text);
+}
+
+function isSoftSkill(skill) {
+  const lower = String(skill).toLowerCase().trim();
+  if (SOFT_SKILLS.has(lower)) return true;
+  return /^(strong|excellent|good)\s+(communication|leadership|customer service)/i.test(lower)
+    || /\b(communication|leadership|customer service|time management)\s+skills?\b/i.test(lower);
+}
+
+function cleanSkillPhrase(raw) {
+  let t = String(raw || '').trim();
+  if (!t) return '';
+  t = t.replace(/^[\s\-•*]+/, '').replace(/[.)]+$/, '').trim();
+  t = t.replace(/^(?:strong|excellent|good|solid|proven|effective)\s+/i, '');
+  t = t.replace(/^(?:must have|required|preferred|minimum|ideal)\s*:?\s*/i, '');
+  t = t.replace(/\b(?:experience with|experience in|proficien(?:t|cy) in|knowledge of|familiarity with|ability to|understanding of)\s+/gi, '');
+  t = t.replace(/\b(?:required|preferred|is a plus|a plus|plus|desired|nice to have)\b/gi, '').trim();
+  t = t.replace(/\s{2,}/g, ' ').trim();
+  if (t.length < 2 || t.length > 60) return '';
+  if (/^(the|a|an|or|and|with|in|for|to|years?|year|experience)$/i.test(t)) return '';
+  if (/^\d+\+?\s*years?/i.test(t)) return '';
+  return t;
+}
+
+function addSkillMatch(matches, seen, skill) {
+  const cleaned = cleanSkillPhrase(skill);
+  if (!cleaned) return;
+  const norm = cleaned.toLowerCase();
+  if (seen.has(norm)) return;
+  seen.add(norm);
+  matches.push(cleaned);
+}
+
+function matchSkillsFromDict(text, dict, seen, matches, limit) {
+  const sorted = [...dict].sort((a, b) => b.length - a.length);
+  for (const skill of sorted) {
+    if (matches.length >= limit) break;
+    if (!skillInText(skill, text)) continue;
+    addSkillMatch(matches, seen, skill);
   }
 }
 
-function matchSkillsFromDict(text, lower, dict, seen, matches, limit) {
-  for (const skill of dict) {
-    if (matches.length >= limit) break;
-    addSkillMatch(matches, seen, skill, text, lower);
+function extractInlineSkillPhrases(text) {
+  const found = [];
+  const seen = new Set();
+  const patterns = [
+    /(?:experience with|experience in|proficien(?:t|cy) in|knowledge of|familiarity with|skilled in)\s+([^.,;\n]+)/gi,
+    /(?:must have|required|preferred)\s*:?\s*([^.,;\n]+)/gi
+  ];
+  for (const re of patterns) {
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const chunk = m[1].replace(/\band\b/gi, ',');
+      chunk.split(/[,;|•]/).forEach((part) => {
+        const token = cleanSkillPhrase(part);
+        if (!token) return;
+        const key = token.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          found.push(token);
+        }
+      });
+    }
   }
+  return found;
 }
 
 function extractCommaListedSkills(text) {
   const found = [];
   const seen = new Set();
-  const sectionRe = /(?:requirements?|qualifications?|skills?|must have|experience (?:with|in)|proficien(?:t|cy) in|knowledge of)[:\s-]*([^\n]+)/gi;
+
+  const sectionHeaders = /(?:^|\n)\s*(?:requirements?|qualifications?|skills?|what you(?:'ll| will) need|must have|minimum qualifications?|preferred qualifications?)\s*:?\s*\n([\s\S]*?)(?=\n\s*\n|\n\s*[A-Z][^\n]{0,40}:|$)/gi;
   let m;
-  while ((m = sectionRe.exec(text)) !== null) {
+  while ((m = sectionHeaders.exec(text)) !== null) {
+    const block = m[1];
+    block.split(/\n/).forEach((line) => {
+      const bullet = line.replace(/^\s*[-•*]\s+/, '').trim();
+      const token = cleanSkillPhrase(bullet.replace(/\band\b/gi, ','));
+      if (!token) return;
+      token.split(/[,;|•]/).forEach((part) => {
+        const p = cleanSkillPhrase(part);
+        if (!p) return;
+        const key = p.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          found.push(p);
+        }
+      });
+    });
+  }
+
+  const inlineRe = /(?:requirements?|qualifications?|skills?|must have|experience (?:with|in)|proficien(?:t|cy) in|knowledge of)[:\s-]*([^\n]+)/gi;
+  while ((m = inlineRe.exec(text)) !== null) {
     const chunk = m[1].replace(/\band\b/gi, ',');
     chunk.split(/[,;|•]/).forEach((part) => {
-      const token = part.replace(/^[\s\-•*]+/, '').replace(/[.)]+$/, '').trim();
-      if (!token || token.length < 2 || token.length > 50) return;
-      if (/^(the|a|an|or|and|with|in|for|to|years?|experience)$/i.test(token)) return;
+      const token = cleanSkillPhrase(part);
+      if (!token) return;
       const key = token.toLowerCase();
       if (!seen.has(key)) {
         seen.add(key);
@@ -117,52 +257,71 @@ function extractCommaListedSkills(text) {
       }
     });
   }
+
   const bulletRe = /(?:^|\n)\s*[-•*]\s+([^\n]+)/g;
   while ((m = bulletRe.exec(text)) !== null) {
-    const line = m[1].trim();
-    if (line.length < 3 || line.length > 80) continue;
-    if (/^(requirements?|qualifications?|responsibilities|duties)\b/i.test(line)) continue;
-    const key = line.toLowerCase();
+    const token = cleanSkillPhrase(m[1]);
+    if (!token) continue;
+    if (/^(requirements?|qualifications?|responsibilities|duties|about the role|job description)\b/i.test(token)) continue;
+    const key = token.toLowerCase();
     if (!seen.has(key)) {
       seen.add(key);
-      found.push(line.length > 40 ? line.slice(0, 40).trim() : line);
+      found.push(token);
     }
   }
+
   return found;
+}
+
+function skillScore(skill, industry, text) {
+  let score = 0;
+  const lower = skill.toLowerCase();
+  if (isSoftSkill(skill)) score += 100;
+  if (industry && SKILL_DICTIONARIES[industry]) {
+    const inDict = SKILL_DICTIONARIES[industry].some((s) => s.toLowerCase() === lower || skillInText(s, skill) || skillInText(skill, s));
+    if (inDict) score -= 30;
+  }
+  if (SHARED_TOOLS.some((s) => s.toLowerCase() === lower)) score -= 20;
+  if (skillInText(skill, text) && lower.length <= 20) score -= 5;
+  return score;
+}
+
+function rankSkills(matches, industry, text) {
+  return [...matches].sort((a, b) => {
+    const scoreDiff = skillScore(a, industry, text) - skillScore(b, industry, text);
+    if (scoreDiff !== 0) return scoreDiff;
+    return a.length - b.length;
+  });
 }
 
 function matchSkills(text, industry) {
   const seen = new Set();
   const matches = [];
-  const lower = text.toLowerCase();
-  const key = normalizeIndustry(industry);
+  const limit = 3;
 
-  const primaryDict = [
-    ...(SKILL_DICTIONARIES[key] || []),
-    ...(key !== 'general' ? SKILL_DICTIONARIES.general : [])
-  ];
-  matchSkillsFromDict(text, lower, primaryDict, seen, matches, 3);
+  const resolvedIndustry = normalizeIndustry(industry) || inferIndustryFromText(text);
 
-  if (matches.length < 3) {
-    for (const dictKey of Object.keys(SKILL_DICTIONARIES)) {
-      if (dictKey === key) continue;
-      matchSkillsFromDict(text, lower, SKILL_DICTIONARIES[dictKey], seen, matches, 3);
-      if (matches.length >= 3) break;
-    }
+  for (const token of extractCommaListedSkills(text)) {
+    addSkillMatch(matches, seen, token);
   }
 
-  if (matches.length < 3) {
-    for (const token of extractCommaListedSkills(text)) {
-      if (matches.length >= 3) break;
-      const norm = token.toLowerCase();
-      if (!seen.has(norm)) {
-        seen.add(norm);
-        matches.push(token);
-      }
-    }
+  for (const token of extractInlineSkillPhrases(text)) {
+    addSkillMatch(matches, seen, token);
   }
 
-  return matches.slice(0, 3);
+  if (resolvedIndustry && SKILL_DICTIONARIES[resolvedIndustry]) {
+    matchSkillsFromDict(text, SKILL_DICTIONARIES[resolvedIndustry], seen, matches, 50);
+  }
+
+  matchSkillsFromDict(text, SHARED_TOOLS, seen, matches, 50);
+
+  if (resolvedIndustry !== 'general') {
+    matchSkillsFromDict(text, SKILL_DICTIONARIES.general, seen, matches, 50);
+  }
+
+  matchSkillsFromDict(text, [...SOFT_SKILLS], seen, matches, 50);
+
+  return rankSkills(matches, resolvedIndustry, text).slice(0, limit);
 }
 
 function extractSalary(text) {
@@ -253,12 +412,6 @@ function extractLocalRequirement(text) {
   return null;
 }
 
-/**
- * Parse pasted job description text.
- * @param {string} text - Raw JD text
- * @param {string} [industry] - Job/company industry for skill matching
- * @returns {object} Parsed fields for jobs.research.requirements
- */
 function parseJobDescription(text, industry) {
   const jd = String(text || '').trim();
   if (!jd) {
@@ -304,9 +457,6 @@ function parseJobDescription(text, industry) {
   };
 }
 
-/**
- * Build jobs.research from import fields (notes, position, location, salary, industry).
- */
 function buildResearchFromLeadData({ notes, jdText, position, location, salaryRange, industry }) {
   const parts = [];
   if (position) parts.push(`Title: ${position}`);
@@ -341,6 +491,9 @@ function buildResearchFromLeadData({ notes, jdText, position, location, salaryRa
 module.exports = {
   parseJobDescription,
   normalizeIndustry,
+  inferIndustryFromText,
   SKILL_DICTIONARIES,
+  SOFT_SKILLS,
+  SHARED_TOOLS,
   buildResearchFromLeadData
 };
