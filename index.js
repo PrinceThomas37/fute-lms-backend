@@ -371,6 +371,13 @@ app.use(function(req, res, next) {
 });
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.get('/health', (req, res) => res.json({ ok: true }));
+app.get('/api/version', (req, res) => res.json({
+  ok: true,
+  version: '3.0.0',
+  commit: process.env.RENDER_GIT_COMMIT || null,
+  branch: process.env.RENDER_GIT_BRANCH || null,
+  deployedAt: process.env.RENDER || 'local'
+}));
 app.get('/industries', auth, (req, res) => res.json(INDUSTRIES));
 
 // ══════════════════════════════════════════════════════════════
