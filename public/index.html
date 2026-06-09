@@ -1927,7 +1927,7 @@ function renderEmail(){
         var sigEmail=myEmails.find(function(e){return e.id===sigEmailId;});
         var sig='';
         if(sigEmailId&&STATE.emailSignaturesCache&&STATE.emailSignaturesCache[sigEmailId]!==undefined){
-          sig=STATE.emailSignaturesCache[sigEmailId];
+          sig=normalizeMailboxSignature(STATE.emailSignaturesCache[sigEmailId]);
         } else if(sigEmailId){
           loadMailboxSignature(u.id,sigEmailId);
         }
@@ -3587,13 +3587,22 @@ window.insertVar=function(v){
 };
 
 // Signature helpers
+var SIGNATURE_TAGLINE='Making Recruitment Easier with Future Tech';
+var LEGACY_SIGNATURE_TAGLINES=['Staffing solutions for healthcare & enterprise','Staffing solutions for healthcare &amp; enterprise'];
 function isLegacyBlockSignature(sigHtml){
   return /&#128231;|&#128222;|&#127760;|&#128205;/.test(sigHtml)||/border-right:3px solid #1E7A3C/.test(sigHtml);
+}
+function upgradeSignatureTagline(sigHtml){
+  var html=String(sigHtml||'');
+  LEGACY_SIGNATURE_TAGLINES.forEach(function(oldTagline){
+    html=html.split(oldTagline).join(SIGNATURE_TAGLINE);
+  });
+  return html;
 }
 function normalizeMailboxSignature(sigHtml){
   if(!sigHtml||!String(sigHtml).trim())return'';
   if(isLegacyBlockSignature(sigHtml))return(SIG_PRESETS&&SIG_PRESETS.professional)||sigHtml;
-  return sigHtml;
+  return upgradeSignatureTagline(sigHtml);
 }
 function fillSignatureHtml(sigHtml,senderName,senderEmail){
   return String(sigHtml||'')
@@ -3649,8 +3658,13 @@ function updateSigPreview(html){
 window.loadMailboxSignature=function(userId,emailId){
   if(!userId||!emailId)return;
   apiGet('/users/'+userId+'/emails/'+emailId+'/signature').then(function(d){
+    var raw=d.signature_html||'';
+    var normalized=normalizeMailboxSignature(raw);
     STATE.emailSignaturesCache=STATE.emailSignaturesCache||{};
-    STATE.emailSignaturesCache[emailId]=normalizeMailboxSignature(d.signature_html||'');
+    STATE.emailSignaturesCache[emailId]=normalized;
+    if(normalized&&normalized!==raw){
+      apiPut('/users/'+userId+'/emails/'+emailId+'/signature',{signature_html:normalized}).catch(function(){});
+    }
     render();
   }).catch(function(){});
 };

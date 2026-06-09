@@ -13,10 +13,24 @@ function legacyUserSignatureKey(userId) {
   return `u_${userId}_signature_html`;
 }
 
+const SIGNATURE_TAGLINE = 'Making Recruitment Easier with Future Tech';
+const LEGACY_SIGNATURE_TAGLINES = [
+  'Staffing solutions for healthcare & enterprise',
+  'Staffing solutions for healthcare &amp; enterprise'
+];
+
 function isLegacyBlockSignature(signatureHtml) {
   const html = String(signatureHtml || '');
   return /&#128231;|&#128222;|&#127760;|&#128205;/.test(html)
     || /border-right:3px solid #1E7A3C/.test(html);
+}
+
+function upgradeSignatureTagline(signatureHtml) {
+  let html = String(signatureHtml || '');
+  LEGACY_SIGNATURE_TAGLINES.forEach((oldTagline) => {
+    html = html.split(oldTagline).join(SIGNATURE_TAGLINE);
+  });
+  return html;
 }
 
 function fillSignatureHtml(signatureHtml, { displayName, emailAddress }) {
@@ -31,14 +45,16 @@ function resolveSignatureHtml(savedHtml) {
   const val = String(savedHtml || '').trim();
   if (!val) return DEFAULT_SIGNATURE_HTML;
   if (isLegacyBlockSignature(val)) return DEFAULT_SIGNATURE_HTML;
-  return val;
+  return upgradeSignatureTagline(val);
 }
 
 module.exports = {
   DEFAULT_SIGNATURE_HTML,
   mailboxSignatureKey,
   legacyUserSignatureKey,
+  SIGNATURE_TAGLINE,
   isLegacyBlockSignature,
+  upgradeSignatureTagline,
   fillSignatureHtml,
   resolveSignatureHtml
 };
