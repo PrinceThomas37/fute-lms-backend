@@ -574,7 +574,16 @@ app.get('/users/:id/emails/:eid/signature', auth, async (req, res) => {
     if (!hasRole(req, 'admin', 'bd_lead') && req.user.id !== req.params.id) return res.status(403).json({ error: 'Forbidden' });
     const { data: mailbox, error } = await supabase.from('user_emails').select('id,user_id,email_address,display_name').eq('id', req.params.eid).eq('user_id', req.params.id).single();
     if (error || !mailbox) return res.status(404).json({ error: 'Email ID not found' });
-    const signature_html = await getMailboxSignature(mailbox.id, mailbox.user_id);
+    const map = await loadMailboxSignatures([mailbox.id], mailbox.user_id);
+    const raw = map[mailbox.id] || '';
+    const signature_html = resolveSignatureHtml(raw);
+    if (raw && signature_html !== raw) {
+      const key = mailboxSignatureKey(mailbox.id);
+      await supabase.from('app_settings').upsert(
+        { key, value: signature_html, updated_at: new Date() },
+        { onConflict: 'key' }
+      );
+    }
     res.json({ signature_html, display_name: mailbox.display_name, email_address: mailbox.email_address });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

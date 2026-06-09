@@ -30,7 +30,10 @@ function upgradeSignatureTagline(signatureHtml) {
   LEGACY_SIGNATURE_TAGLINES.forEach((oldTagline) => {
     html = html.split(oldTagline).join(SIGNATURE_TAGLINE);
   });
-  return html;
+  return html.replace(
+    /Staffing solutions for healthcare(?:\s*(?:&amp;|&)\s*)?enterprise/gi,
+    SIGNATURE_TAGLINE
+  );
 }
 
 function fillSignatureHtml(signatureHtml, { displayName, emailAddress }) {

@@ -1927,7 +1927,9 @@ function renderEmail(){
         var sigEmail=myEmails.find(function(e){return e.id===sigEmailId;});
         var sig='';
         if(sigEmailId&&STATE.emailSignaturesCache&&STATE.emailSignaturesCache[sigEmailId]!==undefined){
-          sig=normalizeMailboxSignature(STATE.emailSignaturesCache[sigEmailId]);
+          var rawSig=STATE.emailSignaturesCache[sigEmailId];
+          sig=normalizeMailboxSignature(rawSig);
+          syncMailboxSignatureIfNeeded(u.id,sigEmailId,rawSig,sig);
         } else if(sigEmailId){
           loadMailboxSignature(u.id,sigEmailId);
         }
@@ -3597,7 +3599,15 @@ function upgradeSignatureTagline(sigHtml){
   LEGACY_SIGNATURE_TAGLINES.forEach(function(oldTagline){
     html=html.split(oldTagline).join(SIGNATURE_TAGLINE);
   });
-  return html;
+  return html.replace(/Staffing solutions for healthcare(?:\s*(?:&amp;|&)\s*)?enterprise/gi,SIGNATURE_TAGLINE);
+}
+function syncMailboxSignatureIfNeeded(userId,emailId,raw,normalized){
+  if(!userId||!emailId||!normalized||normalized===raw||STATE.sigMigrated&&STATE.sigMigrated[emailId])return;
+  STATE.sigMigrated=STATE.sigMigrated||{};
+  STATE.sigMigrated[emailId]=true;
+  STATE.emailSignaturesCache=STATE.emailSignaturesCache||{};
+  STATE.emailSignaturesCache[emailId]=normalized;
+  apiPut('/users/'+userId+'/emails/'+emailId+'/signature',{signature_html:normalized}).catch(function(){});
 }
 function normalizeMailboxSignature(sigHtml){
   if(!sigHtml||!String(sigHtml).trim())return'';
