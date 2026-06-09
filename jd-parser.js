@@ -221,7 +221,8 @@ function cleanSkillPhrase(raw) {
   t = t.replace(/\s{2,}/g, ' ').trim();
   if (t.length < 2 || t.length > 80) return '';
   if (/^(the|a|an|or|and|with|in|for|to|years?|year|experience)$/i.test(t)) return '';
-  if (/^\d+\+?\s*years?/i.test(t)) return '';
+  t = t.replace(/^\d+\+?\s*years?\s+(?:of\s+)?/i, '').trim();
+  if (!t || /^(experience|of)$/i.test(t)) return '';
   return t;
 }
 
@@ -361,9 +362,10 @@ function extractCommaListedSkills(text) {
   return found;
 }
 
-function skillScore(skill, industry, text) {
+function skillScore(skill, industry, text, requirementTokens) {
   let score = 0;
   const lower = skill.toLowerCase();
+  if (requirementTokens && requirementTokens.has(lower)) score -= 20;
   if (isSoftSkill(skill)) score += 100;
   if (industry && getIndustrySkillList(industry).some((s) => s.toLowerCase() === lower)) score -= 35;
   if (getRelatedIndustryKeys(industry).some((rel) => getIndustrySkillList(rel).some((s) => s.toLowerCase() === lower))) score -= 20;
@@ -374,12 +376,37 @@ function skillScore(skill, industry, text) {
   return score;
 }
 
-function rankSkills(matches, industry, text) {
+function rankSkills(matches, industry, text, requirementTokens) {
   return [...matches].sort((a, b) => {
-    const scoreDiff = skillScore(a, industry, text) - skillScore(b, industry, text);
+    const scoreDiff = skillScore(a, industry, text, requirementTokens) - skillScore(b, industry, text, requirementTokens);
     if (scoreDiff !== 0) return scoreDiff;
     return a.length - b.length;
   });
+}
+
+function isPreferredSkillPhrase(skill, rawLine) {
+  const combined = `${rawLine || ''} ${skill || ''}`;
+  return /\b(preferred|nice to have|a plus|plus|desired|optional|bonus)\b/i.test(combined);
+}
+
+function buildRequirementTokenSet(text) {
+  const tokens = new Set();
+  const bulletRe = /(?:^|\n)\s*[-•*]\s+([^\n]+)/g;
+  const bulletLines = [];
+  let m;
+  while ((m = bulletRe.exec(text)) !== null) bulletLines.push(m[1]);
+
+  [...extractCommaListedSkills(text), ...extractInlineSkillPhrases(text)].forEach((skill) => {
+    const cleaned = cleanSkillPhrase(skill);
+    if (!cleaned) return;
+    const rawLine = bulletLines.find((line) => line.toLowerCase().includes(cleaned.toLowerCase())) || '';
+    if (isPreferredSkillPhrase(cleaned, rawLine)) return;
+    tokens.add(cleaned.toLowerCase());
+    cleaned.split(/\s+/).forEach((part) => {
+      if (part.length >= 2) tokens.add(part.toLowerCase());
+    });
+  });
+  return tokens;
 }
 
 function matchSkills(text, industry) {
@@ -387,6 +414,7 @@ function matchSkills(text, industry) {
   const matches = [];
 
   const resolvedIndustry = normalizeIndustry(industry) || inferIndustryFromText(text) || 'general';
+  const requirementTokens = buildRequirementTokenSet(text);
 
   for (const token of extractCommaListedSkills(text)) addSkillMatch(matches, seen, token);
   for (const token of extractInlineSkillPhrases(text)) addSkillMatch(matches, seen, token);
@@ -407,7 +435,17 @@ function matchSkills(text, industry) {
 
   matchSkillsFromDict(text, [...SOFT_SKILLS], seen, matches, 80);
 
-  return rankSkills(matches, resolvedIndustry, text).slice(0, MAX_SUGGESTED_SKILLS);
+  const ranked = rankSkills(matches, resolvedIndustry, text, requirementTokens);
+  const deduped = [];
+  const rankedSeen = new Set();
+  for (const skill of ranked) {
+    const lower = skill.toLowerCase();
+    if (lower === 'cdl' && ranked.some((s) => /^cdl class [ab]$/i.test(s))) continue;
+    if (rankedSeen.has(lower)) continue;
+    rankedSeen.add(lower);
+    deduped.push(skill);
+  }
+  return deduped.slice(0, MAX_SUGGESTED_SKILLS);
 }
 
 function extractSalary(text) {
