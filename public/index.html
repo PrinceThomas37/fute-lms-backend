@@ -28,6 +28,14 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 *{-webkit-font-smoothing:antialiased}
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
+.salary-range-wrap{padding:12px 14px;background:var(--bg);border:1px solid var(--border2);border-radius:var(--r2)}
+.salary-range-track{position:relative;height:8px;background:var(--border);border-radius:999px;margin:18px 0 8px}
+.salary-range-fill{position:absolute;height:8px;background:var(--accent);border-radius:999px;pointer-events:none}
+.salary-range-wrap input[type=range]{position:absolute;width:100%;height:8px;top:0;left:0;margin:0;background:transparent;pointer-events:none;-webkit-appearance:none;appearance:none}
+.salary-range-wrap input[type=range]::-webkit-slider-thumb{pointer-events:auto;-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:#fff;border:2px solid var(--accent);box-shadow:0 1px 4px rgba(0,0,0,.15);cursor:pointer}
+.salary-range-wrap input[type=range]::-moz-range-thumb{pointer-events:auto;width:18px;height:18px;border-radius:50%;background:#fff;border:2px solid var(--accent);box-shadow:0 1px 4px rgba(0,0,0,.15);cursor:pointer}
+.salary-range-track input[type=range]:last-of-type{z-index:3}
+.salary-range-track input[type=range]:first-of-type{z-index:2}
 input,select,textarea,button{font-family:var(--font);font-size:14px;color:inherit}
 button{cursor:pointer;border:none;background:none;outline:none}
 a{color:inherit;text-decoration:none}
@@ -542,7 +550,7 @@ var STATE = {
   sigLayout: 'simple',
   raForm: {
     coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',
-    position:'',jobUrl:'',jobCreatedDate:'',jobOpenedDate:'',salaryRange:'',source:'',editJobId:null,
+    position:'',jobUrl:'',jobCreatedDate:'',salaryRange:'',source:'',editJobId:null,
     contacts:[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}]
   },
   raFormCoSuggestions:[],
@@ -734,6 +742,10 @@ function buildClientEmailVars(l,co,sender){
   var job=findJobForLead(l,co);
   var req=(job&&job.research&&job.research.requirements)||{};
   var skills=Array.isArray(req.skills)?req.skills:[];
+  if(req.skill_1)skills[0]=req.skill_1;
+  if(req.skill_2)skills[1]=req.skill_2;
+  skills=skills.filter(Boolean).slice(0,3);
+  var companyExpertise=(job&&job.research&&job.research.company&&job.research.company.expertise)||"";
   var loc=(job&&job.location)||(co?co.loc:"")||req.location||"";
   var city=req.city||(loc.indexOf(",")>-1?loc.split(",")[0].trim():loc);
   var salary=req.salary_display||(job&&job.salary_range)||"";
@@ -745,7 +757,7 @@ function buildClientEmailVars(l,co,sender){
     skill_1:skills[0]||"",skill_2:skills[1]||"",skill_3:skills[2]||"",
     skills_line:formatSkillsLineClient(skills),
     job_resp:formatJobRespClient(skills),
-    company_service:formatCompanyServiceClient((co&&co.ind)||(job&&job.industry)||""),
+    company_service:formatCompanyServiceClient(companyExpertise||(co&&co.ind)||(job&&job.industry)||""),
     salary_range:salary,salary_line:salary?(" ("+salary+")"):"",
     local_line:localLine,city:city
   };
@@ -4379,7 +4391,6 @@ var COL_MAP=[
   [["bdmassigned","bdm","bdmanager","managername","assignedto"],"bdmAssigned"],
   [["salaryrange","salary","compensation","pay","salaryband"],"salaryRange"],
   [["jobcreateddate","jobcreated","datecreated","createdate"],"jobCreatedDate"],
-  [["jobopeneddate","jobopened","dateopened","opendate","posteddate","jobposted"],"jobOpenedDate"],
 ];
 
 function renderImportModal(rows, sheetName){
@@ -4484,7 +4495,6 @@ function groupImportRows(mapped){
         source:(r.source||"Import").trim(),
         salaryRange:(r.salaryRange||"").trim(),
         jobCreatedDate:(r.jobCreatedDate||"").trim(),
-        jobOpenedDate:(r.jobOpenedDate||"").trim(),
         bdmAssigned:(r.bdmAssigned||"").trim(),
         analystName:(r.analystName||"").trim(),
         notes:"",
@@ -4643,7 +4653,6 @@ window.doImportProcess=function(toProcess,dupEmailMap){
       if(g.industry)payload.industry=g.industry;
       if(g.salaryRange)payload.salary_range=g.salaryRange;
       if(g.jobCreatedDate)payload.job_created_date=parseExcelDateToISO(g.jobCreatedDate);
-      if(g.jobOpenedDate)payload.job_opened_date=parseExcelDateToISO(g.jobOpenedDate);
       if(g.bdmAssigned)payload.bdm_assigned_name=g.bdmAssigned;
       if(g.notes)payload.notes=g.notes;
       if(g.jdText)payload.jd_text=g.jdText;
@@ -4828,9 +4837,10 @@ function renderRALeadForm(){
       '<input class="inp" placeholder="Salary range (e.g. $80,000)" value="'+htmlEsc(f.salaryRange||'')+'" oninput="raFormSet(\'salaryRange\',this.value)"/>'+
       '<input class="inp" placeholder="Source (LinkedIn, Indeed...)" value="'+htmlEsc(f.source||'')+'" oninput="raFormSet(\'source\',this.value)"/>'+
     '</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">'+
-      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Job Created Date</label><input type="date" class="inp" value="'+htmlEsc(f.jobCreatedDate||'')+'" oninput="raFormSet(\'jobCreatedDate\',this.value)"/></div>'+
-      '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Job Opened Date</label><input type="date" class="inp" value="'+htmlEsc(f.jobOpenedDate||'')+'" oninput="raFormSet(\'jobOpenedDate\',this.value)"/></div>'+
+    '<div style="margin-bottom:16px;max-width:280px">'+
+      '<label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Job Created Date</label>'+
+      '<input type="date" class="inp" value="'+htmlEsc(f.jobCreatedDate||'')+'" oninput="raFormSet(\'jobCreatedDate\',this.value)"/>'+
+      '<div style="font-size:11px;color:var(--text3);margin-top:4px">Job opened date is set automatically when the lead is converted to a job.</div>'+
     '</div>'+
 
     // ── Contacts ──
@@ -4875,7 +4885,7 @@ window.raFormEdit=function(jobId){
     location:j.location||'',zipCode:'',
     position:j.position||'',jobUrl:j.job_url||'',
     salaryRange:j.salary_range||'',source:j.source||'',
-    jobCreatedDate:j.job_created_date||'',jobOpenedDate:j.job_opened_date||'',
+    jobCreatedDate:j.job_created_date||'',
     contacts:cs.length?cs.map(function(c){
       return{firstName:c.first_name,lastName:c.last_name,designation:c.designation,
              email:c.email,phone:c.phone,linkedin:c.linkedin,emailStatus:'',emailDupInfo:null};
@@ -4999,7 +5009,7 @@ window.raFormRemoveContact=function(idx){
 };
 
 window.raFormClear=function(){
-  STATE.raForm={coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',position:'',jobUrl:'',jobCreatedDate:'',jobOpenedDate:'',salaryRange:'',source:'',editJobId:null,contacts:[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}]};
+  STATE.raForm={coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',position:'',jobUrl:'',jobCreatedDate:'',salaryRange:'',source:'',editJobId:null,contacts:[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}]};
   STATE.raFormCoSuggestions=[];
   STATE.raFormZipSuggestions=[];
   render();
@@ -5030,7 +5040,6 @@ window.raFormSubmit=function(){
       industry:f.industry||undefined,
       salary_range:f.salaryRange||undefined,
       job_created_date:f.jobCreatedDate||undefined,
-      job_opened_date:f.jobOpenedDate||undefined,
       job_url:f.jobUrl||undefined,
       is_duplicate:hasDup,
       contacts:validContacts.map(function(c){
@@ -5788,13 +5797,71 @@ function getMergedResearch(job){
 function canEditResearch(u,j){
   return userHasRole(u,'ra')&&!userHasAnyRole(u,'ra_lead','admin')&&j.created_by===u.id;
 }
+var SALARY_PERIOD_CONFIG={
+  hour:{min:15,max:250,step:5,label:'per hour'},
+  week:{min:400,max:15000,step:100,label:'per week'},
+  year:{min:30000,max:350000,step:5000,label:'per year'}
+};
+function getSalaryReqState(req){
+  req=req||{};
+  var period=req.salary_period||'year';
+  var cfg=SALARY_PERIOD_CONFIG[period]||SALARY_PERIOD_CONFIG.year;
+  var min=req.salary_min!=null?Number(req.salary_min):Math.round(cfg.min+(cfg.max-cfg.min)*0.3);
+  var max=req.salary_max!=null?Number(req.salary_max):Math.round(cfg.min+(cfg.max-cfg.min)*0.6);
+  if(min>max){var tmp=min;min=max;max=tmp;}
+  min=Math.max(cfg.min,Math.min(cfg.max,min));
+  max=Math.max(cfg.min,Math.min(cfg.max,max));
+  return{period:period,min:min,max:max,cfg:cfg};
+}
+function formatSalaryMoney(n,period){
+  n=Number(n)||0;
+  if(period==='year'&&n>=1000)return'$'+Math.round(n/1000)+'K';
+  return'$'+n.toLocaleString();
+}
+function buildSalaryDisplay(min,max,period){
+  var cfg=SALARY_PERIOD_CONFIG[period]||SALARY_PERIOD_CONFIG.year;
+  var suffix=period==='year'?'':(' '+cfg.label);
+  return formatSalaryMoney(min,period)+'–'+formatSalaryMoney(max,period)+suffix;
+}
+function syncResearchSkillsArray(req){
+  if(!req)return;
+  var list=[req.skill_1,req.skill_2].map(function(s){return String(s||'').trim();}).filter(Boolean);
+  req.skills=list.slice(0,2);
+}
+function renderSalaryRangeControl(jobId,req){
+  var st=getSalaryReqState(req);
+  var display=req.salary_display||buildSalaryDisplay(st.min,st.max,st.period);
+  var periodOpts=['year','week','hour'].map(function(p){
+    var lbl=SALARY_PERIOD_CONFIG[p].label;
+    return '<option value="'+p+'"'+(st.period===p?' selected':'')+'>'+lbl.charAt(0).toUpperCase()+lbl.slice(1)+'</option>';
+  }).join('');
+  var leftPct=((st.min-st.cfg.min)/(st.cfg.max-st.cfg.min))*100;
+  var widthPct=((st.max-st.min)/(st.cfg.max-st.cfg.min))*100;
+  return '<div class="salary-range-wrap" style="grid-column:1/-1">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">'+
+      '<label class="flbl" style="margin:0">Salary range</label>'+
+      '<select class="sel" style="font-size:12px;max-width:160px" onchange="researchUpdateSalaryPeriod(\''+jobId+'\',this.value)">'+periodOpts+'</select>'+
+    '</div>'+
+    '<div id="salary-display-'+jobId+'" style="font-size:15px;font-weight:600;color:var(--accent);margin-top:6px">'+htmlEsc(display)+'</div>'+
+    '<div class="salary-range-track" id="salary-track-'+jobId+'">'+
+      '<div class="salary-range-fill" id="salary-fill-'+jobId+'" style="left:'+leftPct+'%;width:'+widthPct+'%"></div>'+
+      '<input type="range" id="salary-min-'+jobId+'" min="'+st.cfg.min+'" max="'+st.cfg.max+'" step="'+st.cfg.step+'" value="'+st.min+'" oninput="researchUpdateSalaryRange(\''+jobId+'\',\'min\',this.value)"/>'+
+      '<input type="range" id="salary-max-'+jobId+'" min="'+st.cfg.min+'" max="'+st.cfg.max+'" step="'+st.cfg.step+'" value="'+st.max+'" oninput="researchUpdateSalaryRange(\''+jobId+'\',\'max\',this.value)"/>'+
+    '</div>'+
+    '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3)">'+
+      '<span>'+formatSalaryMoney(st.cfg.min,st.period)+'</span>'+
+      '<span>Drag handles to set min and max</span>'+
+      '<span>'+formatSalaryMoney(st.cfg.max,st.period)+'</span>'+
+    '</div>'+
+  '</div>';
+}
 function renderResearchSection(j, canEdit){
   var r=getMergedResearch(j);
   var company=r.company||{};
   var outreach=r.outreach||{};
   var req=r.requirements||{};
   var jdRaw=r.jd_raw||'';
-  var skillsStr=(req.skills||[]).join(', ');
+  syncResearchSkillsArray(req);
 
   var headcountOpts=['','1-10','11-50','51-200','201-500','500+'].map(function(v){
     return '<option value="'+v+'"'+(company.headcount===v?' selected':'')+'>'+( v||'— Select —')+'</option>';
@@ -5845,7 +5912,7 @@ function renderResearchSection(j, canEdit){
 
   if(!canEdit){
     // BD read-only view
-    var hasReq=skillsStr||req.salary_display||req.location||req.local_hint||req.travel;
+    var hasReq=req.skill_1||req.skill_2||(req.skills||[]).length||req.salary_display||req.location||req.local_hint||req.travel;
     var hasData=company.headcount||company.hiring_volume||company.notes||outreach.angle||outreach.avoid||hasReq||jdRaw;
     if(!hasData&&!contactIntel.trim())return '';
     return '<div style="background:var(--bg);border:1px solid var(--border2);border-radius:var(--r2);padding:14px;margin-top:14px">'+
@@ -5854,19 +5921,21 @@ function renderResearchSection(j, canEdit){
         '<div style="margin-bottom:10px">'+
           '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">JD requirements</div>'+
           '<div style="display:flex;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--text2)">'+
-            (skillsStr?'<span style="background:var(--accent-l);color:var(--accent);padding:2px 8px;border-radius:6px">'+htmlEsc(skillsStr)+'</span>':'')+
+            (req.skill_1?'<span style="background:var(--accent-l);color:var(--accent);padding:2px 8px;border-radius:6px">'+htmlEsc(req.skill_1)+'</span>':'')+
+            (req.skill_2?'<span style="background:var(--accent-l);color:var(--accent);padding:2px 8px;border-radius:6px">'+htmlEsc(req.skill_2)+'</span>':'')+
             (req.salary_display?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">'+htmlEsc(req.salary_display)+'</span>':'')+
             (req.location?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">'+htmlEsc(req.location)+'</span>':'')+
             (req.local_hint?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">Local: '+htmlEsc(req.local_hint)+'</span>':'')+
             (req.travel?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">Travel: '+htmlEsc(req.travel)+'</span>':'')+
           '</div>'+
         '</div>':'')+
-      (company.headcount||company.hiring_volume||company.notes?
+      (company.headcount||company.hiring_volume||company.expertise||company.notes?
         '<div style="margin-bottom:10px">'+
           '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Company</div>'+
           '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--text2)">'+
             (company.headcount?'<span style="background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px">'+htmlEsc(company.headcount)+' employees</span>':'')+
             (company.hiring_volume?'<span style="background:var(--green-l);color:var(--green);padding:2px 8px;border-radius:6px">Hiring: '+htmlEsc(company.hiring_volume)+'</span>':'')+
+            (company.expertise?'<span style="background:var(--accent-l);color:var(--accent);padding:2px 8px;border-radius:6px">'+htmlEsc(company.expertise)+'</span>':'')+
           '</div>'+
           (company.notes?'<div style="font-size:12px;color:var(--text2);margin-top:6px;padding:8px;background:var(--card);border-radius:var(--r)">'+htmlEsc(company.notes)+'</div>':'')+
         '</div>':'')+
@@ -5889,6 +5958,7 @@ function renderResearchSection(j, canEdit){
       '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Headcount</label><select class="sel" style="font-size:12px" id="res-headcount" onchange="researchUpdate(\''+j.id+'\',\'company\',\'headcount\',this.value)">'+headcountOpts+'</select></div>'+
       '<div><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Hiring volume</label><select class="sel" style="font-size:12px" id="res-hiring" onchange="researchUpdate(\''+j.id+'\',\'company\',\'hiring_volume\',this.value)">'+hiringOpts+'</select></div>'+
     '</div>'+
+    '<div class="fgrp mb2"><label class="flbl">Company expertise</label><input class="inp" style="font-size:12px" id="res-expertise" placeholder="e.g. Healthcare staffing, ERP implementations..." value="'+htmlEsc(company.expertise||'')+'" oninput="researchUpdate(\''+j.id+'\',\'company\',\'expertise\',this.value)"/></div>'+
     '<div class="fgrp mb4"><label class="flbl">Company notes / recent news</label><textarea class="txta w100" style="min-height:60px;font-size:12px" id="res-notes" oninput="researchUpdate(\''+j.id+'\',\'company\',\'notes\',this.value)" placeholder="Any relevant company news, context...">'+htmlEsc(company.notes||'')+'</textarea></div>'+
 
     (cs.length?
@@ -5903,11 +5973,17 @@ function renderResearchSection(j, canEdit){
       '<button type="button" class="btn btn-outline btn-sm" onclick="parseJobDescription(\''+j.id+'\')">Extract requirements</button>'+
     '</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
-      '<div class="fgrp"><label class="flbl">Skills (comma separated)</label><input class="inp" style="font-size:12px" id="res-skills" placeholder="" value="'+htmlEsc(skillsStr)+'" oninput="researchUpdateRequirements(\''+j.id+'\',\'skills\',this.value)"/></div>'+
-      '<div class="fgrp"><label class="flbl">Salary range</label><input class="inp" style="font-size:12px" id="res-salary" placeholder="" value="'+htmlEsc(req.salary_display||'')+'" oninput="researchUpdate(\''+j.id+'\',\'requirements\',\'salary_display\',this.value);researchUpdate(\''+j.id+'\',\'requirements\',\'salary_range\',this.value)"/></div>'+
+      '<div class="fgrp"><label class="flbl">Skill 1</label><input class="inp" style="font-size:12px" id="res-skill1" placeholder="Primary skill from JD" value="'+htmlEsc(req.skill_1||(req.skills&&req.skills[0])||'')+'" oninput="researchUpdateRequirements(\''+j.id+'\',\'skill_1\',this.value)"/></div>'+
+      '<div class="fgrp"><label class="flbl">Skill 2</label><input class="inp" style="font-size:12px" id="res-skill2" placeholder="Secondary skill" value="'+htmlEsc(req.skill_2||(req.skills&&req.skills[1])||'')+'" oninput="researchUpdateRequirements(\''+j.id+'\',\'skill_2\',this.value)"/></div>'+
+      renderSalaryRangeControl(j.id,req)+
       '<div class="fgrp"><label class="flbl">Location</label><input class="inp" style="font-size:12px" id="res-req-loc" placeholder="" value="'+htmlEsc(req.location||'')+'" oninput="researchUpdate(\''+j.id+'\',\'requirements\',\'location\',this.value)"/></div>'+
       '<div class="fgrp"><label class="flbl">City / local hint</label><input class="inp" style="font-size:12px" id="res-local" placeholder="" value="'+htmlEsc(req.local_hint||req.city||'')+'" oninput="researchUpdate(\''+j.id+'\',\'requirements\',\'local_hint\',this.value);researchUpdate(\''+j.id+'\',\'requirements\',\'city\',this.value)"/></div>'+
-      '<div class="fgrp"><label class="flbl">Travel</label><input class="inp" style="font-size:12px" id="res-travel" placeholder="" value="'+htmlEsc(req.travel||'')+'" oninput="researchUpdate(\''+j.id+'\',\'requirements\',\'travel\',this.value)"/></div>'+
+      '<div class="fgrp"><label class="flbl">Travel</label><select class="sel" style="font-size:12px" id="res-travel" onchange="researchUpdate(\''+j.id+'\',\'requirements\',\'travel\',this.value)">'+
+        ['','none','25%','required'].map(function(v){
+          var labels={'':'— Select —','none':'None','25%':'25%','required':'Required'};
+          return '<option value="'+v+'"'+(req.travel===v?' selected':'')+'>'+labels[v]+'</option>';
+        }).join('')+
+      '</select></div>'+
     '</div>'+
 
     '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 10px">Outreach Notes</div>'+
@@ -5936,11 +6012,53 @@ window.researchUpdate=function(jobId,section,field,val){
 window.researchUpdateRequirements=function(jobId,field,val){
   if(!window._researchDraft[jobId])window._researchDraft[jobId]=JSON.parse(JSON.stringify((STATE.jobs.find(function(j){return j.id===jobId;})||{}).research||{}));
   if(!window._researchDraft[jobId].requirements)window._researchDraft[jobId].requirements={};
-  if(field==='skills'){
-    window._researchDraft[jobId].requirements.skills=val.split(',').map(function(s){return s.trim();}).filter(Boolean).slice(0,3);
-  } else {
-    window._researchDraft[jobId].requirements[field]=val;
+  window._researchDraft[jobId].requirements[field]=val;
+  if(field==='skill_1'||field==='skill_2')syncResearchSkillsArray(window._researchDraft[jobId].requirements);
+};
+function researchRefreshSalaryUi(jobId){
+  var draft=window._researchDraft[jobId]||{};
+  var req=draft.requirements||{};
+  var st=getSalaryReqState(req);
+  var displayEl=document.getElementById('salary-display-'+jobId);
+  var fillEl=document.getElementById('salary-fill-'+jobId);
+  var minEl=document.getElementById('salary-min-'+jobId);
+  var maxEl=document.getElementById('salary-max-'+jobId);
+  if(displayEl)displayEl.textContent=req.salary_display||buildSalaryDisplay(st.min,st.max,st.period);
+  if(fillEl){
+    var leftPct=((st.min-st.cfg.min)/(st.cfg.max-st.cfg.min))*100;
+    var widthPct=((st.max-st.min)/(st.cfg.max-st.cfg.min))*100;
+    fillEl.style.left=leftPct+'%';
+    fillEl.style.width=widthPct+'%';
   }
+  if(minEl){minEl.min=st.cfg.min;minEl.max=st.cfg.max;minEl.step=st.cfg.step;minEl.value=st.min;}
+  if(maxEl){maxEl.min=st.cfg.min;maxEl.max=st.cfg.max;maxEl.step=st.cfg.step;maxEl.value=st.max;}
+}
+window.researchUpdateSalaryRange=function(jobId,which,val){
+  if(!window._researchDraft[jobId])window._researchDraft[jobId]=JSON.parse(JSON.stringify((STATE.jobs.find(function(j){return j.id===jobId;})||{}).research||{}));
+  if(!window._researchDraft[jobId].requirements)window._researchDraft[jobId].requirements={};
+  var req=window._researchDraft[jobId].requirements;
+  var st=getSalaryReqState(req);
+  var num=Number(val);
+  if(which==='min'){
+    req.salary_min=Math.min(num,st.max);
+  } else {
+    req.salary_max=Math.max(num,st.min);
+  }
+  req.salary_display=buildSalaryDisplay(req.salary_min,req.salary_max,req.salary_period||st.period);
+  req.salary_range=req.salary_display;
+  researchRefreshSalaryUi(jobId);
+};
+window.researchUpdateSalaryPeriod=function(jobId,period){
+  if(!window._researchDraft[jobId])window._researchDraft[jobId]=JSON.parse(JSON.stringify((STATE.jobs.find(function(j){return j.id===jobId;})||{}).research||{}));
+  if(!window._researchDraft[jobId].requirements)window._researchDraft[jobId].requirements={};
+  var req=window._researchDraft[jobId].requirements;
+  req.salary_period=period;
+  var st=getSalaryReqState(req);
+  req.salary_min=st.min;
+  req.salary_max=st.max;
+  req.salary_display=buildSalaryDisplay(st.min,st.max,period);
+  req.salary_range=req.salary_display;
+  render();
 };
 
 window.parseJobDescription=function(jobId){
@@ -5953,7 +6071,14 @@ window.parseJobDescription=function(jobId){
     if(!window._researchDraft[jobId])window._researchDraft[jobId]=JSON.parse(JSON.stringify(job.research||{}));
     window._researchDraft[jobId].jd_raw=jdText;
     window._researchDraft[jobId].requirements=Object.assign({},window._researchDraft[jobId].requirements||{},parsed);
-    var n=(parsed.skills||[]).length;
+    var skills=parsed.skills||[];
+    if(skills[0])window._researchDraft[jobId].requirements.skill_1=skills[0];
+    if(skills[1])window._researchDraft[jobId].requirements.skill_2=skills[1];
+    syncResearchSkillsArray(window._researchDraft[jobId].requirements);
+    if(parsed.travel&&!['none','25%','required'].includes(parsed.travel)){
+      window._researchDraft[jobId].requirements.travel=parsed.travel.indexOf('25')>-1?'25%':'required';
+    }
+    var n=skills.length;
     showToast(n?'Extracted '+n+' skill'+(n!==1?'s':'')+' — review and save':'Extracted — review fields and save','success');
     render();
   }).catch(function(e){showToast('Extract failed: '+e.message,'error');});
@@ -5977,6 +6102,13 @@ window.saveResearch=function(jobId){
   if(draft.requirements)merged.requirements=Object.assign({},(j.research&&j.research.requirements)||{},draft.requirements);
   if(draft.jd_raw!==undefined)merged.jd_raw=draft.jd_raw;
   if(draft.contacts)merged.contacts=draft.contacts;
+  if(merged.requirements){
+    syncResearchSkillsArray(merged.requirements);
+    if(!merged.requirements.salary_display&&merged.requirements.salary_min!=null&&merged.requirements.salary_max!=null){
+      merged.requirements.salary_display=buildSalaryDisplay(merged.requirements.salary_min,merged.requirements.salary_max,merged.requirements.salary_period||'year');
+      merged.requirements.salary_range=merged.requirements.salary_display;
+    }
+  }
   apiFetch('PATCH','/jobs/'+jobId+'/research',{research:merged}).then(function(res){
     var saved=parseResearchObject((res&&res.research)||merged);
     STATE.jobs=STATE.jobs.map(function(x){return x.id===jobId?Object.assign({},x,{research:saved}):x;});

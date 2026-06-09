@@ -62,7 +62,11 @@ function fillTemplate(tmpl, vars) {
 function buildEmailVars({ job, contact, senderDisplayName }) {
   const research = job?.research || {};
   const req = research.requirements || {};
-  const skills = Array.isArray(req.skills) ? req.skills : [];
+  const skills = Array.isArray(req.skills) ? [...req.skills] : [];
+  if (req.skill_1) skills[0] = req.skill_1;
+  if (req.skill_2) skills[1] = req.skill_2;
+  const filteredSkills = skills.filter(Boolean).slice(0, 3);
+  const companyExpertise = research.company?.expertise || '';
   const loc = job?.location || job?.company?.location || req.location || '';
   const city = req.city || (loc.includes(',') ? loc.split(',')[0].trim() : loc);
   const salaryDisplay = req.salary_display || job?.salary_range || '';
@@ -83,12 +87,12 @@ function buildEmailVars({ job, contact, senderDisplayName }) {
     loc,
     desig: contact?.designation || 'Hiring Manager',
     sender: senderDisplayName || '',
-    skill_1: skills[0] || '',
-    skill_2: skills[1] || '',
-    skill_3: skills[2] || '',
-    skills_line: formatSkillsLine(skills),
-    job_resp: formatJobResp(skills),
-    company_service: formatCompanyService(job?.company?.industry || job?.industry || ''),
+    skill_1: filteredSkills[0] || '',
+    skill_2: filteredSkills[1] || '',
+    skill_3: filteredSkills[2] || '',
+    skills_line: formatSkillsLine(filteredSkills),
+    job_resp: formatJobResp(filteredSkills),
+    company_service: formatCompanyService(companyExpertise || job?.company?.industry || job?.industry || ''),
     salary_range: salaryDisplay,
     salary_line: salaryLine,
     local_line: localLine,
