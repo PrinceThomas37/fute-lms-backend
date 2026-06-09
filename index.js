@@ -4,7 +4,17 @@ const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { parseJobDescription, buildResearchFromLeadData } = require('./jd-parser');
+const { parseJobDescription, buildResearchFromLeadData, normalizeIndustry } = require('./jd-parser');
+const { learnSkillsForIndustry } = require('./learned-skills');
+
+function persistLearnedSkills(industry, research) {
+  if (!research || !research.requirements) return;
+  const key = normalizeIndustry(industry);
+  if (!key) return;
+  const req = research.requirements;
+  const skills = [req.skill_1, req.skill_2, req.skill_3, ...(req.skills || []), ...(req.suggested_skills || [])].filter(Boolean);
+  learnSkillsForIndustry(key, skills);
+}
 const { DEFAULT_TEMPLATES, buildEmailVars, fillTemplate, resolveTemplate } = require('./email-vars');
 const {
   DEFAULT_SIGNATURE_HTML,
@@ -910,6 +920,7 @@ app.post('/jobs', auth, async (req, res) => {
       await supabase.from('contacts').insert(rows);
     }
     await logActivity(job.id, null, req.user.id, 'job_created', `Job created: ${position}`, null, { position, stage: job.stage });
+    if (research) persistLearnedSkills(jobIndustry, research);
     res.status(201).json(job);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -962,6 +973,7 @@ app.put('/jobs/:id', auth, async (req, res) => {
     } else {
       await logActivity(data.id, null, req.user.id, 'job_updated', 'Job updated', null, null);
     }
+    if (research !== undefined) persistLearnedSkills(jobIndustry || data.industry || existing.industry, research);
     res.json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -995,11 +1007,12 @@ app.patch('/jobs/:id/research', auth, async (req, res) => {
   try {
     const { research } = req.body;
     if (!research) return res.status(400).json({ error: 'research object required' });
-    const { data: job } = await supabase.from('jobs').select('created_by').eq('id', req.params.id).single();
+    const { data: job } = await supabase.from('jobs').select('created_by,industry').eq('id', req.params.id).single();
     if (!job) return res.status(404).json({ error: 'Job not found' });
     if (!hasRole(req, 'admin', 'ra_lead') && job.created_by !== req.user.id) return res.status(403).json({ error: 'Only the RA who created this lead can add research' });
-    const { data, error } = await supabase.from('jobs').update({ research, updated_at: new Date() }).eq('id', req.params.id).select('id,research').single();
+    const { data, error } = await supabase.from('jobs').update({ research, updated_at: new Date() }).eq('id', req.params.id).select('id,research,industry').single();
     if (error) throw error;
+    persistLearnedSkills(data.industry || job.industry, research);
     res.json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
