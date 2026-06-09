@@ -879,7 +879,7 @@ app.post('/jobs/bulk', auth, async (req, res) => {
 
 app.post('/jobs', auth, async (req, res) => {
   try {
-    const { company_id, position, location, source, job_url, stage, notes, assigned_to, is_duplicate, duplicate_of, contacts, salary_range, job_created_date, job_opened_date, bdm_assigned_name, industry: jobIndustry } = req.body;
+    const { company_id, position, location, source, job_url, stage, notes, assigned_to, is_duplicate, duplicate_of, contacts, salary_range, job_created_date, job_opened_date, bdm_assigned_name, industry: jobIndustry, research } = req.body;
     if (!company_id || !position) return res.status(400).json({ error: 'company_id and position required' });
     // 21-day company cooldown — block RA from re-adding same company within 21 days
     if (hasRole(req, 'ra')) {
@@ -901,7 +901,8 @@ app.post('/jobs', auth, async (req, res) => {
       assigned_to: (hasRole(req, 'admin', 'ra_lead') ? (assigned_to || null) : null),
       is_duplicate: is_duplicate || false, duplicate_of: duplicate_of || null, salary_range: salary_range || null,
       job_created_date: job_created_date || null, job_opened_date: job_opened_date || null,
-      timezone, freshness, bdm_assigned_name: bdm_assigned_name || null, industry: jobIndustry || null
+      timezone, freshness, bdm_assigned_name: bdm_assigned_name || null, industry: jobIndustry || null,
+      research: research || null
     }).select().single();
     if (error) throw error;
     if (Array.isArray(contacts) && contacts.length) {
@@ -923,7 +924,7 @@ app.put('/jobs/:id', auth, async (req, res) => {
     const canEdit = hasRole(req, 'admin', 'ra_lead', 'bd', 'bd_lead') || existing.created_by === req.user.id || existing.assigned_to_bd === req.user.id || raCanEdit;
     if (!canEdit) return res.status(403).json({ error: 'Forbidden' });
     if (isRA && !raCanEdit) return res.status(403).json({ error: 'Edit window has expired (24 hours)' });
-    const { position, location, source, job_url, stage, notes, assigned_to, assigned_to_bd, sending_email_id } = req.body;
+    const { position, location, source, job_url, stage, notes, assigned_to, assigned_to_bd, sending_email_id, salary_range, job_created_date, industry: jobIndustry, research } = req.body;
     const updates = { updated_at: new Date() };
     if (position !== undefined) updates.position = position;
     if (location !== undefined) {
@@ -947,6 +948,10 @@ app.put('/jobs/:id', auth, async (req, res) => {
       if (assigned_to_bd && stage === undefined) updates.stage = 'Assigned';
     }
     if (sending_email_id !== undefined && hasRole(req, 'admin', 'ra_lead')) updates.sending_email_id = sending_email_id || null;
+    if (salary_range !== undefined) updates.salary_range = salary_range || null;
+    if (job_created_date !== undefined) updates.job_created_date = job_created_date || null;
+    if (jobIndustry !== undefined) updates.industry = jobIndustry || null;
+    if (research !== undefined) updates.research = research;
     const { data, error } = await supabase.from('jobs').update(updates).eq('id', req.params.id).select().single();
     if (error) throw error;
     if (stage !== undefined && stage !== existing.stage) {
@@ -996,6 +1001,15 @@ app.patch('/jobs/:id/research', auth, async (req, res) => {
     const { data, error } = await supabase.from('jobs').update({ research, updated_at: new Date() }).eq('id', req.params.id).select('id,research').single();
     if (error) throw error;
     res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/parse-jd', auth, async (req, res) => {
+  try {
+    const { jd_text, industry } = req.body;
+    if (!jd_text || !String(jd_text).trim()) return res.status(400).json({ error: 'jd_text required' });
+    const parsed = parseJobDescription(jd_text, industry || '');
+    res.json(parsed);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
