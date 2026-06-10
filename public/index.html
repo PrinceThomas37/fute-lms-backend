@@ -1944,9 +1944,9 @@ function renderEmail(){
           '</div>'+
         '</div>'+
         (STATE.randomTemplateMode?
-          '<div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">A template will be picked at random each time an outreach email is sent.</div>'+
+          '<div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">Bulk outreach rotates through all '+Object.keys(OUTREACH_STYLE_PRESETS).length+' introduction styles — each used once before any repeat.</div>'+
           '<div style="padding:10px 14px;background:var(--accent-l);border-radius:var(--r2);font-size:12.5px;color:var(--accent);font-weight:600;margin-bottom:10px">'+
-            '&#8652; Random — one of '+Object.keys(OUTREACH_STYLE_PRESETS).length+' styles will be applied automatically at send time'+
+            '&#8652; Random mode — Microsoft bulk sends get different templates automatically'+
           '</div>':
           '<div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">Start from a proven template — you can edit any field after applying.</div>'+
           '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+styleBtns+'</div>'
@@ -2108,37 +2108,11 @@ function renderEmail(){
           '<div class="fgrp" style="margin-bottom:0"><label class="flbl">From</label><select class="sel" onchange="selectComposeFromEmail(this.value)">'+composeFromOpts+'</select></div>'
           :'<div style="font-size:12px;color:var(--amber)">No sending email ID assigned — ask your admin to add one.</div>')+
       '</div>'+
-      (function(){
-        var presetKeys=Object.keys(OUTREACH_STYLE_PRESETS);
-        var composePresetBtns=presetKeys.map(function(pk){
-          var p=OUTREACH_STYLE_PRESETS[pk];
-          var on=STATE.composeStylePreset===pk&&!STATE.randomTemplateMode;
-          return '<button type="button" onclick="applyComposeTemplate(\''+pk+'\')" style="text-align:left;padding:8px 12px;border-radius:9px;cursor:pointer;border:2px solid '+(on?'var(--accent)':'var(--border)')+';background:'+(on?'var(--accent-l)':'var(--card)')+';flex:1;min-width:120px">'+
-            '<div style="font-weight:700;font-size:12px;color:'+(on?'var(--accent)':'var(--text)')+'">'+htmlEsc(p.label)+'</div>'+
-            '<div style="font-size:10px;color:var(--text3);margin-top:2px">'+htmlEsc(p.hint)+'</div></button>';
-        }).join('');
-        return '<div class="card cp mb3">'+
-          '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'+
-            '<div class="fw6" style="font-size:13px">Template</div>'+
-            '<div style="display:flex;border:1px solid var(--border);border-radius:20px;overflow:hidden;background:var(--card)">'+
-              '<button type="button" onclick="setTemplateModeSpecific()" style="padding:3px 12px;font-size:12px;font-weight:600;cursor:pointer;border:0;border-radius:20px 0 0 20px;background:'+(STATE.randomTemplateMode?'transparent':'var(--accent)')+';color:'+(STATE.randomTemplateMode?'var(--text3)':'#fff')+'">Specific</button>'+
-              '<button type="button" onclick="setTemplateModeRandom()" style="padding:3px 12px;font-size:12px;font-weight:600;cursor:pointer;border:0;border-radius:0 20px 20px 0;background:'+(STATE.randomTemplateMode?'var(--accent)':'transparent')+';color:'+(STATE.randomTemplateMode?'#fff':'var(--text3)')+'">Random</button>'+
-            '</div>'+
-          '</div>'+
-          (STATE.randomTemplateMode?
-            '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--accent-l);border-radius:var(--r2)">'+
-              '<div style="flex:1;font-size:12.5px;color:var(--text2)">&#8652; A style will be picked at random when you send.</div>'+
-              '<button type="button" onclick="applyComposeTemplate(null)" style="padding:5px 14px;background:var(--accent);color:#fff;border:0;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Pick now</button>'+
-            '</div>':
-            '<div style="display:flex;gap:8px;flex-wrap:wrap">'+composePresetBtns+'</div>'
-          )+
-        '</div>';
-      })()+
       '<div class="card cp mb3">'+
         '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="email-subj" value="'+htmlEsc(STATE.composeSubj)+'" oninput="STATE.composeSubj=this.value" placeholder="Email subject"/></div>'+
         '<div class="fgrp"><label class="flbl">Message</label><textarea class="txta w100" style="min-height:180px" id="email-body" oninput="STATE.composeBody=this.value" placeholder="Write your message here...">'+htmlEsc(STATE.composeBody)+'</textarea></div>'+
         '<div style="display:flex;justify-content:flex-end;margin-top:12px">'+
-          '<button class="btn btn-primary" onclick="sendEmailWithTemplate()" '+((hasRecipient&&composeEmails.length)?'':'disabled style="opacity:.5;cursor:not-allowed"')+'>'+ico('send',13)+' Send</button>'+
+          '<button class="btn btn-primary" onclick="sendEmail()" '+((hasRecipient&&composeEmails.length)?'':'disabled style="opacity:.5;cursor:not-allowed"')+'>'+ico('send',13)+' Send</button>'+
         '</div>'+
       '</div>'+
     '</div>';
@@ -3264,93 +3238,32 @@ window.applyOutreachStylePreset=function(presetKey){
   showToast('Applied "'+preset.label+'" style to all templates — review each tab and Save','success');
   render();
 };
+function persistOutreachTemplateMode(){
+  var userId=STATE.user&&STATE.user.id;
+  if(!userId)return;
+  try{localStorage.setItem('fute_outreach_tmpl_mode_'+userId,JSON.stringify({random:STATE.randomTemplateMode}));}catch(e){}
+}
 window.setTemplateModeSpecific=function(){
   STATE.randomTemplateMode=false;
-  var userId=STATE.user&&STATE.user.id;
-  if(userId){
-    try{var s=localStorage.getItem('fute_tmpl_mode_'+userId);var p=s?JSON.parse(s):{};p.random=false;localStorage.setItem('fute_tmpl_mode_'+userId,JSON.stringify(p));}catch(e){}
-    if(userHasAnyRole(STATE.user,'bd','bd_lead','admin'))apiPost('/outreach-plan',{key:'random_template_mode',value:'false'}).catch(function(){});
-  }
+  persistOutreachTemplateMode();
+  if(userHasAnyRole(STATE.user,'bd','bd_lead','admin'))apiPost('/outreach-plan',{key:'random_template_mode',value:'false'}).catch(function(){});
   render();
 };
 window.setTemplateModeRandom=function(){
   STATE.randomTemplateMode=true;
-  var userId=STATE.user&&STATE.user.id;
-  if(userId){
-    try{var s=localStorage.getItem('fute_tmpl_mode_'+userId);var p=s?JSON.parse(s):{};p.random=true;localStorage.setItem('fute_tmpl_mode_'+userId,JSON.stringify(p));}catch(e){}
-    if(userHasAnyRole(STATE.user,'bd','bd_lead','admin'))apiPost('/outreach-plan',{key:'random_template_mode',value:'true'}).catch(function(){});
-  }
-  render();
-};
-window.applyComposeTemplate=function(presetKey){
-  // null = random pick
-  var keys=Object.keys(OUTREACH_STYLE_PRESETS);
-  var key=presetKey||(keys[Math.floor(Math.random()*keys.length)]);
-  var preset=OUTREACH_STYLE_PRESETS[key];
-  if(!preset)return;
-  var isRandom=!presetKey;
-  STATE.composeStylePreset=key;
-  STATE.randomTemplateMode=isRandom;
-  // persist selection
-  var userId=STATE.user&&STATE.user.id;
-  if(userId){
-    try{localStorage.setItem('fute_tmpl_mode_'+userId,JSON.stringify({preset:key,random:isRandom}));}catch(e){}
-  }
-  if(userId&&userHasAnyRole(STATE.user,'bd','bd_lead','admin')){
-    apiPost('/outreach-plan',{key:'compose_style_preset',value:key}).catch(function(){});
-    apiPost('/outreach-plan',{key:'random_template_mode',value:isRandom?'true':'false'}).catch(function(){});
-  }
-  // fill compose subject/body — resolve merge vars if a contact+lead is selected
-  var subj=preset.o1.subj;
-  var body=preset.o1.body;
-  if(STATE.composeContactId){
-    var parts=STATE.composeContactId.split('|');
-    var cc=STATE.contacts.find(function(c){return c.id===parts[0];});
-    var cj=getMyJobs(STATE.user).find(function(j){return j.id===parts[1];});
-    if(cc&&cj){
-      var co={name:cj.company_name||'',ind:cj.industry||'',loc:cj.location||''};
-      var fromEmForName=STATE.composeFromEmailId?(STATE.userEmailsCache[STATE.user.id]||[]).find(function(e){return e.id===STATE.composeFromEmailId;}):null;
-      var senderName=(fromEmForName&&fromEmForName.display_name)||STATE.user.name||'';
-      subj=fillEmail(subj,cc,co,senderName);
-      body=fillEmail(body,cc,co,senderName);
-    }
-  }
-  STATE.composeSubj=subj;
-  STATE.composeBody=body;
-  showToast('Template applied: "'+preset.label+'"','success');
+  persistOutreachTemplateMode();
+  if(userHasAnyRole(STATE.user,'bd','bd_lead','admin'))apiPost('/outreach-plan',{key:'random_template_mode',value:'true'}).catch(function(){});
   render();
 };
 window.saveTemplateModePreference=function(){
-  var userId=STATE.user&&STATE.user.id;
-  if(!userId)return;
-  try{
-    var stored=localStorage.getItem('fute_tmpl_mode_'+userId);
-    var p=stored?JSON.parse(stored):{};
-    p.random=STATE.randomTemplateMode;
-    if(STATE.composeStylePreset)p.preset=STATE.composeStylePreset;
-    localStorage.setItem('fute_tmpl_mode_'+userId,JSON.stringify(p));
-  }catch(e){}
+  persistOutreachTemplateMode();
   if(userHasAnyRole(STATE.user,'bd','bd_lead','admin')){
-    var saves=[apiPost('/outreach-plan',{key:'random_template_mode',value:STATE.randomTemplateMode?'true':'false'})];
-    if(STATE.composeStylePreset)saves.push(apiPost('/outreach-plan',{key:'compose_style_preset',value:STATE.composeStylePreset}));
-    Promise.all(saves)
-      .then(function(){showToast('Template mode saved','success');})
+    apiPost('/outreach-plan',{key:'random_template_mode',value:STATE.randomTemplateMode?'true':'false'})
+      .then(function(){showToast('Outreach template mode saved','success');})
       .catch(function(){showToast('Save failed','error');});
   } else {
-    showToast('Template mode saved','success');
+    showToast('Outreach template mode saved','success');
   }
-};
-window.sendEmailWithTemplate=function(){
-  // If random mode, always pick a fresh random template then send immediately
-  if(STATE.randomTemplateMode){
-    var keys=Object.keys(OUTREACH_STYLE_PRESETS);
-    var key=keys[Math.floor(Math.random()*keys.length)];
-    var preset=OUTREACH_STYLE_PRESETS[key];
-    STATE.composeSubj=preset.o1.subj;
-    STATE.composeBody=preset.o1.body;
-    showToast('Random template selected: "'+preset.label+'"','info');
-  }
-  sendEmail();
 };
 window.setVarInsertTarget=function(target){
   STATE.varInsertTarget=target||'body';
@@ -3484,14 +3397,6 @@ window.setMergeLead=function(id){STATE.mergeLeadId=id;STATE.genEmail=null;render
 window.setPlatform=function(p){STATE.user.plt=p;render();}
 
 window.openEmailPreviewModal=function(){
-  // If random mode, pick a random style preset now (before building genEmail)
-  if(STATE.randomTemplateMode&&!STATE.genEmail){
-    var presetKeys=Object.keys(OUTREACH_STYLE_PRESETS);
-    var randomKey=presetKeys[Math.floor(Math.random()*presetKeys.length)];
-    var randomPreset=OUTREACH_STYLE_PRESETS[randomKey];
-    STATE.emailSubj=randomPreset.o1.subj;STATE.emailBody=randomPreset.o1.body;
-    showToast('Random template: "'+randomPreset.label+'"','info');
-  }
   // Build genEmail if not already set (fill template variables from selected lead)
   if(!STATE.genEmail){
     // Use loose equality (==) so UUID strings match even if stored as different types
@@ -7284,8 +7189,13 @@ function apiDelete(p){return apiFetch('DELETE',p);}
 // ── Restore session if present ─────────────────
 STATE.token=sessionStorage.getItem('fg_token')||null;
 try{var _su=sessionStorage.getItem('fg_user');if(_su){var _parsed=JSON.parse(_su);STATE.user=normaliseUser(_parsed);}}catch(e){}
-// Restore template mode preference from localStorage
-try{if(STATE.user&&STATE.user.id){var _tmpl=localStorage.getItem('fute_tmpl_mode_'+STATE.user.id);if(_tmpl){var _tm=JSON.parse(_tmpl);if(_tm.preset)STATE.composeStylePreset=_tm.preset;if(typeof _tm.random==='boolean')STATE.randomTemplateMode=_tm.random;}}}catch(e){}
+// Restore outreach template mode from localStorage
+try{
+  if(STATE.user&&STATE.user.id){
+    var _tmpl=localStorage.getItem('fute_outreach_tmpl_mode_'+STATE.user.id)||localStorage.getItem('fute_tmpl_mode_'+STATE.user.id);
+    if(_tmpl){var _tm=JSON.parse(_tmpl);if(typeof _tm.random==='boolean')STATE.randomTemplateMode=_tm.random;}
+  }
+}catch(e){}
 // Wipe demo seed data — will be replaced by API on login
 STATE.jobs=[];STATE.contacts=[];STATE.users=[];STATE.companies=[];STATE.emails=[];STATE.reminders=[];STATE.activities=[];STATE.leads=[];
 
@@ -7377,7 +7287,6 @@ function loadAppData(){
         STATE.fu2Subj=plan['tmpl_fu2_subject']||STATE.fu2Subj;
         STATE.fu2Body=plan['tmpl_fu2_body']||STATE.fu2Body;
         // restore template mode preference
-        if(plan['compose_style_preset'])STATE.composeStylePreset=plan['compose_style_preset'];
         if(plan['random_template_mode'])STATE.randomTemplateMode=plan['random_template_mode']==='true';
         render();
       }).catch(function(){});
