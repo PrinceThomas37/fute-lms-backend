@@ -21,7 +21,8 @@ const {
   fillTemplate,
   resolveTemplate,
   buildRotatingTemplateDeck,
-  isRandomTemplateMode
+  isRandomTemplateMode,
+  getVariantById
 } = require('./email-vars');
 const {
   DEFAULT_SIGNATURE_HTML,
@@ -1277,11 +1278,12 @@ function buildPendingEmailsFromJobs(jobs, callerUserId, bdMap, bdPrimaryEmailMap
     tasks.forEach((task, idx) => {
       const { job, contact, bd } = task;
       try {
-        const subjTmpl = deck
-          ? deck[idx].subject
+        const variant = deck ? deck[idx] : null;
+        const subjTmpl = variant
+          ? variant.o1.subject
           : resolveTemplate(tmplSettings[`u_${bd.id}_tmpl_o1_subject`], 'o1_subject');
-        const bodyTmpl = deck
-          ? deck[idx].body
+        const bodyTmpl = variant
+          ? variant.o1.body
           : resolveTemplate(tmplSettings[`u_${bd.id}_tmpl_o1_body`], 'o1_body');
         const senderDisplayName = job.sending_email?.display_name || bdPrimaryEmailMap[bd.id]?.display_name || bd.name || '';
         const vars = buildEmailVars({ job, contact, senderDisplayName });
@@ -1289,7 +1291,7 @@ function buildPendingEmailsFromJobs(jobs, callerUserId, bdMap, bdPrimaryEmailMap
         const body = fillTemplate(bodyTmpl, vars);
         const resolvedSendingEmail = job.sending_email || bdPrimaryEmailMap[bd.id];
         const sendingEmailAddress = resolvedSendingEmail?.email_address || '';
-        emailsToInsert.push({
+        const row = {
           contact_id: contact.id,
           job_id: job.id,
           to_email: contact.email,
@@ -1299,7 +1301,9 @@ function buildPendingEmailsFromJobs(jobs, callerUserId, bdMap, bdPrimaryEmailMap
           sent_by: bd.id,
           from_email: sendingEmailAddress,
           status: 'pending'
-        });
+        };
+        if (variant?.id) row.template_variant = variant.id;
+        emailsToInsert.push(row);
       } catch (e) {
         console.error(`[GenerateEmails] contact error (${contact.email}):`, e.message);
       }
@@ -2636,6 +2640,21 @@ async function runFollowupEngine() {
     const fu1Due = (dueFu || []).filter(f => !f.followup1_sent_at && f.followup1_due_date <= todayDate);
     const fu2Due = (dueFu || []).filter(f => f.followup1_sent_at && !f.followup2_sent_at && f.followup2_due_date <= todayDate);
 
+    const fuJobIds = [...new Set((dueFu || []).map(f => f.job_id).filter(Boolean))];
+    const variantByPair = {};
+    if (fuJobIds.length) {
+      const { data: o1Sent } = await supabase.from('emails')
+        .select('job_id, contact_id, template_variant, sent_at')
+        .in('job_id', fuJobIds)
+        .eq('status', 'sent')
+        .is('followup_type', null)
+        .order('sent_at', { ascending: false });
+      (o1Sent || []).forEach(row => {
+        const key = `${row.job_id}:${row.contact_id}`;
+        if (!variantByPair[key] && row.template_variant) variantByPair[key] = row.template_variant;
+      });
+    }
+
     for (const fuList of [fu1Due, fu2Due]) {
       const isFu2 = fuList === fu2Due;
       for (const fu of fuList) {
@@ -2661,13 +2680,38 @@ async function runFollowupEngine() {
         // Use sending email display_name so signature matches the From address
         const senderName = job.sending_email?.display_name || bdMap[bdId] || 'Fute Global';
         const vars = buildEmailVars({ job, contact, senderDisplayName: senderName });
-        const subjTmpl = isFu2
-          ? getBDTemplate(bdId, 'tmpl_fu2_subject', 'template_fu2_subject', DEFAULT_TEMPLATES.fu2_subject)
-          : getBDTemplate(bdId, 'tmpl_fu1_subject', 'template_fu1_subject', DEFAULT_TEMPLATES.fu1_subject);
-        const bodyTmpl = isFu2
-          ? getBDTemplate(bdId, 'tmpl_fu2_body', 'template_fu2_body', DEFAULT_TEMPLATES.fu2_body)
-          : getBDTemplate(bdId, 'tmpl_fu1_body', 'template_fu1_body', DEFAULT_TEMPLATES.fu1_body);
-        emailsToInsert.push({ contact_id: fu.contact_id, job_id: fu.job_id, to_email: contact.email, from_email: job.sending_email?.email_address || null, subject: fillTemplate(subjTmpl, vars), body: fillTemplate(bodyTmpl, vars), platform: 'Outlook', sent_by: bdId, status: 'pending', followup_type: isFu2 ? 'fu2' : 'fu1', follow_up_id: fu.id });
+        const useRandomFu = isRandomTemplateMode(settings[`u_${bdId}_random_template_mode`]);
+        let subjTmpl, bodyTmpl, variantId;
+        if (useRandomFu) {
+          const pairKey = `${fu.job_id}:${fu.contact_id}`;
+          variantId = variantByPair[pairKey] || settings[`u_${bdId}_compose_style_preset`] || 'v1';
+          const variant = getVariantById(variantId);
+          const fuTmpl = isFu2 ? variant.fu2 : variant.fu1;
+          subjTmpl = fuTmpl.subject;
+          bodyTmpl = fuTmpl.body;
+        } else {
+          subjTmpl = isFu2
+            ? getBDTemplate(bdId, 'tmpl_fu2_subject', 'template_fu2_subject', DEFAULT_TEMPLATES.fu2_subject)
+            : getBDTemplate(bdId, 'tmpl_fu1_subject', 'template_fu1_subject', DEFAULT_TEMPLATES.fu1_subject);
+          bodyTmpl = isFu2
+            ? getBDTemplate(bdId, 'tmpl_fu2_body', 'template_fu2_body', DEFAULT_TEMPLATES.fu2_body)
+            : getBDTemplate(bdId, 'tmpl_fu1_body', 'template_fu1_body', DEFAULT_TEMPLATES.fu1_body);
+        }
+        const fuRow = {
+          contact_id: fu.contact_id,
+          job_id: fu.job_id,
+          to_email: contact.email,
+          from_email: job.sending_email?.email_address || null,
+          subject: fillTemplate(subjTmpl, vars),
+          body: fillTemplate(bodyTmpl, vars),
+          platform: 'Outlook',
+          sent_by: bdId,
+          status: 'pending',
+          followup_type: isFu2 ? 'fu2' : 'fu1',
+          follow_up_id: fu.id
+        };
+        if (variantId) fuRow.template_variant = variantId;
+        emailsToInsert.push(fuRow);
         if (isFu2) { fu2Updates.push(fu.id); log.fu2_queued++; } else { fu1Updates.push(fu.id); log.fu1_queued++; }
         acCountDelta[acId] = (acCountDelta[acId] || 0) + 1;
       }

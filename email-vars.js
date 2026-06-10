@@ -1,5 +1,5 @@
 /**
- * Shared email template variables and Daniel-style default templates.
+ * Shared email template variables and outreach style variants (O1 + FU1 + FU2).
  */
 
 const DEFAULT_TEMPLATES = {
@@ -31,13 +31,17 @@ Would you like me to share a few resumes?
 I look forward to hearing from you.`
 };
 
-/** Four outreach-1 variants — must stay in sync with OUTREACH_STYLE_PRESETS in public/index.html */
-const OUTREACH_O1_VARIANTS = [
+/**
+ * Five matched outreach styles — each with O1, FU1, and FU2.
+ * Keep in sync with OUTREACH_STYLE_PRESETS in public/index.html.
+ */
+const OUTREACH_VARIANTS = [
   {
     id: 'v1',
     label: 'Introduction',
-    subject: 'Assistance for {{pos}} in {{loc}}',
-    body: `Hi {{fn}},
+    o1: {
+      subject: 'Assistance for {{pos}} in {{loc}}',
+      body: `Hi {{fn}},
 
 We are yet to be introduced, but I am {{sender}}, Recruitment Manager at Fute Global LLC.
 
@@ -46,12 +50,34 @@ I came across your job opening for a {{pos}} in {{loc}}. I have gone through the
 Would you like to review the resumes?
 
 I look forward to hearing from you.`
+    },
+    fu1: {
+      subject: 'Re: Assistance for {{pos}} in {{loc}}',
+      body: `Hi {{fn}},
+
+Following up on my introduction regarding your {{pos}} opening in {{loc}}. I still have candidates with {{job_resp}} experience on {{company_service}} projects who may align with the role.
+
+Would you like to review their resumes?
+
+I look forward to hearing from you.`
+    },
+    fu2: {
+      subject: 'Re: Assistance for {{pos}} in {{loc}}',
+      body: `Hi {{fn}},
+
+One last follow-up on the {{pos}} position in {{loc}}. I still have screened-ready candidates with {{job_resp}} background on {{company_service}} projects whenever timing works for you.
+
+Would you like me to share a few resumes?
+
+I look forward to hearing from you.`
+    }
   },
   {
     id: 'v2',
     label: 'Warm opener',
-    subject: 'Candidates for your {{pos}} opening in {{loc}}',
-    body: `Hi {{fn}},
+    o1: {
+      subject: 'Candidates for your {{pos}} opening in {{loc}}',
+      body: `Hi {{fn}},
 
 I hope this note finds you well. I'm {{sender}}, Recruitment Manager at Fute Global LLC — we haven't met yet.
 
@@ -60,12 +86,34 @@ I noticed your {{pos}} opening in {{loc}} and reviewed the job description. We h
 Would you be open to reviewing their resumes?
 
 I look forward to hearing from you.`
+    },
+    fu1: {
+      subject: 'Re: Candidates for your {{pos}} opening in {{loc}}',
+      body: `Hi {{fn}},
+
+Hope you're doing well — wanted to follow up on your {{pos}} role in {{loc}}. I still have strong candidates with {{job_resp}} experience on {{company_service}} projects who could be a good fit.
+
+Would you be open to a quick resume review?
+
+I look forward to hearing from you.`
+    },
+    fu2: {
+      subject: 'Re: Candidates for your {{pos}} opening in {{loc}}',
+      body: `Hi {{fn}},
+
+Last friendly note about your {{pos}} opening in {{loc}}. Happy to share screened-ready candidates with {{job_resp}} experience on {{company_service}} work whenever the timing is right.
+
+Would you like me to send a few resumes over?
+
+I look forward to hearing from you.`
+    }
   },
   {
     id: 'v3',
     label: 'Respectful reach-out',
-    subject: '{{pos}} role in {{loc}} — resume review',
-    body: `Hi {{fn}},
+    o1: {
+      subject: '{{pos}} role in {{loc}} — resume review',
+      body: `Hi {{fn}},
 
 My name is {{sender}}, Recruitment Manager at Fute Global LLC. We've not been introduced, but I wanted to reach out respectfully.
 
@@ -74,12 +122,34 @@ Your {{pos}} role in {{loc}} caught my attention. After reading through the requ
 Would you like me to share their resumes for review?
 
 I look forward to hearing from you.`
+    },
+    fu1: {
+      subject: 'Re: {{pos}} role in {{loc}} — resume review',
+      body: `Hi {{fn}},
+
+I wanted to respectfully follow up on your {{pos}} opening in {{loc}}. I still have candidates with {{job_resp}} experience on {{company_service}} projects who appear well suited to the role.
+
+Would you still like to review their resumes?
+
+I look forward to hearing from you.`
+    },
+    fu2: {
+      subject: 'Re: {{pos}} role in {{loc}} — resume review',
+      body: `Hi {{fn}},
+
+A brief final follow-up regarding the {{pos}} role in {{loc}}. I remain happy to share candidates with {{job_resp}} background on {{company_service}} engagements at your convenience.
+
+Would you like me to forward a few resumes?
+
+I look forward to hearing from you.`
+    }
   },
   {
     id: 'v4',
     label: 'Concise intro',
-    subject: 'Quick introduction — {{pos}} in {{loc}}',
-    body: `Hi {{fn}},
+    o1: {
+      subject: 'Quick introduction — {{pos}} in {{loc}}',
+      body: `Hi {{fn}},
 
 I'm {{sender}}, Recruitment Manager at Fute Global LLC. Pleasure to connect, albeit virtually.
 
@@ -88,8 +158,76 @@ I came across the {{pos}} opening in {{loc}} and went through the job descriptio
 If helpful, would you like to review a few resumes?
 
 I look forward to hearing from you.`
+    },
+    fu1: {
+      subject: 'Re: Quick introduction — {{pos}} in {{loc}}',
+      body: `Hi {{fn}},
+
+Quick follow-up on your {{pos}} role in {{loc}} — still have candidates with {{job_resp}} experience on {{company_service}} projects who may fit.
+
+Would you like to see a few resumes?
+
+I look forward to hearing from you.`
+    },
+    fu2: {
+      subject: 'Re: Quick introduction — {{pos}} in {{loc}}',
+      body: `Hi {{fn}},
+
+Last note on {{pos}} in {{loc}} — happy to share resumes for candidates with {{job_resp}} experience on {{company_service}} work when you're ready.
+
+I look forward to hearing from you.`
+    }
+  },
+  {
+    id: 'v5',
+    label: 'Direct value',
+    o1: {
+      subject: '{{pos}} in {{loc}} — qualified candidates available',
+      body: `Hi {{fn}},
+
+I'm {{sender}}, Recruitment Manager at Fute Global LLC. We place direct-hire talent and I wanted to connect about your {{pos}} opening in {{loc}}.
+
+After reviewing the job description, we have candidates with solid {{job_resp}} experience on {{company_service}} projects who look well matched — available for your screening with no obligation to proceed.
+
+Would it make sense to review a few resumes?
+
+I look forward to hearing from you.`
+    },
+    fu1: {
+      subject: 'Re: {{pos}} in {{loc}} — qualified candidates available',
+      body: `Hi {{fn}},
+
+Circling back on your {{pos}} role in {{loc}}. We still have qualified candidates with {{job_resp}} experience on {{company_service}} projects ready for your review.
+
+Would you like me to share their resumes?
+
+I look forward to hearing from you.`
+    },
+    fu2: {
+      subject: 'Re: {{pos}} in {{loc}} — qualified candidates available',
+      body: `Hi {{fn}},
+
+Final follow-up on the {{pos}} position in {{loc}}. Candidates with {{job_resp}} background on {{company_service}} projects remain available whenever you'd like to take a look.
+
+Would you like me to send a few resumes?
+
+I look forward to hearing from you.`
+    }
   }
 ];
+
+/** @deprecated Use OUTREACH_VARIANTS — kept for callers expecting flat subject/body */
+const OUTREACH_O1_VARIANTS = OUTREACH_VARIANTS.map(v => ({
+  id: v.id,
+  label: v.label,
+  subject: v.o1.subject,
+  body: v.o1.body
+}));
+
+function getVariantById(id) {
+  const key = String(id || '').trim();
+  return OUTREACH_VARIANTS.find(v => v.id === key) || OUTREACH_VARIANTS[0];
+}
 
 function shuffleInPlace(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -99,8 +237,8 @@ function shuffleInPlace(arr) {
   return arr;
 }
 
-/** Deal templates from a shuffled deck — each variant used once before any repeat. */
-function buildRotatingTemplateDeck(count, variants = OUTREACH_O1_VARIANTS) {
+/** Deal full style variants from a shuffled deck — each used once before any repeat. */
+function buildRotatingTemplateDeck(count, variants = OUTREACH_VARIANTS) {
   const deck = [];
   while (deck.length < count) {
     deck.push(...shuffleInPlace([...variants]));
@@ -219,7 +357,9 @@ function resolveTemplate(saved, templateKey) {
 
 module.exports = {
   DEFAULT_TEMPLATES,
+  OUTREACH_VARIANTS,
   OUTREACH_O1_VARIANTS,
+  getVariantById,
   buildEmailVars,
   fillTemplate,
   formatSkillsLine,
