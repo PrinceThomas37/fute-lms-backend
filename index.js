@@ -1087,6 +1087,9 @@ app.put('/contacts/:id', auth, async (req, res) => {
     fields.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
     const { data, error } = await supabase.from('contacts').update(updates).eq('id', req.params.id).select().single();
     if (error) throw error;
+    if (req.body.email_status !== undefined && isPermanentFollowupBlock(req.body.email_status)) {
+      await skipActiveFollowUpsForContact(req.params.id);
+    }
     res.json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1116,6 +1119,9 @@ app.patch('/contacts/:id/email-status', auth, async (req, res) => {
       const contactName = `${contact.first_name || ''} ${contact.last_name || ''}`.trim();
       await supabase.from('reminders').insert({ job_id: contact.job_id, user_id: req.user.id, contact_name: contactName, company_name: contact.job?.company?.name || '', email: contact.email, return_date: ooo_until, reminder_time: '09:00', note: `${contactName} is back from OOO.`, status: 'pending', reminder_type: 'ooo_return', contact_id: contact.id });
       await logActivity(contact.job_id, contact.id, req.user.id, 'ooo_set', `${contactName} marked OOO until ${ooo_until}`, null, { ooo_until });
+    }
+    if (isPermanentFollowupBlock(email_status)) {
+      await skipActiveFollowUpsForContact(contact.id);
     }
     res.json(contact);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1975,9 +1981,21 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
   const { autoSend = false } = opts;
   const sendWindow = await getSendWindowHours();
   const totalCount = pendingEmails.length;
-  let sent = 0, failed = 0, skippedWindow = 0, skippedQuota = 0, skippedDomain = 0;
+  let sent = 0, failed = 0, skippedWindow = 0, skippedQuota = 0, skippedDomain = 0, skippedContactStatus = 0;
   const failDetails = [], sentContactIds = [], sentJobIds = [];
   const startedAt = new Date().toISOString();
+
+  const followupContactIds = [...new Set(
+    pendingEmails
+      .filter(e => e.followup_type === 'fu1' || e.followup_type === 'fu2')
+      .map(e => e.contact_id)
+      .filter(Boolean)
+  )];
+  const contactStatusById = {};
+  if (followupContactIds.length) {
+    const { data: followupContacts } = await supabase.from('contacts').select('id,email,email_status').in('id', followupContactIds);
+    (followupContacts || []).forEach(c => { contactStatusById[c.id] = c; });
+  }
 
   const mailboxIds = [...new Set(pendingEmails.map(e => e.job?.sending_email_id).filter(Boolean))];
   const [mailboxSignatures, quotaState] = await Promise.all([
@@ -2006,8 +2024,9 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
 
     const progressBase = {
       active: true, total: totalCount, sent, failed,
-      deferred: skippedWindow + skippedQuota + skippedDomain,
+      deferred: skippedWindow + skippedQuota + skippedDomain + skippedContactStatus,
       deferredWindow: skippedWindow, deferredQuota: skippedQuota, deferredDomain: skippedDomain,
+      skippedContactStatus,
       failDetails, startedAt, autoSend
     };
 
@@ -2059,6 +2078,17 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
       continue;
     }
 
+    const isFollowup = email.followup_type === 'fu1' || email.followup_type === 'fu2';
+    if (isFollowup && email.contact_id) {
+      const contact = contactStatusById[email.contact_id];
+      if (contact && !isFollowupEligibleContact(contact)) {
+        skippedContactStatus++;
+        await cancelBlockedFollowupSend(email, contact.email_status);
+        await setSendProgress(userId, { ...progressBase, current: `${email.to_email} (follow-up skipped: ${contactEmailStatus(contact)})` });
+        continue;
+      }
+    }
+
     await waitForMailboxSlot(userEmailId, lastSendAtByMailbox, delays);
     await setSendProgress(userId, { ...progressBase, current: email.to_email });
 
@@ -2092,7 +2122,7 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
     }
   }
 
-  return { sent, failed, skippedWindow, skippedQuota, skippedDomain, failDetails, sentContactIds, sentJobIds, totalCount, sendWindow };
+  return { sent, failed, skippedWindow, skippedQuota, skippedDomain, skippedContactStatus, failDetails, sentContactIds, sentJobIds, totalCount, sendWindow };
 }
 
 async function retryDeferredPendingSends() {
@@ -2256,10 +2286,10 @@ app.post('/distribute/execute', auth, async (req, res) => {
     const fu2Date = new Date(now); fu2Date.setDate(fu2Date.getDate() + fu2Day);
     const fu1Str = fu1Date.toISOString().split('T')[0];
     const fu2Str = fu2Date.toISOString().split('T')[0];
-    const { data: assignedJobs } = await supabase.from('jobs').select('id,sending_email_id,contacts(id,email)').in('id', jobIds);
+    const { data: assignedJobs } = await supabase.from('jobs').select('id,sending_email_id,contacts(id,email,email_status)').in('id', jobIds);
     const followUpRows = [];
     for (const aj of (assignedJobs || [])) {
-      const contacts = (aj.contacts || []).filter(c => isValidEmail(c.email));
+      const contacts = (aj.contacts || []).filter(c => isValidEmail(c.email) && isFollowupEligibleContact(c));
       for (const c of contacts) {
         followUpRows.push({ job_id: aj.id, contact_id: c.id, user_email_id: aj.sending_email_id, outreach_sent_at: outreachDateStr, followup1_due_date: fu1Str, followup2_due_date: fu2Str, status: 'active' });
       }
@@ -2566,10 +2596,10 @@ app.post('/follow-ups/run', auth, async (req, res) => {
 
 async function runFollowupEngine() {
   const todayDate = today();
-  const log = { checked: 0, fu1_queued: 0, fu2_queued: 0, skipped_quota: 0, skipped_stage: 0 };
+  const log = { checked: 0, fu1_queued: 0, fu2_queued: 0, skipped_quota: 0, skipped_stage: 0, skipped_contact_status: 0 };
   try {
     const { data: dueFu, error: fuErr } = await supabase.from('follow_ups')
-      .select(`*, contact:contacts(id,first_name,last_name,email,designation), job:jobs(id,position,location,salary_range,research,industry,stage,timezone,assigned_to_bd,company:companies(name,industry,location),sending_email:user_emails!sending_email_id(id,email_address,display_name))`)
+      .select(`*, contact:contacts(id,first_name,last_name,email,designation,email_status,ooo_until), job:jobs(id,position,location,salary_range,research,industry,stage,timezone,assigned_to_bd,company:companies(name,industry,location),sending_email:user_emails!sending_email_id(id,email_address,display_name))`)
       .eq('status', 'active');
     if (fuErr) throw fuErr;
     log.checked = (dueFu || []).length;
@@ -2620,6 +2650,13 @@ async function runFollowupEngine() {
         if (rem <= 0) { log.skipped_quota++; continue; }
         const contact = fu.contact;
         if (!contact?.email) continue;
+        if (!isFollowupEligibleContact(contact)) {
+          log.skipped_contact_status++;
+          if (isPermanentFollowupBlock(contactEmailStatus(contact))) {
+            await supabase.from('follow_ups').update({ status: 'skipped' }).eq('id', fu.id);
+          }
+          continue;
+        }
         const bdId = job.assigned_to_bd;
         // Use sending email display_name so signature matches the From address
         const senderName = job.sending_email?.display_name || bdMap[bdId] || 'Fute Global';
@@ -2649,7 +2686,7 @@ async function runFollowupEngine() {
     for (const [acId, cnt] of Object.entries(acCountDelta)) {
       await supabase.from('email_send_log').upsert({ user_email_id: acId, send_date: todayDate, emails_sent: (sentToday[acId] || 0) + cnt }, { onConflict: 'user_email_id,send_date' });
     }
-    console.log(`[FollowupEngine] FU1: ${log.fu1_queued}, FU2: ${log.fu2_queued}, skipped_quota: ${log.skipped_quota}, skipped_stage: ${log.skipped_stage}`);
+    console.log(`[FollowupEngine] FU1: ${log.fu1_queued}, FU2: ${log.fu2_queued}, skipped_quota: ${log.skipped_quota}, skipped_stage: ${log.skipped_stage}, skipped_contact_status: ${log.skipped_contact_status}`);
     return log;
   } catch (err) { console.error('[FollowupEngine] Error:', err.message); return { ...log, error: err.message }; }
 }
@@ -2775,6 +2812,42 @@ app.get('/auth/microsoft/callback', async (req, res) => {
 // Validate recipient email before sending — prevents Microsoft Graph 'not resolved' errors
 function isValidEmail(addr) {
   return typeof addr === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr.trim());
+}
+
+const BLOCKED_FOLLOWUP_STATUSES = new Set(['invalid', 'deactivated', 'out_of_office']);
+
+function contactEmailStatus(contact) {
+  return String(contact?.email_status || 'valid').toLowerCase();
+}
+
+function isFollowupEligibleContact(contact) {
+  if (!contact || !isValidEmail(contact.email)) return false;
+  return !BLOCKED_FOLLOWUP_STATUSES.has(contactEmailStatus(contact));
+}
+
+function isPermanentFollowupBlock(status) {
+  const s = String(status || '').toLowerCase();
+  return s === 'invalid' || s === 'deactivated';
+}
+
+async function skipActiveFollowUpsForContact(contactId) {
+  if (!contactId) return;
+  await supabase.from('follow_ups').update({ status: 'skipped' }).eq('contact_id', contactId).eq('status', 'active');
+}
+
+async function cancelBlockedFollowupSend(email, contactStatus) {
+  if (!email?.id) return;
+  try { await supabase.from('emails').delete().eq('id', email.id); } catch (_) {}
+  if (!email.follow_up_id) return;
+  const status = String(contactStatus || '').toLowerCase();
+  if (email.followup_type === 'fu1') {
+    await supabase.from('follow_ups').update({ followup1_sent_at: null }).eq('id', email.follow_up_id);
+  } else if (email.followup_type === 'fu2') {
+    await supabase.from('follow_ups').update({ followup2_sent_at: null, status: 'active' }).eq('id', email.follow_up_id);
+  }
+  if (isPermanentFollowupBlock(status)) {
+    await supabase.from('follow_ups').update({ status: 'skipped' }).eq('id', email.follow_up_id);
+  }
 }
 
 function randomDelay(minSec = 1, maxSec = 120) {
