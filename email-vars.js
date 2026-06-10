@@ -31,6 +31,87 @@ Would you like me to share a few resumes?
 I look forward to hearing from you.`
 };
 
+/** Four outreach-1 variants — must stay in sync with OUTREACH_STYLE_PRESETS in public/index.html */
+const OUTREACH_O1_VARIANTS = [
+  {
+    id: 'v1',
+    label: 'Introduction',
+    subject: 'Assistance for {{pos}} in {{loc}}',
+    body: `Hi {{fn}},
+
+We are yet to be introduced, but I am {{sender}}, BD Manager at Fute Global LLC.
+
+I came across your job opening for a {{pos}} in {{loc}}. I have gone through the job description, and we have several candidates who are experienced in {{job_resp}} for {{company_service}} projects. They are a good fit for the position. These candidates are open to direct hire and yet to be screened for your current open position.
+
+Would you like to review the resumes?
+
+I look forward to hearing from you.`
+  },
+  {
+    id: 'v2',
+    label: 'Warm opener',
+    subject: 'Candidates for your {{pos}} opening in {{loc}}',
+    body: `Hi {{fn}},
+
+I hope this note finds you well. I'm {{sender}}, BD Manager at Fute Global LLC — we haven't met yet.
+
+I noticed your {{pos}} opening in {{loc}} and reviewed the job description. We have several candidates with strong experience in {{job_resp}}, particularly on {{company_service}} projects. They appear well aligned with what you're looking for and are available for direct hire, pending your screening.
+
+Would you be open to reviewing their resumes?
+
+I look forward to hearing from you.`
+  },
+  {
+    id: 'v3',
+    label: 'Respectful reach-out',
+    subject: '{{pos}} role in {{loc}} — resume review',
+    body: `Hi {{fn}},
+
+My name is {{sender}}, BD Manager at Fute Global LLC. We've not been introduced, but I wanted to reach out respectfully.
+
+Your {{pos}} role in {{loc}} caught my attention. After reading through the requirements, I have a shortlist of candidates experienced in {{job_resp}} across {{company_service}} projects — a solid match for the position. They're open to direct hire and have not yet been presented to you.
+
+Would you like me to share their resumes for review?
+
+I look forward to hearing from you.`
+  },
+  {
+    id: 'v4',
+    label: 'Concise intro',
+    subject: 'Quick introduction — {{pos}} in {{loc}}',
+    body: `Hi {{fn}},
+
+I'm {{sender}}, BD Manager at Fute Global LLC. Pleasure to connect, albeit virtually.
+
+I came across the {{pos}} opening in {{loc}} and went through the job description. We have candidates with hands-on {{job_resp}} experience on {{company_service}} engagements who look like a strong fit. They're direct-hire ready and haven't been screened for your role yet.
+
+If helpful, would you like to review a few resumes?
+
+I look forward to hearing from you.`
+  }
+];
+
+function shuffleInPlace(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+/** Deal templates from a shuffled deck — each variant used once before any repeat. */
+function buildRotatingTemplateDeck(count, variants = OUTREACH_O1_VARIANTS) {
+  const deck = [];
+  while (deck.length < count) {
+    deck.push(...shuffleInPlace([...variants]));
+  }
+  return deck.slice(0, count);
+}
+
+function isRandomTemplateMode(value) {
+  return value === 'true' || value === true;
+}
+
 function formatJobResp(skills) {
   const list = (skills || []).filter(Boolean).slice(0, 3);
   if (!list.length) return 'the key requirements';
@@ -127,11 +208,14 @@ function resolveTemplate(saved, templateKey) {
 
 module.exports = {
   DEFAULT_TEMPLATES,
+  OUTREACH_O1_VARIANTS,
   buildEmailVars,
   fillTemplate,
   formatSkillsLine,
   formatJobResp,
   formatCompanyService,
   isLegacyTemplate,
-  resolveTemplate
+  resolveTemplate,
+  buildRotatingTemplateDeck,
+  isRandomTemplateMode
 };

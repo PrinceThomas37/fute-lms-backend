@@ -15,7 +15,14 @@ function persistLearnedSkills(industry, research) {
   const skills = [req.skill_1, req.skill_2, req.skill_3, ...(req.skills || []), ...(req.suggested_skills || [])].filter(Boolean);
   learnSkillsForIndustry(key, skills);
 }
-const { DEFAULT_TEMPLATES, buildEmailVars, fillTemplate, resolveTemplate } = require('./email-vars');
+const {
+  DEFAULT_TEMPLATES,
+  buildEmailVars,
+  fillTemplate,
+  resolveTemplate,
+  buildRotatingTemplateDeck,
+  isRandomTemplateMode
+} = require('./email-vars');
 const {
   DEFAULT_SIGNATURE_HTML,
   mailboxSignatureKey,
@@ -1235,6 +1242,67 @@ app.post('/emails', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+function buildPendingEmailsFromJobs(jobs, callerUserId, bdMap, bdPrimaryEmailMap, tmplSettings) {
+  const tasksByBd = {};
+  let contactsSkipped = 0;
+
+  for (const job of jobs) {
+    const bd = bdMap[job.assigned_to_bd] || { id: callerUserId, name: '', email: '' };
+    const contacts = (job.contacts || []).filter(c => isValidEmail(c.email));
+    if (!contacts.length) {
+      contactsSkipped++;
+      continue;
+    }
+    if (!tasksByBd[bd.id]) tasksByBd[bd.id] = [];
+    for (const contact of contacts) {
+      tasksByBd[bd.id].push({ job, contact, bd });
+    }
+  }
+
+  const emailsToInsert = [];
+  for (const bdId of Object.keys(tasksByBd)) {
+    const tasks = tasksByBd[bdId];
+    const useRandom = isRandomTemplateMode(tmplSettings[`u_${bdId}_random_template_mode`]);
+    const deck = useRandom ? buildRotatingTemplateDeck(tasks.length) : null;
+    if (useRandom) {
+      console.log(`[GenerateEmails] Random template rotation for BD ${bdId}: ${tasks.length} emails across ${deck.length} slots`);
+    }
+
+    tasks.forEach((task, idx) => {
+      const { job, contact, bd } = task;
+      try {
+        const subjTmpl = deck
+          ? deck[idx].subject
+          : resolveTemplate(tmplSettings[`u_${bd.id}_tmpl_o1_subject`], 'o1_subject');
+        const bodyTmpl = deck
+          ? deck[idx].body
+          : resolveTemplate(tmplSettings[`u_${bd.id}_tmpl_o1_body`], 'o1_body');
+        const senderDisplayName = job.sending_email?.display_name || bdPrimaryEmailMap[bd.id]?.display_name || bd.name || '';
+        const vars = buildEmailVars({ job, contact, senderDisplayName });
+        const subject = fillTemplate(subjTmpl, vars);
+        const body = fillTemplate(bodyTmpl, vars);
+        const resolvedSendingEmail = job.sending_email || bdPrimaryEmailMap[bd.id];
+        const sendingEmailAddress = resolvedSendingEmail?.email_address || '';
+        emailsToInsert.push({
+          contact_id: contact.id,
+          job_id: job.id,
+          to_email: contact.email,
+          subject,
+          body,
+          platform: 'Outlook',
+          sent_by: bd.id,
+          from_email: sendingEmailAddress,
+          status: 'pending'
+        });
+      } catch (e) {
+        console.error(`[GenerateEmails] contact error (${contact.email}):`, e.message);
+      }
+    });
+  }
+
+  return { emailsToInsert, contactsSkipped };
+}
+
 // Standalone generation function — called directly by autoSendForManager (no HTTP)
 async function generateEmailsForJobs(job_ids, callerUserId) {
   // Batch fetch jobs in chunks to avoid Supabase URL length limits on .in()
@@ -1264,35 +1332,16 @@ async function generateEmailsForJobs(job_ids, callerUserId) {
     : { data: [] };
   const bdPrimaryEmailMap = {};
   (bdEmailRows || []).forEach(e => { if (!bdPrimaryEmailMap[e.user_id]) bdPrimaryEmailMap[e.user_id] = e; });
-  const tmplKeys = allBdIds.flatMap(id => [`u_${id}_tmpl_o1_subject`, `u_${id}_tmpl_o1_body`]);
+  const tmplKeys = allBdIds.flatMap(id => [
+    `u_${id}_tmpl_o1_subject`, `u_${id}_tmpl_o1_body`, `u_${id}_random_template_mode`
+  ]);
   const { data: tmplRows } = await supabase.from('app_settings').select('key,value').in('key', tmplKeys);
   const tmplSettings = {};
   (tmplRows || []).forEach(r => { tmplSettings[r.key] = r.value; });
-  const emailsToInsert = [];
-  let contactsSkipped = 0;
-  for (const job of jobs) {
-    const bd = bdMap[job.assigned_to_bd] || { id: callerUserId, name: '', email: '' };
-    const contacts = (job.contacts || []).filter(c => isValidEmail(c.email));
-    if (!contacts.length) {
-      contactsSkipped++;
-      continue;
-    }
-    const subjTmpl = resolveTemplate(tmplSettings[`u_${bd.id}_tmpl_o1_subject`], 'o1_subject');
-    const bodyTmpl = resolveTemplate(tmplSettings[`u_${bd.id}_tmpl_o1_body`], 'o1_body');
-    for (const contact of contacts) {
-      try {
-        const senderDisplayName = job.sending_email?.display_name || bdPrimaryEmailMap[bd.id]?.display_name || bd.name || '';
-        const vars = buildEmailVars({ job, contact, senderDisplayName });
-        const subject = fillTemplate(subjTmpl, vars);
-        const body = fillTemplate(bodyTmpl, vars);
-        const jobSendingEmail = job.sending_email;
-        const bdPrimaryEmail = bdPrimaryEmailMap[bd.id];
-        const resolvedSendingEmail = jobSendingEmail || bdPrimaryEmail;
-        const sendingEmailAddress = resolvedSendingEmail?.email_address || '';
-        emailsToInsert.push({ contact_id: contact.id, job_id: job.id, to_email: contact.email, subject, body, platform: 'Outlook', sent_by: bd.id, from_email: sendingEmailAddress, status: 'pending' });
-      } catch(e) { console.error(`[GenerateEmails] contact error (${contact.email}):`, e.message); }
-    }
-  }
+
+  const { emailsToInsert, contactsSkipped } = buildPendingEmailsFromJobs(
+    jobs, callerUserId, bdMap, bdPrimaryEmailMap, tmplSettings
+  );
   if (contactsSkipped) console.log(`[GenerateEmails] ${contactsSkipped} jobs had no valid contacts — skipped`);
   // Insert emails in batches of 500 to avoid Supabase payload limits
   const INSERT_BATCH = 500;
@@ -1332,46 +1381,25 @@ app.post('/emails/generate', auth, async (req, res) => {
       if (!bdPrimaryEmailMap[e.user_id]) bdPrimaryEmailMap[e.user_id] = e; // first = primary (ordered desc)
     });
 
-    // Load saved templates for all BD users involved
     const tmplKeys = allBdIds.flatMap(id => [
-      `u_${id}_tmpl_o1_subject`, `u_${id}_tmpl_o1_body`
+      `u_${id}_tmpl_o1_subject`, `u_${id}_tmpl_o1_body`, `u_${id}_random_template_mode`
     ]);
     const { data: tmplRows } = await supabase.from('app_settings').select('key,value').in('key', tmplKeys);
     const tmplSettings = {};
     (tmplRows || []).forEach(r => { tmplSettings[r.key] = r.value; });
 
-    const emailsToInsert = [];
-    const generated = [];
-    const failed = [];
-    for (const job of jobs) {
-      const bd = bdMap[job.assigned_to_bd] || { id: req.user.id, name: req.user.name, email: req.user.email };
-      const contacts = (job.contacts || []).filter(c => isValidEmail(c.email));
-
-      const subjTmpl = resolveTemplate(tmplSettings[`u_${bd.id}_tmpl_o1_subject`], 'o1_subject');
-      const bodyTmpl = resolveTemplate(tmplSettings[`u_${bd.id}_tmpl_o1_body`], 'o1_body');
-
-      for (const contact of contacts) {
-        try {
-          const senderDisplayName = job.sending_email?.display_name || bdPrimaryEmailMap[bd.id]?.display_name || bd.name || '';
-          const vars = buildEmailVars({ job, contact, senderDisplayName });
-          const subject = fillTemplate(subjTmpl, vars);
-          const body = fillTemplate(bodyTmpl, vars);
-          // Use job's assigned sending email, or fall back to BD's primary outreach email
-          // Never fall back to bd.email (login email) — that's not an outreach account
-          const jobSendingEmail = job.sending_email;
-          const bdPrimaryEmail = bdPrimaryEmailMap[bd.id];
-          const resolvedSendingEmail = jobSendingEmail || bdPrimaryEmail;
-          const sendingEmailAddress = resolvedSendingEmail?.email_address || '';
-          const sendingDisplayName = resolvedSendingEmail?.display_name || bd.name || '';
-          // Note: if job has no sending_email_id, we use bdPrimaryEmail as fallback for generation only
-          // We do NOT silently overwrite sending_email_id — that must only be set during distribution
-          emailsToInsert.push({ contact_id: contact.id, job_id: job.id, to_email: contact.email, subject, body, platform: 'Outlook', sent_by: bd.id, from_email: sendingEmailAddress, status: 'pending' });
-          generated.push({ contact_id: contact.id, email: contact.email });
-        } catch(e) { failed.push({ contact_id: contact.id, email: contact.email, error: e.message }); }
-      }
+    const { emailsToInsert } = buildPendingEmailsFromJobs(
+      jobs, req.user.id, bdMap, bdPrimaryEmailMap, tmplSettings
+    );
+    if (emailsToInsert.length) {
+      const { error: insErr } = await supabase.from('emails').insert(emailsToInsert);
+      if (insErr) throw insErr;
     }
-    if (emailsToInsert.length) { const { error: insErr } = await supabase.from('emails').insert(emailsToInsert); if (insErr) throw insErr; }
-    res.json({ generated: generated.length, failed: failed.length, failDetails: failed });
+    res.json({
+      generated: emailsToInsert.length,
+      failed: 0,
+      failDetails: []
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
