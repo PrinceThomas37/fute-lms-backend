@@ -36,6 +36,12 @@ function upgradeSignatureTagline(signatureHtml) {
   );
 }
 
+function upgradeSignatureTitle(signatureHtml) {
+  return String(signatureHtml || '')
+    .replace(/BD Manager at Fute Global LLC/gi, 'Recruitment Manager at Fute Global LLC')
+    .replace(/BD Manager \|/gi, 'Recruitment Manager |');
+}
+
 function fillSignatureHtml(signatureHtml, { displayName, emailAddress }) {
   const sender = displayName || '';
   const senderEmail = emailAddress || '';
@@ -48,7 +54,7 @@ function resolveSignatureHtml(savedHtml) {
   const val = String(savedHtml || '').trim();
   if (!val) return DEFAULT_SIGNATURE_HTML;
   if (isLegacyBlockSignature(val)) return DEFAULT_SIGNATURE_HTML;
-  return upgradeSignatureTagline(val);
+  return upgradeSignatureTitle(upgradeSignatureTagline(val));
 }
 
 module.exports = {
@@ -58,6 +64,7 @@ module.exports = {
   SIGNATURE_TAGLINE,
   isLegacyBlockSignature,
   upgradeSignatureTagline,
+  upgradeSignatureTitle,
   fillSignatureHtml,
   resolveSignatureHtml
 };
