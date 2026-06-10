@@ -544,6 +544,7 @@ var STATE = {
   emailSignaturesCache: {},
   planFromEmailId: null,
   outreachStylePreset: 'standard',
+  composeStylePreset: null,
   randomTemplateMode: false,
   varInsertTarget: 'body',
   showMoreVarChips: false,
@@ -2106,11 +2107,37 @@ function renderEmail(){
           '<div class="fgrp" style="margin-bottom:0"><label class="flbl">From</label><select class="sel" onchange="selectComposeFromEmail(this.value)">'+composeFromOpts+'</select></div>'
           :'<div style="font-size:12px;color:var(--amber)">No sending email ID assigned — ask your admin to add one.</div>')+
       '</div>'+
+      (function(){
+        var presetKeys=Object.keys(OUTREACH_STYLE_PRESETS);
+        var composePresetBtns=presetKeys.map(function(pk){
+          var p=OUTREACH_STYLE_PRESETS[pk];
+          var on=STATE.composeStylePreset===pk&&!STATE.randomTemplateMode;
+          return '<button type="button" onclick="applyComposeTemplate(\''+pk+'\')" style="text-align:left;padding:8px 12px;border-radius:9px;cursor:pointer;border:2px solid '+(on?'var(--accent)':'var(--border)')+';background:'+(on?'var(--accent-l)':'var(--card)')+';flex:1;min-width:120px">'+
+            '<div style="font-weight:700;font-size:12px;color:'+(on?'var(--accent)':'var(--text)')+'">'+htmlEsc(p.label)+'</div>'+
+            '<div style="font-size:10px;color:var(--text3);margin-top:2px">'+htmlEsc(p.hint)+'</div></button>';
+        }).join('');
+        return '<div class="card cp mb3">'+
+          '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'+
+            '<div class="fw6" style="font-size:13px">Template</div>'+
+            '<div style="display:flex;border:1px solid var(--border);border-radius:20px;overflow:hidden;background:var(--card)">'+
+              '<button type="button" onclick="STATE.randomTemplateMode=false;render()" style="padding:3px 12px;font-size:12px;font-weight:600;cursor:pointer;border:0;border-radius:20px 0 0 20px;background:'+(STATE.randomTemplateMode?'transparent':'var(--accent)')+';color:'+(STATE.randomTemplateMode?'var(--text3)':'#fff')+'">Specific</button>'+
+              '<button type="button" onclick="STATE.randomTemplateMode=true;render()" style="padding:3px 12px;font-size:12px;font-weight:600;cursor:pointer;border:0;border-radius:0 20px 20px 0;background:'+(STATE.randomTemplateMode?'var(--accent)':'transparent')+';color:'+(STATE.randomTemplateMode?'#fff':'var(--text3)')+'">Random</button>'+
+            '</div>'+
+          '</div>'+
+          (STATE.randomTemplateMode?
+            '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--accent-l);border-radius:var(--r2)">'+
+              '<div style="flex:1;font-size:12.5px;color:var(--text2)">&#8652; A style will be picked at random when you send.</div>'+
+              '<button type="button" onclick="applyComposeTemplate(null)" style="padding:5px 14px;background:var(--accent);color:#fff;border:0;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Pick now</button>'+
+            '</div>':
+            '<div style="display:flex;gap:8px;flex-wrap:wrap">'+composePresetBtns+'</div>'
+          )+
+        '</div>';
+      })()+
       '<div class="card cp mb3">'+
         '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="email-subj" value="'+htmlEsc(STATE.composeSubj)+'" oninput="STATE.composeSubj=this.value" placeholder="Email subject"/></div>'+
         '<div class="fgrp"><label class="flbl">Message</label><textarea class="txta w100" style="min-height:180px" id="email-body" oninput="STATE.composeBody=this.value" placeholder="Write your message here...">'+htmlEsc(STATE.composeBody)+'</textarea></div>'+
         '<div style="display:flex;justify-content:flex-end;margin-top:12px">'+
-          '<button class="btn btn-primary" onclick="sendEmail()" '+((hasRecipient&&composeEmails.length)?'':'disabled style="opacity:.5;cursor:not-allowed"')+'>'+ico('send',13)+' Send</button>'+
+          '<button class="btn btn-primary" onclick="sendEmailWithTemplate()" '+((hasRecipient&&composeEmails.length)?'':'disabled style="opacity:.5;cursor:not-allowed"')+'>'+ico('send',13)+' Send</button>'+
         '</div>'+
       '</div>'+
     '</div>';
@@ -3235,6 +3262,42 @@ window.applyOutreachStylePreset=function(presetKey){
   STATE.myOutreachPlan['tmpl_fu2_subject']=preset.fu2.subj;STATE.myOutreachPlan['tmpl_fu2_body']=preset.fu2.body;
   showToast('Applied "'+preset.label+'" style to all templates — review each tab and Save','success');
   render();
+};
+window.applyComposeTemplate=function(presetKey){
+  // null = random pick
+  var keys=Object.keys(OUTREACH_STYLE_PRESETS);
+  var key=presetKey||(keys[Math.floor(Math.random()*keys.length)]);
+  var preset=OUTREACH_STYLE_PRESETS[key];
+  if(!preset)return;
+  STATE.composeStylePreset=key;
+  STATE.randomTemplateMode=!presetKey;
+  // fill compose subject/body — resolve merge vars if a contact+lead is selected
+  var subj=preset.o1.subj;
+  var body=preset.o1.body;
+  if(STATE.composeContactId){
+    var parts=STATE.composeContactId.split('|');
+    var cc=STATE.contacts.find(function(c){return c.id===parts[0];});
+    var cj=(STATE.myJobs||getMyJobs(STATE.user)||[]).find(function(j){return j.id===parts[1];});
+    if(cc&&cj){
+      var co={name:cj.company_name||'',ind:cj.industry||'',loc:cj.location||''};
+      var fromEmForName=STATE.composeFromEmailId?(STATE.userEmailsCache[STATE.user.id]||[]).find(function(e){return e.id===STATE.composeFromEmailId;}):null;
+      var senderName=(fromEmForName&&fromEmForName.display_name)||STATE.user.name||'';
+      subj=fillEmail(subj,cc,co,senderName);
+      body=fillEmail(body,cc,co,senderName);
+    }
+  }
+  STATE.composeSubj=subj;
+  STATE.composeBody=body;
+  showToast('Template applied: "'+preset.label+'"','success');
+  render();
+};
+window.sendEmailWithTemplate=function(){
+  // If random mode and compose fields are still empty/unset, pick a random template first
+  if(STATE.randomTemplateMode&&(!STATE.composeSubj||!STATE.composeBody)){
+    applyComposeTemplate(null);
+    return;
+  }
+  sendEmail();
 };
 window.setVarInsertTarget=function(target){
   STATE.varInsertTarget=target||'body';
