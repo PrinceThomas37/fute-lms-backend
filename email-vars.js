@@ -39,7 +39,7 @@ const OUTREACH_O1_VARIANTS = [
     subject: 'Assistance for {{pos}} in {{loc}}',
     body: `Hi {{fn}},
 
-We are yet to be introduced, but I am {{sender}}, BD Manager at Fute Global LLC.
+We are yet to be introduced, but I am {{sender}}, Recruitment Manager at Fute Global LLC.
 
 I came across your job opening for a {{pos}} in {{loc}}. I have gone through the job description, and we have several candidates who are experienced in {{job_resp}} for {{company_service}} projects. They are a good fit for the position. These candidates are open to direct hire and yet to be screened for your current open position.
 
@@ -53,7 +53,7 @@ I look forward to hearing from you.`
     subject: 'Candidates for your {{pos}} opening in {{loc}}',
     body: `Hi {{fn}},
 
-I hope this note finds you well. I'm {{sender}}, BD Manager at Fute Global LLC — we haven't met yet.
+I hope this note finds you well. I'm {{sender}}, Recruitment Manager at Fute Global LLC — we haven't met yet.
 
 I noticed your {{pos}} opening in {{loc}} and reviewed the job description. We have several candidates with strong experience in {{job_resp}}, particularly on {{company_service}} projects. They appear well aligned with what you're looking for and are available for direct hire, pending your screening.
 
@@ -67,7 +67,7 @@ I look forward to hearing from you.`
     subject: '{{pos}} role in {{loc}} — resume review',
     body: `Hi {{fn}},
 
-My name is {{sender}}, BD Manager at Fute Global LLC. We've not been introduced, but I wanted to reach out respectfully.
+My name is {{sender}}, Recruitment Manager at Fute Global LLC. We've not been introduced, but I wanted to reach out respectfully.
 
 Your {{pos}} role in {{loc}} caught my attention. After reading through the requirements, I have a shortlist of candidates experienced in {{job_resp}} across {{company_service}} projects — a solid match for the position. They're open to direct hire and have not yet been presented to you.
 
@@ -81,7 +81,7 @@ I look forward to hearing from you.`
     subject: 'Quick introduction — {{pos}} in {{loc}}',
     body: `Hi {{fn}},
 
-I'm {{sender}}, BD Manager at Fute Global LLC. Pleasure to connect, albeit virtually.
+I'm {{sender}}, Recruitment Manager at Fute Global LLC. Pleasure to connect, albeit virtually.
 
 I came across the {{pos}} opening in {{loc}} and went through the job description. We have candidates with hands-on {{job_resp}} experience on {{company_service}} engagements who look like a strong fit. They're direct-hire ready and haven't been screened for your role yet.
 
@@ -183,6 +183,8 @@ function buildEmailVars({ job, contact, senderDisplayName }) {
 
 /** Fingerprints of outdated outreach templates saved in app_settings. */
 const LEGACY_TEMPLATE_MARKERS = [
+  /BD Manager at Fute Global LLC/i,
+  /BD Manager \|/i,
   /I'd like to check before sending/i,
   /I'm reaching out about your {{pos}} opening/i,
   /There's no charge to review resumes/i,
