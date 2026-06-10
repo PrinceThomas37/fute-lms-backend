@@ -2120,8 +2120,8 @@ function renderEmail(){
           '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'+
             '<div class="fw6" style="font-size:13px">Template</div>'+
             '<div style="display:flex;border:1px solid var(--border);border-radius:20px;overflow:hidden;background:var(--card)">'+
-              '<button type="button" onclick="STATE.randomTemplateMode=false;render()" style="padding:3px 12px;font-size:12px;font-weight:600;cursor:pointer;border:0;border-radius:20px 0 0 20px;background:'+(STATE.randomTemplateMode?'transparent':'var(--accent)')+';color:'+(STATE.randomTemplateMode?'var(--text3)':'#fff')+'">Specific</button>'+
-              '<button type="button" onclick="STATE.randomTemplateMode=true;render()" style="padding:3px 12px;font-size:12px;font-weight:600;cursor:pointer;border:0;border-radius:0 20px 20px 0;background:'+(STATE.randomTemplateMode?'var(--accent)':'transparent')+';color:'+(STATE.randomTemplateMode?'#fff':'var(--text3)')+'">Random</button>'+
+              '<button type="button" onclick="setTemplateModeSpecific()" style="padding:3px 12px;font-size:12px;font-weight:600;cursor:pointer;border:0;border-radius:20px 0 0 20px;background:'+(STATE.randomTemplateMode?'transparent':'var(--accent)')+';color:'+(STATE.randomTemplateMode?'var(--text3)':'#fff')+'">Specific</button>'+
+              '<button type="button" onclick="setTemplateModeRandom()" style="padding:3px 12px;font-size:12px;font-weight:600;cursor:pointer;border:0;border-radius:0 20px 20px 0;background:'+(STATE.randomTemplateMode?'var(--accent)':'transparent')+';color:'+(STATE.randomTemplateMode?'#fff':'var(--text3)')+'">Random</button>'+
             '</div>'+
           '</div>'+
           (STATE.randomTemplateMode?
@@ -3263,21 +3263,49 @@ window.applyOutreachStylePreset=function(presetKey){
   showToast('Applied "'+preset.label+'" style to all templates — review each tab and Save','success');
   render();
 };
+window.setTemplateModeSpecific=function(){
+  STATE.randomTemplateMode=false;
+  var userId=STATE.user&&STATE.user.id;
+  if(userId){
+    try{var s=localStorage.getItem('fute_tmpl_mode_'+userId);var p=s?JSON.parse(s):{};p.random=false;localStorage.setItem('fute_tmpl_mode_'+userId,JSON.stringify(p));}catch(e){}
+    if(userHasAnyRole(STATE.user,'bd','bd_lead','admin'))apiPost('/outreach-plan',{key:'random_template_mode',value:'false'}).catch(function(){});
+  }
+  render();
+};
+window.setTemplateModeRandom=function(){
+  STATE.randomTemplateMode=true;
+  var userId=STATE.user&&STATE.user.id;
+  if(userId){
+    try{var s=localStorage.getItem('fute_tmpl_mode_'+userId);var p=s?JSON.parse(s):{};p.random=true;localStorage.setItem('fute_tmpl_mode_'+userId,JSON.stringify(p));}catch(e){}
+    if(userHasAnyRole(STATE.user,'bd','bd_lead','admin'))apiPost('/outreach-plan',{key:'random_template_mode',value:'true'}).catch(function(){});
+  }
+  render();
+};
 window.applyComposeTemplate=function(presetKey){
   // null = random pick
   var keys=Object.keys(OUTREACH_STYLE_PRESETS);
   var key=presetKey||(keys[Math.floor(Math.random()*keys.length)]);
   var preset=OUTREACH_STYLE_PRESETS[key];
   if(!preset)return;
+  var isRandom=!presetKey;
   STATE.composeStylePreset=key;
-  STATE.randomTemplateMode=!presetKey;
+  STATE.randomTemplateMode=isRandom;
+  // persist selection
+  var userId=STATE.user&&STATE.user.id;
+  if(userId){
+    try{localStorage.setItem('fute_tmpl_mode_'+userId,JSON.stringify({preset:key,random:isRandom}));}catch(e){}
+  }
+  if(userId&&userHasAnyRole(STATE.user,'bd','bd_lead','admin')){
+    apiPost('/outreach-plan',{key:'compose_style_preset',value:key}).catch(function(){});
+    apiPost('/outreach-plan',{key:'random_template_mode',value:isRandom?'true':'false'}).catch(function(){});
+  }
   // fill compose subject/body — resolve merge vars if a contact+lead is selected
   var subj=preset.o1.subj;
   var body=preset.o1.body;
   if(STATE.composeContactId){
     var parts=STATE.composeContactId.split('|');
     var cc=STATE.contacts.find(function(c){return c.id===parts[0];});
-    var cj=(STATE.myJobs||getMyJobs(STATE.user)||[]).find(function(j){return j.id===parts[1];});
+    var cj=getMyJobs(STATE.user).find(function(j){return j.id===parts[1];});
     if(cc&&cj){
       var co={name:cj.company_name||'',ind:cj.industry||'',loc:cj.location||''};
       var fromEmForName=STATE.composeFromEmailId?(STATE.userEmailsCache[STATE.user.id]||[]).find(function(e){return e.id===STATE.composeFromEmailId;}):null;
@@ -7231,6 +7259,8 @@ function apiDelete(p){return apiFetch('DELETE',p);}
 // ── Restore session if present ─────────────────
 STATE.token=sessionStorage.getItem('fg_token')||null;
 try{var _su=sessionStorage.getItem('fg_user');if(_su){var _parsed=JSON.parse(_su);STATE.user=normaliseUser(_parsed);}}catch(e){}
+// Restore template mode preference from localStorage
+try{if(STATE.user&&STATE.user.id){var _tmpl=localStorage.getItem('fute_tmpl_mode_'+STATE.user.id);if(_tmpl){var _tm=JSON.parse(_tmpl);if(_tm.preset)STATE.composeStylePreset=_tm.preset;if(typeof _tm.random==='boolean')STATE.randomTemplateMode=_tm.random;}}}catch(e){}
 // Wipe demo seed data — will be replaced by API on login
 STATE.jobs=[];STATE.contacts=[];STATE.users=[];STATE.companies=[];STATE.emails=[];STATE.reminders=[];STATE.activities=[];STATE.leads=[];
 
@@ -7321,6 +7351,9 @@ function loadAppData(){
         STATE.fu1Body=plan['tmpl_fu1_body']||STATE.fu1Body;
         STATE.fu2Subj=plan['tmpl_fu2_subject']||STATE.fu2Subj;
         STATE.fu2Body=plan['tmpl_fu2_body']||STATE.fu2Body;
+        // restore template mode preference
+        if(plan['compose_style_preset'])STATE.composeStylePreset=plan['compose_style_preset'];
+        if(plan['random_template_mode'])STATE.randomTemplateMode=plan['random_template_mode']==='true';
         render();
       }).catch(function(){});
       apiGet('/users/'+STATE.user.id+'/emails').then(function(emails){
