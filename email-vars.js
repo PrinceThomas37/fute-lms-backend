@@ -6,7 +6,7 @@ const DEFAULT_TEMPLATES = {
   o1_subject: 'Assistance for {{pos}} in {{loc}}',
   o1_body: `Hi {{fn}},
 
-We are yet to be introduced, but I am {{sender}}, BD Manager at Fute Global LLC.
+We are yet to be introduced, but I am {{sender}}, Recruitment Manager at Fute Global LLC.
 
 I came across your job opening for a {{pos}} in {{loc}}. I have gone through the job description, and we have several candidates who are experienced in {{job_resp}} for {{company_service}} projects. They are a good fit for the position. These candidates are open to direct hire and yet to be screened for your current open position.
 
