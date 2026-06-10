@@ -1938,19 +1938,20 @@ function renderEmail(){
           '<div style="display:flex;align-items:center;gap:8px;font-size:12px">'+
             '<span style="color:var(--text3)">Template mode:</span>'+
             '<div style="display:flex;border:1px solid var(--border);border-radius:20px;overflow:hidden;background:var(--card)">'+
-              '<button type="button" onclick="STATE.randomTemplateMode=false;render()" style="padding:4px 14px;font-size:12px;font-weight:600;cursor:pointer;border:0;border-radius:20px 0 0 20px;background:'+(STATE.randomTemplateMode?'transparent':'var(--accent)')+';color:'+(STATE.randomTemplateMode?'var(--text3)':'#fff')+';transition:all .15s">Specific</button>'+
-              '<button type="button" onclick="STATE.randomTemplateMode=true;render()" style="padding:4px 14px;font-size:12px;font-weight:600;cursor:pointer;border:0;border-radius:0 20px 20px 0;background:'+(STATE.randomTemplateMode?'var(--accent)':'transparent')+';color:'+(STATE.randomTemplateMode?'#fff':'var(--text3)')+';transition:all .15s">Random</button>'+
+              '<button type="button" onclick="setTemplateModeSpecific()" style="padding:4px 14px;font-size:12px;font-weight:600;cursor:pointer;border:0;border-radius:20px 0 0 20px;background:'+(STATE.randomTemplateMode?'transparent':'var(--accent)')+';color:'+(STATE.randomTemplateMode?'var(--text3)':'#fff')+';transition:all .15s">Specific</button>'+
+              '<button type="button" onclick="setTemplateModeRandom()" style="padding:4px 14px;font-size:12px;font-weight:600;cursor:pointer;border:0;border-radius:0 20px 20px 0;background:'+(STATE.randomTemplateMode?'var(--accent)':'transparent')+';color:'+(STATE.randomTemplateMode?'#fff':'var(--text3)')+';transition:all .15s">Random</button>'+
             '</div>'+
           '</div>'+
         '</div>'+
         (STATE.randomTemplateMode?
           '<div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">A template will be picked at random each time an outreach email is sent.</div>'+
-          '<div style="padding:10px 14px;background:var(--accent-l);border-radius:var(--r2);font-size:12.5px;color:var(--accent);font-weight:600">'+
+          '<div style="padding:10px 14px;background:var(--accent-l);border-radius:var(--r2);font-size:12.5px;color:var(--accent);font-weight:600;margin-bottom:10px">'+
             '&#8652; Random — one of '+Object.keys(OUTREACH_STYLE_PRESETS).length+' styles will be applied automatically at send time'+
           '</div>':
           '<div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">Start from a proven template — you can edit any field after applying.</div>'+
-          '<div style="display:flex;gap:8px;flex-wrap:wrap">'+styleBtns+'</div>'
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+styleBtns+'</div>'
         )+
+        '<button class="btn btn-primary" onclick="saveTemplateModePreference()" style="font-size:12px;padding:6px 18px">Save preference</button>'+
       '</div>'+
       '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">'+tmplTabBtns+'</div>'+
       '<div class="card cp" style="border-top:3px solid '+activeTmpl.color+'">'+
@@ -3319,11 +3320,35 @@ window.applyComposeTemplate=function(presetKey){
   showToast('Template applied: "'+preset.label+'"','success');
   render();
 };
+window.saveTemplateModePreference=function(){
+  var userId=STATE.user&&STATE.user.id;
+  if(!userId)return;
+  try{
+    var stored=localStorage.getItem('fute_tmpl_mode_'+userId);
+    var p=stored?JSON.parse(stored):{};
+    p.random=STATE.randomTemplateMode;
+    if(STATE.composeStylePreset)p.preset=STATE.composeStylePreset;
+    localStorage.setItem('fute_tmpl_mode_'+userId,JSON.stringify(p));
+  }catch(e){}
+  if(userHasAnyRole(STATE.user,'bd','bd_lead','admin')){
+    var saves=[apiPost('/outreach-plan',{key:'random_template_mode',value:STATE.randomTemplateMode?'true':'false'})];
+    if(STATE.composeStylePreset)saves.push(apiPost('/outreach-plan',{key:'compose_style_preset',value:STATE.composeStylePreset}));
+    Promise.all(saves)
+      .then(function(){showToast('Template mode saved','success');})
+      .catch(function(){showToast('Save failed','error');});
+  } else {
+    showToast('Template mode saved','success');
+  }
+};
 window.sendEmailWithTemplate=function(){
-  // If random mode and compose fields are still empty/unset, pick a random template first
-  if(STATE.randomTemplateMode&&(!STATE.composeSubj||!STATE.composeBody)){
-    applyComposeTemplate(null);
-    return;
+  // If random mode, always pick a fresh random template then send immediately
+  if(STATE.randomTemplateMode){
+    var keys=Object.keys(OUTREACH_STYLE_PRESETS);
+    var key=keys[Math.floor(Math.random()*keys.length)];
+    var preset=OUTREACH_STYLE_PRESETS[key];
+    STATE.composeSubj=preset.o1.subj;
+    STATE.composeBody=preset.o1.body;
+    showToast('Random template selected: "'+preset.label+'"','info');
   }
   sendEmail();
 };
