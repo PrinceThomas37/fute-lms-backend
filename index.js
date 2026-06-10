@@ -2470,7 +2470,7 @@ app.post('/app-settings', auth, async (req, res) => {
 app.get('/outreach-plan', auth, async (req, res) => {
   try {
     const uid = req.user.id;
-    const keys = [`u_${uid}_fu1_day`,`u_${uid}_fu2_day`,`u_${uid}_tmpl_o1_subject`,`u_${uid}_tmpl_o1_body`,`u_${uid}_tmpl_fu1_subject`,`u_${uid}_tmpl_fu1_body`,`u_${uid}_tmpl_fu2_subject`,`u_${uid}_tmpl_fu2_body`,`u_${uid}_signature_html`];
+    const keys = [`u_${uid}_fu1_day`,`u_${uid}_fu2_day`,`u_${uid}_tmpl_o1_subject`,`u_${uid}_tmpl_o1_body`,`u_${uid}_tmpl_fu1_subject`,`u_${uid}_tmpl_fu1_body`,`u_${uid}_tmpl_fu2_subject`,`u_${uid}_tmpl_fu2_body`,`u_${uid}_signature_html`,`u_${uid}_random_template_mode`,`u_${uid}_compose_style_preset`];
     const { data } = await supabase.from('app_settings').select('key,value').in('key', keys);
     const plan = {};
     (data || []).forEach(r => { plan[r.key.replace(`u_${uid}_`, '')] = r.value; });
@@ -2500,7 +2500,7 @@ app.post('/outreach-plan', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'bd', 'bd_lead', 'admin')) return res.status(403).json({ error: 'BD role required' });
     const uid = req.user.id;
-    const allowed = ['fu1_day','fu2_day','tmpl_o1_subject','tmpl_o1_body','tmpl_fu1_subject','tmpl_fu1_body','tmpl_fu2_subject','tmpl_fu2_body','signature_html'];
+    const allowed = ['fu1_day','fu2_day','tmpl_o1_subject','tmpl_o1_body','tmpl_fu1_subject','tmpl_fu1_body','tmpl_fu2_subject','tmpl_fu2_body','signature_html','random_template_mode','compose_style_preset'];
     const { key, value } = req.body;
     if (!allowed.includes(key)) return res.status(400).json({ error: 'Invalid key' });
     const fullKey = `u_${uid}_${key}`;
