@@ -768,9 +768,9 @@ function buildClientEmailVars(l,co,sender){
 }
 function fillEmail(tmpl,l,co,sender){
   var map=buildClientEmailVars(l,co,sender);
-  return tmpl.replace(/{{(\w+)}}/g,function(m,k){
+  return normalizeSenderTitle(tmpl.replace(/{{(\w+)}}/g,function(m,k){
     return map[k]!==undefined?map[k]:m;
-  });
+  }));
 }
 
 // Resume-review outreach presets — same intent, four wording variants for random rotation
@@ -3684,10 +3684,20 @@ function syncMailboxSignatureIfNeeded(userId,emailId,raw,normalized){
   STATE.emailSignaturesCache[emailId]=normalized;
   apiPut('/users/'+userId+'/emails/'+emailId+'/signature',{signature_html:normalized}).catch(function(){});
 }
+function upgradeSignatureTitle(sigHtml){
+  return String(sigHtml||'')
+    .replace(/BD Manager at Fute Global LLC/gi,'Recruitment Manager at Fute Global LLC')
+    .replace(/BD Manager \|/gi,'Recruitment Manager |');
+}
 function normalizeMailboxSignature(sigHtml){
   if(!sigHtml||!String(sigHtml).trim())return'';
   if(isLegacyBlockSignature(sigHtml))return(SIG_PRESETS&&SIG_PRESETS.professional)||sigHtml;
-  return upgradeSignatureTagline(sigHtml);
+  return upgradeSignatureTitle(upgradeSignatureTagline(sigHtml));
+}
+function normalizeSenderTitle(text){
+  return String(text||'')
+    .replace(/BD Manager at Fute Global LLC/gi,'Recruitment Manager at Fute Global LLC')
+    .replace(/BD Manager \|/gi,'Recruitment Manager |');
 }
 function fillSignatureHtml(sigHtml,senderName,senderEmail){
   return String(sigHtml||'')

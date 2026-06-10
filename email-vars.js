@@ -133,8 +133,17 @@ function formatSkillsLine(skills) {
   return ` with experience in ${list.slice(0, -1).join(', ')}, and ${list[list.length - 1]}`;
 }
 
+const SENDER_JOB_TITLE = 'Recruitment Manager';
+
+function normalizeSenderTitle(text) {
+  return String(text || '')
+    .replace(/BD Manager at Fute Global LLC/gi, `${SENDER_JOB_TITLE} at Fute Global LLC`)
+    .replace(/BD Manager \|/gi, `${SENDER_JOB_TITLE} |`);
+}
+
 function fillTemplate(tmpl, vars) {
-  return (tmpl || '').replace(/{{(\w+)}}/g, (m, k) => (vars[k] !== undefined && vars[k] !== null ? vars[k] : m));
+  const filled = (tmpl || '').replace(/{{(\w+)}}/g, (m, k) => (vars[k] !== undefined && vars[k] !== null ? vars[k] : m));
+  return normalizeSenderTitle(filled);
 }
 
 /**
@@ -205,7 +214,7 @@ function isLegacyTemplate(text) {
 function resolveTemplate(saved, templateKey) {
   const val = String(saved || '').trim();
   if (!val || isLegacyTemplate(val)) return DEFAULT_TEMPLATES[templateKey] || '';
-  return val;
+  return normalizeSenderTitle(val);
 }
 
 module.exports = {
@@ -218,6 +227,8 @@ module.exports = {
   formatCompanyService,
   isLegacyTemplate,
   resolveTemplate,
+  normalizeSenderTitle,
+  SENDER_JOB_TITLE,
   buildRotatingTemplateDeck,
   isRandomTemplateMode
 };
