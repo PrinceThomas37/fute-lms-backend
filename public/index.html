@@ -622,6 +622,13 @@ function render(){
     '</div>';
     return;
   }
+  // Save focus/cursor state so we can restore it after DOM rebuild
+  var _ae=document.activeElement;
+  var _focusId=_ae&&_ae.id||'';
+  var _focusPh=_ae&&_ae.placeholder||'';
+  var _focusTag=_ae&&_ae.tagName||'';
+  var _selStart=_ae&&typeof _ae.selectionStart==='number'?_ae.selectionStart:-1;
+  var _selEnd=_ae&&typeof _ae.selectionEnd==='number'?_ae.selectionEnd:-1;
   // Save all scroll positions before re-render
   var content=document.getElementById("content");
   var scrollTop=content?content.scrollTop:0;
@@ -639,6 +646,17 @@ function render(){
     if(newPage&&pageScroll)newPage.scrollTop=pageScroll;
   }
   if(winScroll)window.scrollTo(0,winScroll);
+  // Restore focus and cursor position so typing isn't interrupted by DOM rebuild
+  var _restored=null;
+  if(_focusId)_restored=document.getElementById(_focusId);
+  if(!_restored&&_focusPh&&_focusTag){
+    var _els=document.querySelectorAll(_focusTag.toLowerCase()+'[placeholder]');
+    for(var _i=0;_i<_els.length;_i++){if(_els[_i].placeholder===_focusPh){_restored=_els[_i];break;}}
+  }
+  if(_restored&&document.body.contains(_restored)){
+    _restored.focus();
+    if(_selStart>=0&&_restored.setSelectionRange){try{_restored.setSelectionRange(_selStart,_selEnd);}catch(e){}}
+  }
 }
 
 // Debounced render — collapses multiple rapid async render() calls into one.
@@ -5102,9 +5120,10 @@ function renderRALeadForm(){
 // ── RA Form actions ──────────────────────────────
 window.raFormUpdateResearch=function(section,field,val){
   var r=raFormEnsureResearch();
-  if(section==='jd_raw'&&field==='__root__'){r.jd_raw=val;return;}
+  if(section==='jd_raw'&&field==='__root__'){r.jd_raw=val;STATE.raFormTouchedAt=Date.now();return;}
   if(!r[section])r[section]={};
   r[section][field]=val;
+  STATE.raFormTouchedAt=Date.now();
 };
 window.raFormUpdateRequirements=function(field,val){
   var r=raFormEnsureResearch();
@@ -5194,6 +5213,7 @@ window.raFormParseJD=function(){
 };
 window.raFormSet=function(field,val){
   STATE.raForm[field]=val;
+  STATE.raFormTouchedAt=Date.now();
 };
 
 window.raFormDetectTimezone=function(location){
@@ -5237,10 +5257,16 @@ window.raFormEdit=function(jobId){
 
 window.raFormZipSearch=function(val){
   STATE.raForm.zipCode=val;
-  if(!val||val.length<3){STATE.raFormZipSuggestions=[];render();return;}
+  STATE.raFormTouchedAt=Date.now();
+  if(!val||val.length<3){
+    STATE.raFormZipSuggestions=[];
+    var _zi=document.getElementById('ra-zip');
+    if(_zi){var _zw=_zi.parentElement;if(_zw){var _zs=_zw.querySelectorAll('._zip-sug');if(_zs.length&&_zs[0].parentElement&&_zs[0].parentElement!==_zw)_zs[0].parentElement.remove();}}
+    return;
+  }
   apiGet('/lookup/zipcode?zip='+encodeURIComponent(val)).then(function(results){
     STATE.raFormZipSuggestions=results;
-    render();
+    scheduleRender();
     setTimeout(function(){
       var items=document.querySelectorAll('._zip-sug');
       Array.prototype.forEach.call(items,function(el){
@@ -5264,7 +5290,18 @@ window.raFormZipSearch=function(val){
 };
 
 window.raFormZipBlur=function(){
-  setTimeout(function(){STATE.raFormZipSuggestions=[];render();},200);
+  // Clear suggestions without a full DOM rebuild — prevents flicker when switching windows
+  setTimeout(function(){
+    STATE.raFormZipSuggestions=[];
+    var zipInput=document.getElementById('ra-zip');
+    if(zipInput){
+      var wrap=zipInput.parentElement;
+      if(wrap){
+        var items=wrap.querySelectorAll('._zip-sug');
+        if(items.length){var sugBox=items[0].parentElement;if(sugBox&&sugBox!==wrap)sugBox.remove();}
+      }
+    }
+  },200);
 };
 
 // ── Company cooldown helper ─────────────────────
@@ -5287,10 +5324,16 @@ window.raFormCoSearch=function(val){
   STATE.raForm.coName=val;
   STATE.raForm.coId=null;
   STATE.raForm.coInfo=null;
-  if(!val||val.length<3){STATE.raFormCoSuggestions=[];render();return;}
+  STATE.raFormTouchedAt=Date.now();
+  if(!val||val.length<3){
+    STATE.raFormCoSuggestions=[];
+    var _cs=document.getElementById('co-suggestions');
+    if(_cs)_cs.remove();
+    return;
+  }
   apiGet('/companies/search?q='+encodeURIComponent(val)).then(function(results){
     STATE.raFormCoSuggestions=results;
-    render();
+    scheduleRender();
     // Bind click handlers after render
     setTimeout(function(){
       var items=document.querySelectorAll('._co-sug');
@@ -5317,7 +5360,12 @@ window.raFormCoSearch=function(val){
 };
 
 window.raFormCoBlur=function(){
-  setTimeout(function(){STATE.raFormCoSuggestions=[];render();},200);
+  // Clear suggestions without a full DOM rebuild — prevents flicker when switching windows
+  setTimeout(function(){
+    STATE.raFormCoSuggestions=[];
+    var el=document.getElementById('co-suggestions');
+    if(el)el.remove();
+  },200);
 };
 
 window.raFormCheckEmail=function(idx,email){
@@ -5326,13 +5374,14 @@ window.raFormCheckEmail=function(idx,email){
   apiPost('/contacts/check-email',{email:email}).then(function(res){
     contacts[idx].emailStatus=res.duplicate?'dup':'ok';
     contacts[idx].emailDupInfo=res;
-    render();
+    scheduleRender();
   }).catch(function(){});
 };
 
 window.raFormUpdateContact=function(idx,field,val){
   STATE.raForm.contacts[idx][field]=val;
   if(field==='email')STATE.raForm.contacts[idx].emailStatus='';
+  STATE.raFormTouchedAt=Date.now();
 };
 
 window.raFormAddContact=function(){
@@ -5352,6 +5401,7 @@ window.raFormClear=function(){
   STATE.raForm={coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',position:'',jobUrl:'',jobCreatedDate:'',salaryRange:'',source:'',editJobId:null,contacts:[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}],research:defaultRaFormResearch()};
   STATE.raFormCoSuggestions=[];
   STATE.raFormZipSuggestions=[];
+  STATE.raFormTouchedAt=null;
   render();
 };
 
