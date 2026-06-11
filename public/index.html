@@ -1590,7 +1590,7 @@ function renderAddJobModal(){
         '<input id="aj-email" placeholder="Email" style="padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/>'+
         '<input id="aj-phone" placeholder="Phone" style="padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px"/>'+
       '</div>'+
-      '<div style="display:flex;justify-content:flex-end;gap:8px"><button onclick="closeModal()" style="background:transparent;color:var(--text3);border:1px solid var(--border);padding:9px 16px;border-radius:7px;cursor:pointer;font-size:13px">Cancel</button><button onclick="submitAddJob()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600">Create Job</button></div>'+
+      '<div style="display:flex;justify-content:flex-end;gap:8px"><button onclick="closeModal()" style="background:transparent;color:var(--text3);border:1px solid var(--border);padding:9px 16px;border-radius:7px;cursor:pointer;font-size:13px">Cancel</button><button onclick="submitAddJob()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600">Add Lead</button></div>'+
     '</div>'+
   '</div>';
 }
@@ -1639,26 +1639,26 @@ function submitAddJob(){
   var fn=document.getElementById("aj-fn").value.trim();
   if(!pos){showToast("Position is required","error");return;}
   if(!fn){showToast("First contact name is required","error");return;}
-  var c=STATE.companies.find(function(x){return x.id===co;})||{};
-  var jid="j"+Date.now();
-  STATE.jobs.unshift({
-    id:jid, company_id:co, company_name:c.name||"", company_ind:c.ind||"", company_web:c.web||"",
-    position:pos, location:document.getElementById("aj-loc").value.trim(),
+  apiPost('/jobs',{
+    company_id:co,
+    position:pos,
+    location:document.getElementById("aj-loc").value.trim()||null,
     source:document.getElementById("aj-src").value.trim()||"LinkedIn",
-    job_url:document.getElementById("aj-url").value.trim(),
-    stage:"Active", notes:"",
-    created_by:STATE.user.id, assigned_to:STATE.user.id,
-    created_date:new Date().toISOString().slice(0,10), created_at:new Date().toISOString()
+    job_url:document.getElementById("aj-url").value.trim()||null,
+    contacts:[{
+      first_name:fn,
+      last_name:document.getElementById("aj-ln").value.trim(),
+      designation:document.getElementById("aj-desig").value.trim()||null,
+      email:document.getElementById("aj-email").value.trim()||null,
+      phone:document.getElementById("aj-phone").value.trim()||null
+    }]
+  }).then(function(){
+    STATE.modal=null;
+    showToast("Lead created","success");
+    return refreshJobs();
+  }).catch(function(e){
+    showToast("Failed to create lead: "+e.message,"error");
   });
-  STATE.contacts.unshift({
-    id:"c"+Date.now(), job_id:jid,
-    first_name:fn, last_name:document.getElementById("aj-ln").value.trim(),
-    designation:document.getElementById("aj-desig").value.trim(),
-    email:document.getElementById("aj-email").value.trim(),
-    phone:document.getElementById("aj-phone").value.trim(),
-    linkedin:"", is_primary:true
-  });
-  STATE.modal=null; showToast("Job created","success"); render();
 }
 function openAddContact(jid){ STATE.modal={type:"addContact",job_id:jid}; render(); }
 function backToJob(jid){ STATE.modal={type:"jobDetail",id:jid}; render(); }
@@ -1666,24 +1666,33 @@ function submitAddContact(jid){
   var fn=document.getElementById("ac-fn").value.trim();
   if(!fn){showToast("First name is required","error");return;}
   var existing=jobContacts(jid);
-  STATE.contacts.push({
-    id:"c"+Date.now(), job_id:jid,
-    first_name:fn, last_name:document.getElementById("ac-ln").value.trim(),
-    designation:document.getElementById("ac-desig").value.trim(),
-    email:document.getElementById("ac-email").value.trim(),
-    phone:document.getElementById("ac-phone").value.trim(),
-    linkedin:document.getElementById("ac-linkedin").value.trim(),
+  apiPost('/contacts',{
+    job_id:jid,
+    first_name:fn,
+    last_name:document.getElementById("ac-ln").value.trim(),
+    designation:document.getElementById("ac-desig").value.trim()||null,
+    email:document.getElementById("ac-email").value.trim()||null,
+    phone:document.getElementById("ac-phone").value.trim()||null,
+    linkedin:document.getElementById("ac-linkedin").value.trim()||null,
     is_primary:existing.length===0
+  }).then(function(){
+    showToast("Contact added","success");
+    return refreshJobs();
+  }).then(function(){
+    STATE.modal={type:"jobDetail",id:jid}; render();
+  }).catch(function(e){
+    showToast("Failed to add contact: "+e.message,"error");
   });
-  showToast("Contact added","success");
-  STATE.modal={type:"jobDetail",id:jid}; render();
 }
 function deleteContact(cid){
   if(!confirm("Delete this contact?")) return;
   var c=STATE.contacts.find(function(x){return x.id===cid;}); if(!c) return;
-  var jid=c.job_id;
-  STATE.contacts=STATE.contacts.filter(function(x){return x.id!==cid;});
-  showToast("Contact deleted","success"); render();
+  apiDelete('/contacts/'+cid).then(function(){
+    showToast("Contact deleted","success");
+    return refreshJobs();
+  }).catch(function(e){
+    showToast("Failed to delete contact: "+e.message,"error");
+  });
 }
 function sendEmailToContact(cid){
   var c=STATE.contacts.find(function(x){return x.id===cid;}); if(!c) return;

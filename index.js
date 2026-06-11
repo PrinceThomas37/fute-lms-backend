@@ -1004,6 +1004,27 @@ app.post('/jobs', auth, async (req, res) => {
     let freshness = 'Normal';
     const refDate = job_opened_date || job_created_date;
     if (refDate) { const days = Math.floor((new Date() - new Date(refDate)) / 86400000); if (days <= 3) freshness = 'New'; else if (days <= 10) freshness = 'Normal'; else freshness = 'Old'; }
+    // Same skill seeding as bulk import: parse JD/notes if present, otherwise
+    // infer from the title — preferring verified skills from similar past jobs.
+    let researchObj = research || null;
+    if (!researchObj) {
+      researchObj = buildResearchFromLeadData({ notes, position, location, salaryRange: salary_range, industry: jobIndustry });
+      const reqr = researchObj && researchObj.requirements;
+      if (reqr && (reqr.skills_source === 'title_inference' || !(reqr.suggested_skills || []).length)) {
+        try {
+          const hist = await inferSkillsFromJobHistory([position]);
+          const skills = hist.get(position);
+          if (skills && skills.length) {
+            reqr.skills = skills;
+            reqr.suggested_skills = skills;
+            reqr.skill_1 = skills[0] || '';
+            reqr.skill_2 = skills[1] || '';
+            reqr.skill_3 = skills[2] || '';
+            reqr.skills_source = 'history_match';
+          }
+        } catch (e) { /* best-effort */ }
+      }
+    }
     const { data: job, error } = await supabase.from('jobs').insert({
       company_id, position, location, source, job_url, stage: stage || 'Unassigned', notes: notes || '',
       created_by: req.user.id,
@@ -1011,7 +1032,7 @@ app.post('/jobs', auth, async (req, res) => {
       is_duplicate: is_duplicate || false, duplicate_of: duplicate_of || null, salary_range: salary_range || null,
       job_created_date: job_created_date || null, job_opened_date: job_opened_date || null,
       timezone, freshness, bdm_assigned_name: bdm_assigned_name || null, industry: jobIndustry || null,
-      research: research || null
+      research: researchObj
     }).select().single();
     if (error) throw error;
     if (Array.isArray(contacts) && contacts.length) {
