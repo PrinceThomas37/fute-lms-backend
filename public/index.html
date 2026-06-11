@@ -2988,8 +2988,7 @@ function renderPendingScheduleBanner(){
       '<strong>'+ps.total_pending+'</strong> pending total · '+
       '<span style="color:var(--green);font-weight:600">'+ready+' ready to send now</span>'+
       (wait?' · <span style="color:#b45309;font-weight:600">'+wait+' waiting for send window</span>':'')+
-      '<br><span style="font-size:12px">Send window: '+htmlEsc(winLbl)+'. '+
-      htmlEsc((ps.auto_retry&&ps.auto_retry.note)||'')+'</span>'+
+      '<br><span style="font-size:12px">Send window: '+htmlEsc(winLbl)+'.</span>'+
     '</div>'+
     (tzRows?'<div style="font-size:12px;margin-top:8px">'+tzRows+'</div>':'')+
     retryBtn+
