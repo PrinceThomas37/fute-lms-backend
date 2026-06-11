@@ -4837,9 +4837,9 @@ function renderSuggestedSkillChips(suggested,assignHandler,skillsSource){
     unique.push(String(s).trim());
   });
   if(!unique.length)return '';
-  var sourceNote=skillsSource==='title_inference'
-    ?'<div style="font-size:10.5px;color:var(--amber);margin-bottom:6px">⚠ Guessed from the job title (no JD on file) — verify before sending</div>'
-    :'';
+  var sourceNote='';
+  if(skillsSource==='title_inference')sourceNote='<div style="font-size:10.5px;color:var(--amber);margin-bottom:6px">⚠ Guessed from the job title (no JD on file) — verify before sending</div>';
+  else if(skillsSource==='history_match')sourceNote='<div style="font-size:10.5px;color:var(--accent);margin-bottom:6px">Based on similar past leads (no JD on file) — verify before sending</div>';
   return '<div class="mb3" style="padding:10px 12px;background:var(--bg);border:1px solid var(--border2);border-radius:var(--r2)">'+
     sourceNote+
     '<div style="font-size:11px;color:var(--text3);margin-bottom:8px">Suggested skills — click 1, 2, or 3 to assign</div>'+

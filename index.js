@@ -4,7 +4,7 @@ const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { parseJobDescription, buildResearchFromLeadData, normalizeIndustry } = require('./jd-parser');
+const { parseJobDescription, buildResearchFromLeadData, normalizeIndustry, normalizeJobTitle, titleSimilarity } = require('./jd-parser');
 const { learnSkillsForIndustry } = require('./learned-skills');
 
 function persistLearnedSkills(industry, research) {
@@ -827,6 +827,72 @@ app.get('/jobs/:id', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+/**
+ * Skill inference from the system's own job history.
+ *
+ * For title-only imports, look up past jobs with similar normalized titles
+ * and reuse their verified skills. Past jobs whose skills were themselves
+ * guessed (title_inference / history_match) are excluded so guesses never
+ * compound. Human-assigned skill_1..3 are preferred over machine-suggested.
+ *
+ * Returns Map<originalTitle, skills[]>.
+ */
+async function inferSkillsFromJobHistory(positions) {
+  const result = new Map();
+  const wanted = [...new Set(positions.filter(Boolean))];
+  if (!wanted.length) return result;
+
+  const { data: history } = await supabase.from('jobs')
+    .select('position, research')
+    .not('research', 'is', null)
+    .is('deleted_at', null)
+    .order('created_at', { ascending: false })
+    .limit(1500);
+  if (!history || !history.length) return result;
+
+  const entries = [];
+  for (const row of history) {
+    if (!row.position) continue;
+    let research = row.research;
+    if (typeof research === 'string') { try { research = JSON.parse(research); } catch { continue; } }
+    const reqr = research && research.requirements;
+    if (!reqr) continue;
+    if (reqr.skills_source === 'title_inference' || reqr.skills_source === 'history_match') continue;
+    let skills = [reqr.skill_1, reqr.skill_2, reqr.skill_3].filter(Boolean);
+    if (skills.length < 2 && Array.isArray(reqr.suggested_skills)) skills = reqr.suggested_skills.filter(Boolean);
+    if (!skills.length) continue;
+    const norm = normalizeJobTitle(row.position);
+    if (!norm.tokens.length) continue;
+    entries.push({ norm, skills });
+  }
+  if (!entries.length) return result;
+
+  for (const pos of wanted) {
+    const norm = normalizeJobTitle(pos);
+    if (!norm.tokens.length) continue;
+    const freq = new Map();
+    let matches = 0;
+    for (const e of entries) {
+      const sim = titleSimilarity(norm.canon, e.norm.canon);
+      const headMatch = norm.head && e.norm.head === norm.head;
+      // Either nearly identical titles, or same role noun with decent overlap
+      if (!(sim >= 0.75 || (headMatch && sim >= 0.45))) continue;
+      matches++;
+      for (const s of e.skills) {
+        const k = String(s).toLowerCase();
+        const cur = freq.get(k) || { skill: s, score: 0 };
+        cur.score += sim; // weight by similarity
+        freq.set(k, cur);
+      }
+      if (matches >= 25) break; // enough evidence
+    }
+    if (!freq.size) continue;
+    const top = [...freq.values()].sort((a, b) => b.score - a.score).slice(0, 5).map((x) => x.skill);
+    result.set(pos, top);
+  }
+  return result;
+}
+
 app.post('/jobs/bulk', auth, async (req, res) => {
   try {
     const { jobs } = req.body;
@@ -880,6 +946,31 @@ app.post('/jobs/bulk', auth, async (req, res) => {
       return row;
     });
     if (!jobRows.length) return res.status(200).json({ imported: 0, contacts: 0, skipped, message: `All ${skipped} companies are in a 21-day cooldown period.` });
+
+    // For title-only leads (skills guessed from the title, or none at all),
+    // check the system's own history: similar past titles with verified
+    // skills are a better source than archetype guesses.
+    try {
+      const needsHistory = jobRows.filter((row) => {
+        const reqr = row.research && row.research.requirements;
+        if (!reqr) return false;
+        return reqr.skills_source === 'title_inference' || !(reqr.suggested_skills || []).length;
+      });
+      if (needsHistory.length) {
+        const historySkills = await inferSkillsFromJobHistory(needsHistory.map((r) => r.position));
+        for (const row of needsHistory) {
+          const skills = historySkills.get(row.position);
+          if (!skills || !skills.length) continue;
+          const reqr = row.research.requirements;
+          reqr.skills = skills;
+          reqr.suggested_skills = skills;
+          reqr.skill_1 = skills[0] || '';
+          reqr.skill_2 = skills[1] || '';
+          reqr.skill_3 = skills[2] || '';
+          reqr.skills_source = 'history_match';
+        }
+      }
+    } catch (e) { /* history lookup is best-effort — never block an import */ }
     const { data: insertedJobs, error: jobErr } = await supabase.from('jobs').insert(jobRows).select('id');
     if (jobErr) throw jobErr;
     const contactRows = [];

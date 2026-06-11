@@ -930,13 +930,130 @@ const ROLE_PROFILES = [
   { re: /\bservice advisor\b/i, skills: ['service writing', 'customer service', 'DMS'] }
 ];
 
+// ─────────────────────────────────────────────────────────────────
+// Job title normalization — collapses the "infinite titles" space.
+// "Sr. Accts Payable Mgr II – Remote" → "accounts payable manager"
+// Expanding abbreviations + stripping seniority/level/employment
+// noise leaves a small set of (qualifier + head-role-noun) cores.
+// ─────────────────────────────────────────────────────────────────
+const TITLE_ABBREVIATIONS = {
+  sr: 'senior', jr: 'junior', mgr: 'manager', mgmt: 'management',
+  asst: 'assistant', assoc: 'associate', acct: 'accounting', accts: 'accounts',
+  eng: 'engineer', engr: 'engineer', tech: 'technician', techs: 'technician',
+  admin: 'administrator', coord: 'coordinator', rep: 'representative',
+  spec: 'specialist', supv: 'supervisor', supvr: 'supervisor', super: 'supervisor',
+  dir: 'director', exec: 'executive', maint: 'maintenance', mfg: 'manufacturing',
+  ops: 'operations', dev: 'developer', recept: 'receptionist',
+  cust: 'customer', svc: 'service', svcs: 'services', whse: 'warehouse',
+  ofc: 'office', dept: 'department', natl: 'national', intl: 'international'
+};
+
+const TITLE_NOISE_WORDS = new Set([
+  'senior', 'junior', 'lead', 'principal', 'chief', 'head', 'entry',
+  'mid', 'level', 'contract', 'contractor',
+  'temporary', 'temp', 'seasonal', 'permanent', 'direct', 'hire',
+  'time', 'remote', 'hybrid', 'onsite', 'on', 'site', 'immediate', 'immediately',
+  'urgent', 'urgently', 'needed', 'wanted', 'hiring', 'now', 'asap',
+  'new', 'experienced', 'sign', 'bonus', 'weekly', 'pay', 'great',
+  'i', 'ii', 'iii', 'iv', 'v', '1', '2', '3', '4', '5',
+  'a', 'an', 'the', 'of', 'for', 'with', 'and', 'or', 'to', 'in'
+]);
+
+/** Role nouns — the finite set of "what the person IS" words in job titles */
+const ROLE_NOUNS = new Set([
+  'accountant', 'bookkeeper', 'controller', 'auditor', 'analyst', 'nurse',
+  'assistant', 'biller', 'coder', 'phlebotomist', 'therapist', 'manager',
+  'supervisor', 'associate', 'worker', 'operator', 'driver', 'dispatcher',
+  'coordinator', 'specialist', 'technician', 'electrician', 'plumber',
+  'carpenter', 'welder', 'superintendent', 'estimator', 'machinist',
+  'inspector', 'assembler', 'engineer', 'developer', 'scientist',
+  'administrator', 'dba', 'representative', 'executive', 'receptionist',
+  'recruiter', 'paralegal', 'chef', 'advisor', 'agent', 'clerk', 'teacher',
+  'attorney', 'architect', 'designer', 'consultant', 'director', 'officer',
+  'planner', 'buyer', 'scheduler', 'mechanic', 'installer', 'foreman',
+  'laborer', 'generalist', 'underwriter', 'adjuster', 'appraiser',
+  'rn', 'lpn', 'cna', 'cpa'
+]);
+
+/** Morphological variants → canonical form, for title similarity comparison */
+const TOKEN_CANONICAL = {
+  accounting: 'accountant', accounts: 'account',
+  rn: 'nurse', lpn: 'nurse', nursing: 'nurse',
+  dev: 'developer', development: 'developer', developing: 'developer',
+  engineering: 'engineer', mgmt: 'management',
+  drive: 'driver', driving: 'driver',
+  recruiting: 'recruiter', recruitment: 'recruiter',
+  supervising: 'supervisor', supervision: 'supervisor',
+  administering: 'administrator', administration: 'administrator'
+};
+
+function canonToken(w) {
+  if (TOKEN_CANONICAL[w]) return TOKEN_CANONICAL[w];
+  if (w.length > 4 && w.endsWith('s')) return w.slice(0, -1); // light plural strip
+  return w;
+}
+
+/**
+ * Normalize a job title into comparable tokens.
+ * Returns { normalized, tokens, canon, head }:
+ * - tokens: cleaned words (for profile/dictionary matching)
+ * - canon: canonicalized tokens (for similarity comparison)
+ * - head: the role noun — the rightmost token that names what the
+ *   person IS ("nurse" in "Travel Nurse - ER"), falling back to the
+ *   last token if no known role noun appears.
+ */
+function normalizeJobTitle(title) {
+  let t = String(title || '').toLowerCase();
+  // Keep bracketed tech lists ("(React/Node)") — they carry signal; the
+  // separator strip below merges them in. Only drop shift/schedule brackets.
+  t = t.replace(/\((?:[^)]*\b(?:shift|schedule|hours?|days?|nights?|weekends?)\b[^)]*)\)/g, ' ');
+  t = t.replace(/[()]/g, ' ');
+  t = t.replace(/\b(?:full|part)[\s-]?time\b/g, ' '); // strip as phrase so "full stack" survives
+  t = t.replace(/#?\b(?:req|job|id)\s*[#:]?\s*\d+\b/g, ' '); // req/job IDs
+  t = t.replace(/\$[\d,.]+(?:\s*[-–]\s*\$?[\d,.]+)?(?:\s*\/?\s*(?:hr|hour|yr|year|wk|week))?/g, ' '); // pay rates
+  t = t.replace(/[\/|,•·–—-]/g, ' ');             // separators → space
+  t = t.replace(/[^a-z0-9+#.& ]/g, ' ');          // strip remaining punctuation (keep c++/c#/.net chars)
+  const tokens = t.split(/\s+/)
+    .map((w) => w.replace(/^\.+|\.+$/g, ''))
+    .map((w) => TITLE_ABBREVIATIONS[w] || w)
+    .filter((w) => w && !TITLE_NOISE_WORDS.has(w));
+  const canon = tokens.map(canonToken);
+  // Head = rightmost canonical token that's a known role noun
+  let head = tokens.length ? canon[canon.length - 1] : '';
+  for (let i = canon.length - 1; i >= 0; i--) {
+    if (ROLE_NOUNS.has(canon[i])) { head = canon[i]; break; }
+  }
+  return {
+    normalized: tokens.join(' '),
+    tokens,
+    canon,
+    head
+  };
+}
+
+/**
+ * Token-set similarity between two normalized titles (Jaccard over
+ * canonical tokens — pass norm.canon, not norm.tokens).
+ */
+function titleSimilarity(tokensA, tokensB) {
+  if (!tokensA.length || !tokensB.length) return 0;
+  const sa = new Set(tokensA);
+  const sb = new Set(tokensB);
+  let inter = 0;
+  sa.forEach((tok) => { if (sb.has(tok)) inter++; });
+  return inter / (sa.size + sb.size - inter);
+}
+
 /**
  * Infer skills from a job title alone — used when a lead is imported
  * without any JD text. Returns [] if nothing can be inferred.
  */
 function inferSkillsFromTitle(title, industry) {
   if (!title || !String(title).trim()) return [];
-  const t = String(title).trim();
+  const norm = normalizeJobTitle(title);
+  // Match profiles against BOTH the raw title and the normalized form, so
+  // "Sr. Acct Payable Mgr" (normalized: "accounts payable manager") still hits.
+  const t = String(title).trim() + '   ' + norm.normalized;
   const found = [];
   const seen = new Set();
 
@@ -1038,6 +1155,8 @@ module.exports = {
   inferIndustryFromText,
   matchSkills,
   inferSkillsFromTitle,
+  normalizeJobTitle,
+  titleSimilarity,
   SKILL_DICTIONARIES,
   SOFT_SKILLS,
   SHARED_TOOLS,
