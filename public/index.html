@@ -576,15 +576,26 @@ STATE.emails = STATE.leads.filter(function(l){return l.sent}).slice(0,6).map(fun
 // RENDER ENGINE
 // ════════════════════════════════════════════════
 var toastTimer={};
+// Patch only the toast container instead of rebuilding the whole page —
+// a full render() here would wipe unsaved inputs in any open modal.
+function updateToastsDOM(){
+  var html=renderToasts();
+  var w=document.querySelector('.toast-wrap');
+  if(w){w.outerHTML=html;}
+  else if(html){
+    var app=document.getElementById('app');
+    if(app){var d=document.createElement('div');d.innerHTML=html;if(d.firstChild)app.appendChild(d.firstChild);}
+  }
+}
 function showToast(msg,type){
   type=type||"info";
   var id=Date.now();
   STATE.toasts.push({id:id,msg:msg,type:type});
   toastTimer[id]=setTimeout(function(){
     STATE.toasts=STATE.toasts.filter(function(t){return t.id!==id});
-    render();
+    updateToastsDOM();
   },3000);
-  render();
+  updateToastsDOM();
 }
 
 var clockTimer=null;
@@ -2933,7 +2944,7 @@ function loadPendingSummary(){
   if(!STATE.user||!STATE.token||STATE.token==='guest')return;
   var q='';
   if(userHasRole(STATE.user,'ra_lead')&&STATE.raLeadSelectedBD)q='?manager_id='+encodeURIComponent(STATE.raLeadSelectedBD);
-  apiGet('/emails/pending-summary'+q).then(function(d){STATE.pendingSummary=d;render();}).catch(function(){});
+  apiGet('/emails/pending-summary'+q).then(function(d){STATE.pendingSummary=d;scheduleRender();}).catch(function(){});
 }
 function startPendingSummaryPoll(){
   if(STATE._pendingSummaryTimer){clearInterval(STATE._pendingSummaryTimer);STATE._pendingSummaryTimer=null;}
