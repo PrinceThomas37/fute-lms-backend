@@ -31,6 +31,10 @@ const {
   fillSignatureHtml,
   resolveSignatureHtml
 } = require('./email-signature');
+const {
+  classifyEmailDeliverability,
+  annotateContactEmailStatus
+} = require('./email-validation');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -981,8 +985,14 @@ app.post('/jobs/bulk', auth, async (req, res) => {
         contactRows.push({ job_id: job.id, first_name: c.first_name || '', last_name: c.last_name || '', designation: c.designation || null, email: c.email || null, phone: c.phone || null, linkedin: c.linkedin || null, is_primary: ci === 0 });
       });
     });
-    if (contactRows.length) { await supabase.from('contacts').insert(contactRows); }
-    res.status(201).json({ imported: insertedJobs.length, contacts: contactRows.length, skipped });
+    if (contactRows.length) {
+      // Flag dead-domain / malformed addresses on import (Excel sheets included)
+      // so the send loop never mails them. Best-effort — never block an import.
+      try { await annotateContactEmailStatus(contactRows); } catch (_) {}
+      await supabase.from('contacts').insert(contactRows);
+    }
+    const invalidContacts = contactRows.filter(c => c.email_status === 'invalid').length;
+    res.status(201).json({ imported: insertedJobs.length, contacts: contactRows.length, invalidEmails: invalidContacts, skipped });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1037,6 +1047,7 @@ app.post('/jobs', auth, async (req, res) => {
     if (error) throw error;
     if (Array.isArray(contacts) && contacts.length) {
       const rows = contacts.map((c, i) => ({ job_id: job.id, first_name: c.first_name || '', last_name: c.last_name || '', designation: c.designation || null, email: c.email || null, phone: c.phone || null, linkedin: c.linkedin || null, is_primary: i === 0 }));
+      try { await annotateContactEmailStatus(rows); } catch (_) {}
       await supabase.from('contacts').insert(rows);
     }
     await logActivity(job.id, null, req.user.id, 'job_created', `Job created: ${position}`, null, { position, stage: job.stage });
@@ -1183,7 +1194,9 @@ app.post('/contacts', auth, async (req, res) => {
     const { job_id, first_name, last_name, designation, email, phone, linkedin, is_primary } = req.body;
     if (!job_id || !first_name) return res.status(400).json({ error: 'job_id and first_name required' });
     if (!(await canTouchJob(req, job_id))) return res.status(403).json({ error: 'Forbidden' });
-    const { data, error } = await supabase.from('contacts').insert({ job_id, first_name, last_name: last_name || '', designation, email, phone, linkedin, is_primary: !!is_primary }).select().single();
+    const contactRow = { job_id, first_name, last_name: last_name || '', designation, email, phone, linkedin, is_primary: !!is_primary };
+    if (email) { try { contactRow.email_status = await classifyEmailDeliverability(email); } catch (_) {} }
+    const { data, error } = await supabase.from('contacts').insert(contactRow).select().single();
     if (error) throw error;
     await logActivity(job_id, data.id, req.user.id, 'contact_added', `Contact added: ${first_name} ${last_name || ''}`.trim(), null, null);
     res.status(201).json(data);
@@ -2910,6 +2923,109 @@ setInterval(async () => {
     }
   } catch (e) { console.error('[Cron] Error:', e.message); }
 }, 60000);
+
+// ══════════════════════════════════════════════════════════════
+// BOUNCE / NDR FEEDBACK LOOP
+// Reads non-delivery reports from each connected Microsoft mailbox and marks
+// the matching contact email_status='invalid', so addresses that actually
+// bounce stop getting mailed (and their follow-ups are cancelled). This is the
+// mailbox-level counterpart to the domain-level MX check done at entry.
+// ══════════════════════════════════════════════════════════════
+function isNdrMessage(msg) {
+  const from = (msg.from?.emailAddress?.address || '').toLowerCase();
+  const subj = (msg.subject || '').toLowerCase();
+  return from.includes('postmaster') || from.includes('mailer-daemon')
+    || subj.startsWith('undeliverable')
+    || subj.includes('delivery has failed')
+    || subj.includes('delivery status notification')
+    || subj.includes('returned mail');
+}
+
+// Pull every email address out of NDR text, dropping our own mailboxes and the
+// postmaster/daemon senders — what remains is the failed recipient(s).
+function extractBounceRecipients(text, ownAddresses) {
+  if (!text) return [];
+  const out = new Set();
+  const re = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const addr = m[0].toLowerCase();
+    if (ownAddresses.has(addr)) continue;
+    if (addr.startsWith('postmaster@') || addr.startsWith('mailer-daemon@')) continue;
+    out.add(addr);
+  }
+  return [...out];
+}
+
+async function sweepMailboxBounces(tokenRow, ownAddresses) {
+  let accessToken;
+  try { accessToken = await getMicrosoftToken(tokenRow.user_email_id); }
+  catch (e) { console.error(`[BounceSweep] token for ${tokenRow.email_address}: ${e.message}`); return 0; }
+
+  const sinceKey = `bounce_sweep_since_${tokenRow.user_email_id}`;
+  const { data: sinceRow } = await supabase.from('app_settings').select('value').eq('key', sinceKey).maybeSingle();
+  const since = sinceRow?.value || new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+
+  const filter = encodeURIComponent(`receivedDateTime ge ${since}`);
+  const path = `/me/mailFolders/Inbox/messages?$top=50&$orderby=receivedDateTime desc`
+    + `&$select=id,subject,from,bodyPreview,body,receivedDateTime&$filter=${filter}`;
+  let data;
+  try { data = await graphMailRequest(accessToken, path); }
+  catch (e) { console.error(`[BounceSweep] list for ${tokenRow.email_address}: ${e.message}`); return 0; }
+
+  const messages = data.value || [];
+  let marked = 0, newest = since;
+  for (const msg of messages) {
+    if (msg.receivedDateTime && msg.receivedDateTime > newest) newest = msg.receivedDateTime;
+    if (!isNdrMessage(msg)) continue;
+    const text = `${msg.body?.content || ''} ${msg.bodyPreview || ''}`;
+    for (const addr of extractBounceRecipients(text, ownAddresses)) {
+      const { data: matches } = await supabase.from('contacts')
+        .select('id,email_status,job_id').ilike('email', addr).limit(10);
+      for (const c of (matches || [])) {
+        if (c.email_status === 'invalid' || c.email_status === 'deactivated') continue;
+        await supabase.from('contacts').update({ email_status: 'invalid', updated_at: new Date() }).eq('id', c.id);
+        await skipActiveFollowUpsForContact(c.id);
+        await logActivity(c.job_id, c.id, null, 'email_bounced',
+          `Auto-marked invalid — bounce/NDR received for ${addr}`, null,
+          { source: 'ndr', mailbox: tokenRow.email_address });
+        marked++;
+      }
+    }
+  }
+  await supabase.from('app_settings').upsert({ key: sinceKey, value: newest, updated_at: new Date() }, { onConflict: 'key' });
+  return marked;
+}
+
+async function runBounceSweep() {
+  try {
+    const { data: tokens } = await supabase.from('microsoft_tokens').select('user_email_id,email_address');
+    if (!tokens || !tokens.length) return 0;
+    const { data: ue } = await supabase.from('user_emails').select('email_address');
+    const ownAddresses = new Set((ue || []).map(u => (u.email_address || '').toLowerCase()).filter(Boolean));
+    tokens.forEach(t => { if (t.email_address) ownAddresses.add(t.email_address.toLowerCase()); });
+    let total = 0;
+    for (const t of tokens) {
+      try { total += await sweepMailboxBounces(t, ownAddresses); }
+      catch (e) { console.error(`[BounceSweep] ${t.email_address}: ${e.message}`); }
+    }
+    if (total) console.log(`[BounceSweep] marked ${total} contact(s) invalid from NDRs`);
+    return total;
+  } catch (e) { console.error('[BounceSweep] error:', e.message); return 0; }
+}
+
+// Manual trigger (admin) — useful for verifying the loop without waiting for cron.
+app.post('/admin/bounce-sweep', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'bd_lead')) return res.status(403).json({ error: 'Admin only' });
+    const marked = await runBounceSweep();
+    res.json({ success: true, marked });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Sweep bounces every 30 minutes, with a first pass shortly after boot.
+setInterval(() => { runBounceSweep(); }, 30 * 60 * 1000);
+setTimeout(() => { runBounceSweep(); }, 5 * 60 * 1000);
 
 // Retry pending emails when leads enter their local send window (every 20 minutes)
 setInterval(() => { retryDeferredPendingSends(); }, 20 * 60 * 1000);
