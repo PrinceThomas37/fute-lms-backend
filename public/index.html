@@ -635,7 +635,17 @@ function render(){
 var _scheduleRenderTimer=null;
 function scheduleRender(){
   if(_scheduleRenderTimer)return;
-  _scheduleRenderTimer=setTimeout(function(){_scheduleRenderTimer=null;render();},16);
+  _scheduleRenderTimer=setTimeout(function(){
+    _scheduleRenderTimer=null;
+    // Don't rebuild DOM while user is actively typing inside a modal/detail view —
+    // that would wipe unsaved form inputs (lead details, convert-to-job, etc.)
+    var ae=document.activeElement;
+    var userIsEditing=ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT');
+    var modalOpen=!!(STATE.modal||(document.getElementById('modal-overlay')&&document.getElementById('modal-overlay').style.display!=='none'));
+    var detailOpen=!!(STATE.detailLead);
+    if(userIsEditing&&(modalOpen||detailOpen))return;
+    render();
+  },16);
 }
 
 // ════════════════════════════════════════════════
