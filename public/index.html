@@ -1635,13 +1635,7 @@ function renderAddContactModal(){
   '</div>';
 }
 
-// ── JOB/CONTACT ACTIONS (local STATE; B2 will swap to API) ──
-function changeJobStage(jid, st){
-  var j=jobById(jid); if(!j) return;
-  var old=j.stage; j.stage=st;
-  STATE.activities.unshift({id:"a"+Date.now(),lid:jid,by:STATE.user.id,type:"stage_change",txt:"Stage: "+old+" → "+st,dt:new Date().toISOString()});
-  showToast("Stage updated","success"); render();
-}
+// ── JOB/CONTACT ACTIONS ──
 function saveJobNotes(jid, val){
   var j=jobById(jid); if(!j) return;
   if (j.notes===val) return;
@@ -7437,7 +7431,7 @@ function loadAppData(){
     showToast('Could not connect: '+err.message,'error');render();
   });
 }
-function refreshJobs(){return apiGet('/jobs').then(function(j){STATE.jobs=j.map(normaliseJob);STATE.contacts=flattenContacts(j);scheduleRender();});}
+function refreshJobs(){return apiGet('/jobs').then(function(raw){var p=STATE._pendingStageChanges||{};STATE.jobs=raw.map(normaliseJob).map(function(j){if(p[j.id])j.stage=p[j.id];return j;});STATE.contacts=flattenContacts(raw);scheduleRender();});}
 
 // ── Background polling — keeps UI in sync ──────
 var _bgPollTimer=null;
@@ -7447,9 +7441,10 @@ function startBackgroundPoll(){
     if(!STATE.user||!STATE.token)return;
     var pg=STATE.page;
     // Always refresh jobs (stage changes, new leads, assignments)
-    apiGet('/jobs').then(function(j){
-      STATE.jobs=j.map(normaliseJob);
-      STATE.contacts=flattenContacts(j);
+    apiGet('/jobs').then(function(raw){
+      var p=STATE._pendingStageChanges||{};
+      STATE.jobs=raw.map(normaliseJob).map(function(j){if(p[j.id])j.stage=p[j.id];return j;});
+      STATE.contacts=flattenContacts(raw);
       scheduleRender();
     }).catch(function(){});
     // Refresh emails when on email page
@@ -7587,9 +7582,19 @@ window.doLogout=function(){STATE.user=null;STATE.token=null;sessionStorage.remov
 // ── Jobs (wired) ───────────────────────────────
 window.changeJobStage=function(jid,st){
   var j=jobById(jid);if(!j)return;
+  if(j.stage===st)return;
   if(STATE.user&&STATE.user.isGuest){guestSimulate('stageChange',{id:jid,stage:st});return;}
-  var old=j.stage;j.stage=st;render();
-  apiPut('/jobs/'+jid,{stage:st}).then(function(){showToast('Stage updated','success');}).catch(function(e){j.stage=old;showToast('Failed: '+e.message,'error');render();});
+  var old=j.stage;j.stage=st;
+  if(!STATE._pendingStageChanges)STATE._pendingStageChanges={};
+  STATE._pendingStageChanges[jid]=st;
+  render();
+  apiPut('/jobs/'+jid,{stage:st}).then(function(){
+    if(STATE._pendingStageChanges)delete STATE._pendingStageChanges[jid];
+    showToast('Stage updated','success');
+  }).catch(function(e){
+    if(STATE._pendingStageChanges)delete STATE._pendingStageChanges[jid];
+    j.stage=old;showToast('Failed: '+e.message,'error');render();
+  });
 };
 window.saveJobNotes=function(jid,val){
   var j=jobById(jid);if(!j||j.notes===val)return;var old=j.notes;j.notes=val;
