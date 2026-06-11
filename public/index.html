@@ -4826,7 +4826,7 @@ window.doImportProcess=function(toProcess,dupEmailMap){
 function defaultRaFormResearch(){
   return{jd_raw:'',suggested_skills:[],company:{expertise:'',notes:'',headcount:'',hiring_volume:''},outreach:{angle:'',avoid:''},requirements:{skill_1:'',skill_2:'',skill_3:'',salary_min:null,salary_max:null,salary_period:'year',salary_display:'',location:'',local_hint:'',travel:''},contacts:[]};
 }
-function renderSuggestedSkillChips(suggested,assignHandler){
+function renderSuggestedSkillChips(suggested,assignHandler,skillsSource){
   assignHandler=assignHandler||'raFormAssignSkill';
   if(!suggested||!suggested.length)return '';
   var unique=[],seen={};
@@ -4837,7 +4837,11 @@ function renderSuggestedSkillChips(suggested,assignHandler){
     unique.push(String(s).trim());
   });
   if(!unique.length)return '';
+  var sourceNote=skillsSource==='title_inference'
+    ?'<div style="font-size:10.5px;color:var(--amber);margin-bottom:6px">⚠ Guessed from the job title (no JD on file) — verify before sending</div>'
+    :'';
   return '<div class="mb3" style="padding:10px 12px;background:var(--bg);border:1px solid var(--border2);border-radius:var(--r2)">'+
+    sourceNote+
     '<div style="font-size:11px;color:var(--text3);margin-bottom:8px">Suggested skills — click 1, 2, or 3 to assign</div>'+
     '<div style="display:flex;flex-direction:column;gap:8px">'+
     unique.map(function(sk){
@@ -4858,6 +4862,13 @@ function raFormEnsureResearch(){
   if(!STATE.raForm.research.outreach)STATE.raForm.research.outreach={};
   if(!STATE.raForm.research.requirements)STATE.raForm.research.requirements={};
   if(!STATE.raForm.research.contacts)STATE.raForm.research.contacts=[];
+  // Imported leads keep parsed/inferred skills under requirements — surface them
+  // at the top level so the suggested-skill chips render.
+  if((!STATE.raForm.research.suggested_skills||!STATE.raForm.research.suggested_skills.length)
+    &&STATE.raForm.research.requirements.suggested_skills
+    &&STATE.raForm.research.requirements.suggested_skills.length){
+    STATE.raForm.research.suggested_skills=STATE.raForm.research.requirements.suggested_skills.slice();
+  }
   return STATE.raForm.research;
 }
 function buildRaFormResearchPayload(){
@@ -5041,7 +5052,7 @@ function renderRALeadForm(){
     '<div style="margin-bottom:12px">'+
       '<button type="button" class="btn btn-outline btn-sm" onclick="raFormParseJD()">Extract requirements</button>'+
     '</div>'+
-    renderSuggestedSkillChips(r.suggested_skills||[],'raFormAssignSkill')+
+    renderSuggestedSkillChips(r.suggested_skills||[],'raFormAssignSkill',(r.requirements||{}).skills_source)+
     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'+
       '<div class="fgrp"><label class="flbl">Skill 1</label><input class="inp" style="font-size:12px" placeholder="Primary skill from JD" value="'+htmlEsc(req.skill_1||'')+'" oninput="raFormUpdateRequirements(\'skill_1\',this.value)"/></div>'+
       '<div class="fgrp"><label class="flbl">Skill 2</label><input class="inp" style="font-size:12px" placeholder="Secondary skill" value="'+htmlEsc(req.skill_2||'')+'" oninput="raFormUpdateRequirements(\'skill_2\',this.value)"/></div>'+

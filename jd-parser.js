@@ -360,7 +360,7 @@ function extractYearsOfExperience(text) {
   const seen = new Set();
   // Require an explicit "of / with / in / using / experience" bridge word so we don't
   // accidentally grab verb phrases like "4+ years managing operations".
-  const re = /\b\d+\s*(?:\+|\s*to\s*\d+)?\s*years?\s+(?:of\s+experience\s+(?:with|in|using)\s+|of\s+experience\s+in\s+|experience\s+(?:with|in|using)\s+|of\s+)([A-Za-z][A-Za-z0-9\s\.\-\/\+#]{1,40})/gi;
+  const re = /\b\d+[ \t]*(?:\+|[ \t]*to[ \t]*\d+)?[ \t]*years?[ \t]+(?:of[ \t]+experience[ \t]+(?:with|in|using)[ \t]+|experience[ \t]+(?:with|in|using)[ \t]+|of[ \t]+)([A-Za-z][A-Za-z0-9 \t\.\-\/\+#]{1,40})/gi;
   let m;
   while ((m = re.exec(text)) !== null) {
     const raw = m[1].trim();
@@ -833,6 +833,152 @@ function parseJobDescription(text, industry) {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Title-based skill inference — for leads imported with only a job
+// title, company, and location (no JD text to parse).
+//
+// Two passes:
+// 1. Technologies named directly in the title ("React Developer",
+//    "SQL Server DBA") — scanned against all industry dictionaries.
+// 2. Role archetypes: common staffing job titles mapped to the 3-4
+//    core skills a recruiter would expect for that role.
+//
+// Inferred skills are clearly flagged (skills_source) so the RA knows
+// they came from the title, not an actual JD, and reviews them.
+// ─────────────────────────────────────────────────────────────────
+const ROLE_PROFILES = [
+  // accounting / finance
+  { re: /\b(?:staff |senior |junior )?accountant\b/i, skills: ['general ledger', 'reconciliations', 'QuickBooks'] },
+  { re: /\bbookkeeper\b/i, skills: ['bookkeeping', 'QuickBooks', 'accounts payable'] },
+  { re: /\bcontroller\b/i, skills: ['GAAP', 'financial reporting', 'month-end close'] },
+  { re: /\bpayroll\b/i, skills: ['payroll processing', 'ADP', 'multi-state payroll'] },
+  { re: /\b(?:accounts payable|ap) (?:specialist|clerk|manager)\b/i, skills: ['accounts payable', 'invoice processing', 'vendor management'] },
+  { re: /\b(?:accounts receivable|ar) (?:specialist|clerk|manager)\b/i, skills: ['accounts receivable', 'collections', 'billing'] },
+  { re: /\btax (?:preparer|accountant|manager|associate)\b/i, skills: ['tax preparation', 'CPA', 'tax compliance'] },
+  { re: /\bauditor\b/i, skills: ['audit', 'GAAP', 'internal controls'] },
+  { re: /\bfinancial analyst\b/i, skills: ['financial modeling', 'Excel', 'FP&A'] },
+  { re: /\bcfo\b/i, skills: ['financial strategy', 'GAAP', 'forecasting'] },
+
+  // healthcare
+  { re: /\b(?:registered nurse|rn)\b/i, skills: ['patient care', 'EHR', 'medication administration'] },
+  { re: /\b(?:lpn|licensed practical nurse)\b/i, skills: ['patient care', 'vital signs', 'medication administration'] },
+  { re: /\b(?:cna|nursing assistant)\b/i, skills: ['patient care', 'vital signs', 'ADLs'] },
+  { re: /\bmedical (?:biller|billing)\b/i, skills: ['medical billing', 'ICD-10', 'CPT coding'] },
+  { re: /\bmedical (?:coder|coding)\b/i, skills: ['ICD-10', 'CPT coding', 'medical records'] },
+  { re: /\bmedical assistant\b/i, skills: ['patient intake', 'vital signs', 'EHR'] },
+  { re: /\bphlebotomist\b/i, skills: ['phlebotomy', 'specimen collection', 'patient care'] },
+  { re: /\bphysical therapist\b/i, skills: ['physical therapy', 'patient evaluation', 'treatment planning'] },
+
+  // logistics / warehouse / driving
+  { re: /\bwarehouse (?:manager|supervisor|lead|associate|worker)\b/i, skills: ['inventory control', 'WMS', 'shipping and receiving'] },
+  { re: /\bforklift\b/i, skills: ['forklift operation', 'inventory control', 'pallet jack'] },
+  { re: /\b(?:truck |delivery |cdl )?driver\b/i, skills: ['CDL', 'DOT compliance', 'route planning'] },
+  { re: /\bdispatcher\b/i, skills: ['dispatch', 'route planning', 'TMS'] },
+  { re: /\blogistics (?:coordinator|manager|specialist)\b/i, skills: ['logistics coordination', 'TMS', 'freight management'] },
+  { re: /\bsupply chain\b/i, skills: ['supply chain management', 'demand planning', 'ERP'] },
+  { re: /\b(?:freight|import|export) (?:coordinator|specialist|agent)\b/i, skills: ['freight forwarding', 'customs documentation', 'Incoterms'] },
+
+  // construction / trades
+  { re: /\bhvac\b/i, skills: ['HVAC systems', 'EPA 608', 'preventive maintenance'] },
+  { re: /\belectrician\b/i, skills: ['electrical systems', 'NEC code', 'troubleshooting'] },
+  { re: /\bplumber\b/i, skills: ['plumbing systems', 'pipe fitting', 'blueprint reading'] },
+  { re: /\bcarpenter\b/i, skills: ['carpentry', 'framing', 'blueprint reading'] },
+  { re: /\bwelder\b/i, skills: ['MIG welding', 'TIG welding', 'blueprint reading'] },
+  { re: /\b(?:construction )?superintendent\b/i, skills: ['construction management', 'scheduling', 'OSHA 30'] },
+  { re: /\bproject manager\b.*\bconstruction\b|\bconstruction\b.*\bproject manager\b/i, skills: ['construction management', 'Procore', 'budgeting'] },
+  { re: /\bestimator\b/i, skills: ['cost estimating', 'takeoffs', 'blueprint reading'] },
+  { re: /\bmaintenance technician\b/i, skills: ['preventive maintenance', 'troubleshooting', 'HVAC'] },
+
+  // manufacturing
+  { re: /\bcnc (?:machinist|operator|programmer)\b/i, skills: ['CNC machining', 'G-code', 'blueprint reading'] },
+  { re: /\bmachinist\b/i, skills: ['CNC machining', 'manual machining', 'GD&T'] },
+  { re: /\b(?:production|plant) (?:manager|supervisor)\b/i, skills: ['production scheduling', 'lean manufacturing', 'team leadership'] },
+  { re: /\bquality (?:engineer|inspector|manager)\b/i, skills: ['quality control', 'ISO 9001', 'root cause analysis'] },
+  { re: /\bassembl(?:er|y)\b/i, skills: ['assembly', 'blueprint reading', 'hand tools'] },
+
+  // technology — stack-specific first, generic after
+  { re: /\b(?:react|angular|vue)(?:\.?js)? (?:engineer|developer)\b/i, skills: ['JavaScript', 'TypeScript', 'CSS'] },
+  { re: /\b(?:node|java|python|php|\.net|c#|golang|go|ruby) (?:engineer|developer)\b/i, skills: ['API development', 'SQL', 'Git'] },
+  { re: /\b(?:software|backend|back-end|full.?stack|web|application) (?:engineer|developer)\b/i, skills: ['JavaScript', 'SQL', 'API development'] },
+  { re: /\bfront.?end (?:engineer|developer)\b/i, skills: ['JavaScript', 'React', 'CSS'] },
+  { re: /\bdata (?:engineer|analyst|scientist)\b/i, skills: ['SQL', 'Python', 'data pipelines'] },
+  { re: /\bdevops\b/i, skills: ['CI/CD', 'AWS', 'Kubernetes'] },
+  { re: /\b(?:qa|quality assurance) (?:engineer|analyst|tester)\b/i, skills: ['test automation', 'Selenium', 'regression testing'] },
+  { re: /\b(?:it|desktop|technical) support\b/i, skills: ['troubleshooting', 'Active Directory', 'help desk'] },
+  { re: /\b(?:network|systems?) (?:engineer|administrator|admin)\b/i, skills: ['networking', 'Windows Server', 'Active Directory'] },
+  { re: /\bdba\b|\bdatabase administrator\b/i, skills: ['SQL Server', 'database administration', 'performance tuning'] },
+
+  // sales / admin / office
+  { re: /\b(?:sales|account) (?:representative|rep|executive|manager)\b/i, skills: ['B2B sales', 'CRM', 'pipeline management'] },
+  { re: /\bbusiness development\b/i, skills: ['lead generation', 'CRM', 'client relationships'] },
+  { re: /\bcustomer (?:service|support) (?:representative|rep|specialist)?\b/i, skills: ['customer service', 'CRM', 'conflict resolution'] },
+  { re: /\b(?:administrative|executive) assistant\b/i, skills: ['calendar management', 'Microsoft Office', 'travel coordination'] },
+  { re: /\boffice manager\b/i, skills: ['office administration', 'Microsoft Office', 'vendor management'] },
+  { re: /\breceptionist\b/i, skills: ['front desk', 'phone systems', 'scheduling'] },
+  { re: /\b(?:hr|human resources) (?:generalist|manager|coordinator|specialist)\b/i, skills: ['employee relations', 'HRIS', 'onboarding'] },
+  { re: /\brecruiter\b/i, skills: ['full-cycle recruiting', 'ATS', 'candidate sourcing'] },
+  { re: /\bparalegal\b/i, skills: ['legal research', 'document preparation', 'e-discovery'] },
+  { re: /\blegal assistant\b/i, skills: ['legal documentation', 'calendaring', 'client communication'] },
+
+  // hospitality / food
+  { re: /\b(?:executive |sous |head )?chef\b/i, skills: ['menu planning', 'food safety', 'kitchen management'] },
+  { re: /\b(?:restaurant|food service) manager\b/i, skills: ['restaurant operations', 'food safety', 'staff scheduling'] },
+  { re: /\bhotel (?:manager|general manager)\b/i, skills: ['hotel operations', 'PMS', 'guest relations'] },
+
+  // automotive
+  { re: /\bautomotive technician\b|\bauto mechanic\b/i, skills: ['automotive diagnostics', 'ASE certification', 'OBD-II'] },
+  { re: /\bservice advisor\b/i, skills: ['service writing', 'customer service', 'DMS'] }
+];
+
+/**
+ * Infer skills from a job title alone — used when a lead is imported
+ * without any JD text. Returns [] if nothing can be inferred.
+ */
+function inferSkillsFromTitle(title, industry) {
+  if (!title || !String(title).trim()) return [];
+  const t = String(title).trim();
+  const found = [];
+  const seen = new Set();
+
+  const push = (skill) => {
+    const key = String(skill).toLowerCase();
+    if (!seen.has(key)) { seen.add(key); found.push(skill); }
+  };
+
+  // Pass 1: technologies named directly in the title (e.g. "React Developer",
+  // "SQL Server DBA", "Salesforce Administrator"). Scan every dictionary —
+  // titles are short so this is cheap.
+  const resolvedIndustry = normalizeIndustry(industry);
+  const dictsToScan = resolvedIndustry
+    ? [resolvedIndustry, ...getRelatedIndustryKeys(resolvedIndustry), 'general']
+    : Object.keys(SKILL_DICTIONARIES);
+  for (const key of dictsToScan) {
+    for (const skill of getIndustrySkillList(key)) {
+      if (skill.length >= 3 && skillInText(skill, t)) push(skill);
+    }
+  }
+  for (const tool of SHARED_TOOLS) {
+    if (tool.length >= 3 && skillInText(tool, t)) push(tool);
+  }
+
+  // Pass 2: role archetype mapping
+  for (const profile of ROLE_PROFILES) {
+    if (profile.re.test(t)) {
+      profile.skills.forEach(push);
+      break; // first matching profile wins — they're ordered specific → generic
+    }
+  }
+
+  // Subsumption dedup: drop "CDL" when "CDL Class A" is present, etc.
+  const lowers = found.map((s) => s.toLowerCase());
+  const deduped = found.filter((skill) => {
+    const lower = skill.toLowerCase();
+    return !lowers.some((other) => other !== lower && other.startsWith(lower + ' '));
+  });
+
+  return deduped.slice(0, MAX_SUGGESTED_SKILLS);
+}
+
 function buildResearchFromLeadData({ notes, jdText, position, location, salaryRange, industry }) {
   const parts = [];
   if (position) parts.push(`Title: ${position}`);
@@ -843,6 +989,28 @@ function buildResearchFromLeadData({ notes, jdText, position, location, salaryRa
   if (!seedText.trim()) return null;
 
   const parsed = parseJobDescription(seedText, industry);
+
+  // No JD text (or it produced almost nothing)? Infer skills from the title.
+  // Flag the source so the RA knows these are educated guesses to review,
+  // not extracted requirements.
+  if (parsed.suggested_skills.length < 3 && position) {
+    const inferred = inferSkillsFromTitle(position, industry);
+    if (inferred.length) {
+      const merged = [...parsed.suggested_skills];
+      const seen = new Set(merged.map((s) => s.toLowerCase()));
+      for (const skill of inferred) {
+        if (merged.length >= MAX_SUGGESTED_SKILLS) break;
+        if (!seen.has(skill.toLowerCase())) { seen.add(skill.toLowerCase()); merged.push(skill); }
+      }
+      parsed.skills = merged;
+      parsed.suggested_skills = merged;
+      parsed.skill_1 = merged[0] || '';
+      parsed.skill_2 = merged[1] || '';
+      parsed.skill_3 = merged[2] || '';
+      parsed.skills_source = 'title_inference';
+    }
+  }
+
   if (salaryRange) {
     parsed.salary_display = parsed.salary_display || String(salaryRange).trim();
     parsed.salary_range = parsed.salary_range || String(salaryRange).trim();
@@ -869,6 +1037,7 @@ module.exports = {
   normalizeIndustry,
   inferIndustryFromText,
   matchSkills,
+  inferSkillsFromTitle,
   SKILL_DICTIONARIES,
   SOFT_SKILLS,
   SHARED_TOOLS,
