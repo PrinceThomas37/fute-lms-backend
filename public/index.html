@@ -654,6 +654,9 @@ function scheduleRender(){
     // the input has temporarily lost focus.
     var modalOpen=!!(STATE.modal||(document.getElementById('modal-overlay')&&document.getElementById('modal-overlay').style.display!=='none'));
     if(modalOpen||STATE.detailLead)return;
+    // Skip if user was recently editing the RA lead form (within last 3 seconds)
+    // to prevent background polls from interrupting active typing.
+    if(STATE.raFormTouchedAt&&(Date.now()-STATE.raFormTouchedAt)<3000)return;
     render();
   },16);
 }
@@ -5102,9 +5105,10 @@ function renderRALeadForm(){
 // ── RA Form actions ──────────────────────────────
 window.raFormUpdateResearch=function(section,field,val){
   var r=raFormEnsureResearch();
-  if(section==='jd_raw'&&field==='__root__'){r.jd_raw=val;return;}
+  if(section==='jd_raw'&&field==='__root__'){r.jd_raw=val;STATE.raFormTouchedAt=Date.now();return;}
   if(!r[section])r[section]={};
   r[section][field]=val;
+  STATE.raFormTouchedAt=Date.now();
 };
 window.raFormUpdateRequirements=function(field,val){
   var r=raFormEnsureResearch();
@@ -5194,6 +5198,7 @@ window.raFormParseJD=function(){
 };
 window.raFormSet=function(field,val){
   STATE.raForm[field]=val;
+  STATE.raFormTouchedAt=Date.now();
 };
 
 window.raFormDetectTimezone=function(location){
@@ -5237,10 +5242,11 @@ window.raFormEdit=function(jobId){
 
 window.raFormZipSearch=function(val){
   STATE.raForm.zipCode=val;
+  STATE.raFormTouchedAt=Date.now();
   if(!val||val.length<3){STATE.raFormZipSuggestions=[];render();return;}
   apiGet('/lookup/zipcode?zip='+encodeURIComponent(val)).then(function(results){
     STATE.raFormZipSuggestions=results;
-    render();
+    scheduleRender();
     setTimeout(function(){
       var items=document.querySelectorAll('._zip-sug');
       Array.prototype.forEach.call(items,function(el){
@@ -5264,7 +5270,18 @@ window.raFormZipSearch=function(val){
 };
 
 window.raFormZipBlur=function(){
-  setTimeout(function(){STATE.raFormZipSuggestions=[];render();},200);
+  // Clear suggestions without a full DOM rebuild — prevents flicker when switching windows
+  setTimeout(function(){
+    STATE.raFormZipSuggestions=[];
+    var zipInput=document.getElementById('ra-zip');
+    if(zipInput){
+      var wrap=zipInput.parentElement;
+      if(wrap){
+        var items=wrap.querySelectorAll('._zip-sug');
+        if(items.length){var sugBox=items[0].parentElement;if(sugBox&&sugBox!==wrap)sugBox.remove();}
+      }
+    }
+  },200);
 };
 
 // ── Company cooldown helper ─────────────────────
@@ -5287,10 +5304,11 @@ window.raFormCoSearch=function(val){
   STATE.raForm.coName=val;
   STATE.raForm.coId=null;
   STATE.raForm.coInfo=null;
+  STATE.raFormTouchedAt=Date.now();
   if(!val||val.length<3){STATE.raFormCoSuggestions=[];render();return;}
   apiGet('/companies/search?q='+encodeURIComponent(val)).then(function(results){
     STATE.raFormCoSuggestions=results;
-    render();
+    scheduleRender();
     // Bind click handlers after render
     setTimeout(function(){
       var items=document.querySelectorAll('._co-sug');
@@ -5317,7 +5335,12 @@ window.raFormCoSearch=function(val){
 };
 
 window.raFormCoBlur=function(){
-  setTimeout(function(){STATE.raFormCoSuggestions=[];render();},200);
+  // Clear suggestions without a full DOM rebuild — prevents flicker when switching windows
+  setTimeout(function(){
+    STATE.raFormCoSuggestions=[];
+    var el=document.getElementById('co-suggestions');
+    if(el)el.remove();
+  },200);
 };
 
 window.raFormCheckEmail=function(idx,email){
@@ -5326,13 +5349,14 @@ window.raFormCheckEmail=function(idx,email){
   apiPost('/contacts/check-email',{email:email}).then(function(res){
     contacts[idx].emailStatus=res.duplicate?'dup':'ok';
     contacts[idx].emailDupInfo=res;
-    render();
+    scheduleRender();
   }).catch(function(){});
 };
 
 window.raFormUpdateContact=function(idx,field,val){
   STATE.raForm.contacts[idx][field]=val;
   if(field==='email')STATE.raForm.contacts[idx].emailStatus='';
+  STATE.raFormTouchedAt=Date.now();
 };
 
 window.raFormAddContact=function(){
@@ -5352,6 +5376,7 @@ window.raFormClear=function(){
   STATE.raForm={coName:'',coId:null,coInfo:null,website:'',industry:'',location:'',zipCode:'',position:'',jobUrl:'',jobCreatedDate:'',salaryRange:'',source:'',editJobId:null,contacts:[{firstName:'',lastName:'',designation:'',email:'',phone:'',linkedin:'',emailStatus:'',emailDupInfo:null}],research:defaultRaFormResearch()};
   STATE.raFormCoSuggestions=[];
   STATE.raFormZipSuggestions=[];
+  STATE.raFormTouchedAt=null;
   render();
 };
 
