@@ -622,6 +622,13 @@ function render(){
     '</div>';
     return;
   }
+  // Save focus/cursor state so we can restore it after DOM rebuild
+  var _ae=document.activeElement;
+  var _focusId=_ae&&_ae.id||'';
+  var _focusPh=_ae&&_ae.placeholder||'';
+  var _focusTag=_ae&&_ae.tagName||'';
+  var _selStart=_ae&&typeof _ae.selectionStart==='number'?_ae.selectionStart:-1;
+  var _selEnd=_ae&&typeof _ae.selectionEnd==='number'?_ae.selectionEnd:-1;
   // Save all scroll positions before re-render
   var content=document.getElementById("content");
   var scrollTop=content?content.scrollTop:0;
@@ -639,6 +646,17 @@ function render(){
     if(newPage&&pageScroll)newPage.scrollTop=pageScroll;
   }
   if(winScroll)window.scrollTo(0,winScroll);
+  // Restore focus and cursor position so typing isn't interrupted by DOM rebuild
+  var _restored=null;
+  if(_focusId)_restored=document.getElementById(_focusId);
+  if(!_restored&&_focusPh&&_focusTag){
+    var _els=document.querySelectorAll(_focusTag.toLowerCase()+'[placeholder]');
+    for(var _i=0;_i<_els.length;_i++){if(_els[_i].placeholder===_focusPh){_restored=_els[_i];break;}}
+  }
+  if(_restored&&document.body.contains(_restored)){
+    _restored.focus();
+    if(_selStart>=0&&_restored.setSelectionRange){try{_restored.setSelectionRange(_selStart,_selEnd);}catch(e){}}
+  }
 }
 
 // Debounced render — collapses multiple rapid async render() calls into one.
@@ -654,9 +672,6 @@ function scheduleRender(){
     // the input has temporarily lost focus.
     var modalOpen=!!(STATE.modal||(document.getElementById('modal-overlay')&&document.getElementById('modal-overlay').style.display!=='none'));
     if(modalOpen||STATE.detailLead)return;
-    // Skip if user was recently editing the RA lead form (within last 3 seconds)
-    // to prevent background polls from interrupting active typing.
-    if(STATE.raFormTouchedAt&&(Date.now()-STATE.raFormTouchedAt)<3000)return;
     render();
   },16);
 }
@@ -5243,7 +5258,12 @@ window.raFormEdit=function(jobId){
 window.raFormZipSearch=function(val){
   STATE.raForm.zipCode=val;
   STATE.raFormTouchedAt=Date.now();
-  if(!val||val.length<3){STATE.raFormZipSuggestions=[];render();return;}
+  if(!val||val.length<3){
+    STATE.raFormZipSuggestions=[];
+    var _zi=document.getElementById('ra-zip');
+    if(_zi){var _zw=_zi.parentElement;if(_zw){var _zs=_zw.querySelectorAll('._zip-sug');if(_zs.length&&_zs[0].parentElement&&_zs[0].parentElement!==_zw)_zs[0].parentElement.remove();}}
+    return;
+  }
   apiGet('/lookup/zipcode?zip='+encodeURIComponent(val)).then(function(results){
     STATE.raFormZipSuggestions=results;
     scheduleRender();
@@ -5305,7 +5325,12 @@ window.raFormCoSearch=function(val){
   STATE.raForm.coId=null;
   STATE.raForm.coInfo=null;
   STATE.raFormTouchedAt=Date.now();
-  if(!val||val.length<3){STATE.raFormCoSuggestions=[];render();return;}
+  if(!val||val.length<3){
+    STATE.raFormCoSuggestions=[];
+    var _cs=document.getElementById('co-suggestions');
+    if(_cs)_cs.remove();
+    return;
+  }
   apiGet('/companies/search?q='+encodeURIComponent(val)).then(function(results){
     STATE.raFormCoSuggestions=results;
     scheduleRender();
