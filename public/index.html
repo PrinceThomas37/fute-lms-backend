@@ -5782,7 +5782,7 @@ function renderBDInsights(){
     var lbl=new Date(k+'T12:00:00').toLocaleDateString('en-US',{weekday:'short'});
     return '<div style="display:flex;flex-direction:column;align-items:center;gap:3px;flex:1">'+
       '<div style="font-size:11px;font-weight:600;color:'+(isT?'var(--green)':'var(--teal)')+'">'+val+'</div>'+
-      '<div style="width:100%;background:var(--border);border-radius:4px;height:48px;display:flex;align-items:flex-end">'+
+      '<div style="width:100%;background:var(--border);border-radius:4px;height:64px;display:flex;align-items:flex-end">'+
         '<div style="width:100%;background:'+(isT?'var(--green)':'var(--teal)')+';border-radius:4px;height:'+Math.max(pct,val?4:0)+'%;opacity:'+(isT?'1':'.7')+'"></div>'+
       '</div>'+
       '<div style="font-size:10px;color:'+(isT?'var(--green)':'var(--text3)')+';font-weight:'+(isT?700:400)+'">'+lbl+'</div>'+
@@ -5799,7 +5799,7 @@ function renderBDInsights(){
     var lbl=new Date(k+'T12:00:00').toLocaleDateString('en-US',{weekday:'short'});
     return '<div style="display:flex;flex-direction:column;align-items:center;gap:3px;flex:1">'+
       '<div style="font-size:11px;font-weight:600;color:'+(isT?'var(--green)':'var(--accent)')+'">'+val+'</div>'+
-      '<div style="width:100%;background:var(--border);border-radius:4px;height:48px;display:flex;align-items:flex-end">'+
+      '<div style="width:100%;background:var(--border);border-radius:4px;height:64px;display:flex;align-items:flex-end">'+
         '<div style="width:100%;background:'+(isT?'var(--green)':'var(--accent)')+';border-radius:4px;height:'+Math.max(pct,val?4:0)+'%;opacity:'+(isT?'1':'.65')+'"></div>'+
       '</div>'+
       '<div style="font-size:10px;color:'+(isT?'var(--green)':'var(--text3)')+';font-weight:'+(isT?700:400)+'">'+lbl+'</div>'+
@@ -5894,11 +5894,11 @@ function renderBDInsights(){
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'+
       '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:16px">'+
         '<div style="font-weight:600;font-size:13px;margin-bottom:12px">Emails sent — last 7 days <span style="font-size:11px;color:var(--green)">\u25cf today</span></div>'+
-        '<div style="display:flex;gap:5px;align-items:flex-end;height:60px">'+(emailChart||'<div style="font-size:12px;color:var(--text3)">No data</div>')+'</div>'+
+        '<div style="display:flex;gap:5px;align-items:flex-end">'+(emailChart||'<div style="font-size:12px;color:var(--text3)">No data</div>')+'</div>'+
       '</div>'+
       '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:16px">'+
         '<div style="font-weight:600;font-size:13px;margin-bottom:12px">Leads assigned — last 7 days</div>'+
-        '<div style="display:flex;gap:5px;align-items:flex-end;height:60px">'+(leadsChart||'<div style="font-size:12px;color:var(--text3)">No data</div>')+'</div>'+
+        '<div style="display:flex;gap:5px;align-items:flex-end">'+(leadsChart||'<div style="font-size:12px;color:var(--text3)">No data</div>')+'</div>'+
       '</div>'+
     '</div>'+
 
