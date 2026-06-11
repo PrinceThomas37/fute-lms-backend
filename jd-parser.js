@@ -1,18 +1,57 @@
 /**
- * Non-AI job description parser — regex + industry skill dictionaries.
+ * Non-AI job description parser — regex + structure-aware extraction.
  *
- * Skill extraction order:
- * 1. Requirements / qualification lines from the JD (highest priority)
- * 2. Industry dictionary (from form industry or inferred from JD text)
- * 3. Shared tools (SAP, Excel, Sage ERP, etc.)
- * 4. General professional tools
- * 5. Soft skills (communication, leadership, …) — only if nothing technical found
+ * Skill extraction order (highest → lowest priority):
+ * 1. "N years of X" phrases — the single strongest JD signal
+ * 2. Parenthetical skill lists  e.g. "Java (Spring, Hibernate)"
+ * 3. Bullet lines from Required / Qualifications sections
+ * 4. Bullet lines from Preferred / Nice-to-have sections
+ * 5. Inline "experience with / proficiency in" phrases
+ * 6. Industry dictionary terms present in the JD text
+ * 7. Shared tools (SAP, Excel, Salesforce …)
+ * 8. Soft skills — only if nothing technical was found
+ *
+ * Education lines, degree requirements, and benefit descriptions are
+ * explicitly filtered out so they do not appear as skill suggestions.
  */
 
 const { SKILL_DICTIONARIES } = require('./skill-dictionaries');
 const { loadLearnedSkills } = require('./learned-skills');
 
 const MAX_SUGGESTED_SKILLS = 8;
+
+// ─────────────────────────────────────────────────────────────────
+// Section tier definitions
+// Sections are split from the JD text and given a priority tier.
+// Tier 1 = Required, Tier 2 = Preferred, Tier 3 = Responsibilities,
+// Tier 4 = ignore (About, Benefits, Equal-opportunity boilerplate)
+// ─────────────────────────────────────────────────────────────────
+const SECTION_TIERS = {
+  required: [
+    'requirements?', 'qualifications?', 'must.have', 'minimum qualifications?',
+    'required qualifications?', 'technical skills?', 'experience required',
+    'knowledge & experience', 'education & experience',
+    'what you(?:\'ll| will) (need|bring)', 'you bring',
+    'what we(?:\'re| are) looking for', 'ideal candidate',
+    'who you are', 'about you'
+  ],
+  preferred: [
+    'preferred qualifications?', 'nice.to.have', 'bonus points', 'a.plus',
+    'preferred skills?', 'desired qualifications?', 'would be great',
+    'great to have', 'additionally'
+  ],
+  responsibilities: [
+    'responsibilities', 'duties', 'what you(?:\'ll| will) do',
+    'your role', 'the role', 'day.to.day', 'in this role', 'job duties',
+    'key responsibilities', 'primary responsibilities', 'about the role'
+  ],
+  ignore: [
+    'benefit', 'perks?', 'about (?:us|the company|our company)',
+    'why (?:join|work|us)', 'our culture', 'equal opportunity',
+    'who we are', 'compensation', 'what we offer', 'we offer',
+    'our team', 'our mission'
+  ]
+};
 
 /** Related industry clusters — scan neighbors after primary industry */
 const RELATED_INDUSTRIES = {
@@ -210,29 +249,57 @@ function isSoftSkill(skill) {
     || /\b(communication|leadership|customer service|time management)\s+skills?\b/i.test(lower);
 }
 
+// ─────────────────────────────────────────────────────────────────
+// NEW: Filter out education / degree requirements before they
+// become skill suggestions. These are never real job skills.
+// ─────────────────────────────────────────────────────────────────
+function isEducationPhrase(skill) {
+  const s = String(skill || '').trim();
+  return /^(?:bachelor|master|associate|high school|phd|ph\.d|doctorate|mba|j\.d\.|juris|m\.s\.|b\.s\.|b\.a\.|degree|diploma|ged|certificate)/i.test(s)
+    || /\b(?:bachelor'?s?|master'?s?|associate'?s?)\s+(?:degree|of)/i.test(s)
+    || /\b(?:degree|diploma)\s+(?:in|required|preferred)/i.test(s)
+    || /^(?:college|university|academic)\s/i.test(s);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// NEW: Filter out generic "ability to / willingness to" sentences
+// that are duties, not skills.
+// ─────────────────────────────────────────────────────────────────
+function isGenericAbilityPhrase(skill) {
+  return /^(?:ability|willingness|capacity|desire)\s+to\b/i.test(skill)
+    || /^(?:must be able|should be able)\b/i.test(skill)
+    || /^(?:work in|work with|work on)\s+a\b/i.test(skill)
+    || skill.split(/\s+/).length > 6; // anything >6 words is almost certainly a sentence fragment
+}
+
 function cleanSkillPhrase(raw) {
   let t = String(raw || '').trim();
   if (!t) return '';
   t = t.replace(/^[\s\-•*]+/, '').replace(/[.)]+$/, '').trim();
+  // Strip trailing unclosed parenthetical (comma-splits can leave "Excel (pivot tables")
+  t = t.replace(/\s*\([^)]*$/, '').trim();
   t = t.replace(/^(?:strong|excellent|good|solid|proven|effective)\s+/i, '');
   t = t.replace(/^(?:must have|required|preferred|minimum|ideal)\s*:?\s*/i, '');
   t = t.replace(/\b(?:experience with|experience in|proficien(?:t|cy) in|knowledge of|familiarity with|ability to|understanding of)\s+/gi, '');
   t = t.replace(/\b(?:required|preferred|is a plus|a plus|plus|desired|nice to have)\b/gi, '').trim();
+  // Strip trailing generic nouns that add no meaning to a skill name
+  t = t.replace(/\s+(?:experience|skills?|background|knowledge|proficiency|expertise)$/i, '').trim();
   t = t.replace(/\s{2,}/g, ' ').trim();
-  if (t.length < 2 || t.length > 80) return '';
+  if (t.length < 2 || t.length > 60) return ''; // tightened from 80 to 60
   if (/^(the|a|an|or|and|with|in|for|to|years?|year|experience)$/i.test(t)) return '';
-  t = t.replace(/^\d+\+?\s*years?\s+(?:of\s+)?/i, '').trim();
+  t = t.replace(/^\d+\+?\s*(?:to\s*\d+\+?)?\s*years?\s+(?:of\s+)?/i, '').trim();
   if (!t || /^(experience|of)$/i.test(t)) return '';
+  if (isEducationPhrase(t) || isGenericAbilityPhrase(t)) return '';
   return t;
 }
 
-function addSkillMatch(matches, seen, skill) {
+function addSkillMatch(matches, seen, skill, tier) {
   const cleaned = cleanSkillPhrase(skill);
   if (!cleaned) return;
   const norm = cleaned.toLowerCase();
   if (seen.has(norm)) return;
   seen.add(norm);
-  matches.push(cleaned);
+  matches.push({ skill: cleaned, tier: tier || 99 });
 }
 
 function getIndustrySkillList(industryKey) {
@@ -275,21 +342,123 @@ function extractKnownAcronyms(text) {
   return found;
 }
 
-function matchSkillsFromDict(text, dict, seen, matches, limit) {
+function matchSkillsFromDict(text, dict, seen, matches, limit, tier) {
   const sorted = [...dict].sort((a, b) => b.length - a.length);
   for (const skill of sorted) {
     if (matches.length >= limit) break;
     if (!skillInText(skill, text)) continue;
-    addSkillMatch(matches, seen, skill);
+    addSkillMatch(matches, seen, skill, tier);
   }
 }
 
-function extractInlineSkillPhrases(text) {
+// ─────────────────────────────────────────────────────────────────
+// NEW: Extract "N+ years of X" as the strongest required-skill signal.
+// "5+ years of React", "3 years experience in SQL Server" etc.
+// ─────────────────────────────────────────────────────────────────
+function extractYearsOfExperience(text) {
+  const found = [];
+  const seen = new Set();
+  // Require an explicit "of / with / in / using / experience" bridge word so we don't
+  // accidentally grab verb phrases like "4+ years managing operations".
+  const re = /\b\d+\s*(?:\+|\s*to\s*\d+)?\s*years?\s+(?:of\s+experience\s+(?:with|in|using)\s+|of\s+experience\s+in\s+|experience\s+(?:with|in|using)\s+|of\s+)([A-Za-z][A-Za-z0-9\s\.\-\/\+#]{1,40})/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const raw = m[1].trim();
+    // Skip if the phrase starts with a gerund (verb-ing) — it's a duty, not a skill
+    if (/^[A-Z]?[a-z]+ing\b/.test(raw)) continue;
+    // Trim trailing noise words
+    const trimmed = raw.replace(/\s+(?:experience|preferred|required|a plus|plus|desired|or more|minimum).*$/i, '').trim();
+    const cleaned = cleanSkillPhrase(trimmed);
+    if (!cleaned) continue;
+    const key = cleaned.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      found.push(cleaned);
+    }
+  }
+  return found;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// NEW: Extract parenthetical skill lists.
+// "experience with Java (Spring Boot, Maven, Hibernate)" →
+// ["Spring Boot", "Maven", "Hibernate"]
+// ─────────────────────────────────────────────────────────────────
+function extractParentheticalSkillLists(text) {
+  const found = [];
+  const seen = new Set();
+  const re = /\(([^)]{4,120})\)/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const inner = m[1];
+    // Only treat as a skill list if it contains commas or slashes (i.e. multiple items)
+    if (!(/[,\/]/.test(inner))) continue;
+    inner.split(/[,\/]/).forEach((part) => {
+      const cleaned = cleanSkillPhrase(part.trim());
+      if (!cleaned) return;
+      if (cleaned.split(/\s+/).length > 4) return; // skip sentence fragments
+      const key = cleaned.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        found.push(cleaned);
+      }
+    });
+  }
+  return found;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// NEW: Split JD into named sections with priority tiers.
+// Returns { required: string, preferred: string, responsibilities: string, body: string }
+// ─────────────────────────────────────────────────────────────────
+function splitIntoSections(text) {
+  const sections = { required: '', preferred: '', responsibilities: '', body: text };
+
+  function buildPattern(labels) {
+    return new RegExp(
+      `(?:^|\\n)\\s*(?:${labels.join('|')})\\s*:?\\s*(?:\\n|$)([\\s\\S]*?)(?=(?:\\n\\s*(?:${
+        [...SECTION_TIERS.required, ...SECTION_TIERS.preferred,
+          ...SECTION_TIERS.responsibilities, ...SECTION_TIERS.ignore].join('|')
+      })\\s*:?\\s*(?:\\n|$))|$)`,
+      'gi'
+    );
+  }
+
+  // Walk through the text line by line, labelling each block
+  const lines = text.split('\n');
+  let currentTier = 'body';
+  const blocks = { required: [], preferred: [], responsibilities: [], body: [], ignore: [] };
+
+  const tierPatterns = {};
+  for (const [tier, labels] of Object.entries(SECTION_TIERS)) {
+    tierPatterns[tier] = new RegExp(`^\\s*(?:${labels.join('|')})\\s*:?\\s*$`, 'i');
+  }
+
+  for (const line of lines) {
+    let matched = false;
+    for (const [tier, re] of Object.entries(tierPatterns)) {
+      if (re.test(line)) {
+        currentTier = tier;
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) blocks[currentTier].push(line);
+  }
+
+  sections.required = blocks.required.join('\n');
+  sections.preferred = blocks.preferred.join('\n');
+  sections.responsibilities = blocks.responsibilities.join('\n');
+  sections.body = blocks.body.join('\n');
+  return sections;
+}
+
+function extractInlineSkillPhrases(text, tier) {
   const found = [];
   const seen = new Set();
   const patterns = [
-    /(?:experience with|experience in|proficien(?:t|cy) in|knowledge of|familiarity with|skilled in|working knowledge of|hands-on with|background in|expertise in)\s+([^.,;\n]+)/gi,
-    /(?:must have|required|preferred|nice to have)\s*:?\s*([^.,;\n]+)/gi
+    /(?:experience with|experience in|proficien(?:t|cy) in|knowledge of|familiarity with|skilled in|working knowledge of|hands-on with|background in|expertise in)\s+([^.,;\n]{3,60})/gi,
+    /(?:must have|required|preferred|nice to have)\s*:?\s*([^.,;\n]{3,60})/gi
   ];
   for (const re of patterns) {
     let m;
@@ -301,7 +470,7 @@ function extractInlineSkillPhrases(text) {
         const key = token.toLowerCase();
         if (!seen.has(key)) {
           seen.add(key);
-          found.push(token);
+          found.push({ skill: token, tier: tier || 50 });
         }
       });
     }
@@ -309,7 +478,29 @@ function extractInlineSkillPhrases(text) {
   return found;
 }
 
-function extractCommaListedSkills(text) {
+function extractBulletSkills(text, tier) {
+  const found = [];
+  const seen = new Set();
+  const bulletRe = /(?:^|\n)\s*[-•*]\s+([^\n]{2,100})/g;
+  let m;
+  while ((m = bulletRe.exec(text)) !== null) {
+    const line = m[1].trim();
+    // Skip lines that are clearly section titles or very long sentences
+    if (/^(requirements?|qualifications?|responsibilities|duties|about the role|job description)\b/i.test(line)) continue;
+    // Skip lines that look like sentences (verb at start) not skill phrases
+    if (/^(?:manage|lead|develop|create|build|work|support|ensure|provide|assist|maintain|implement|coordinate|communicate|collaborate|partner|design|drive|own|identify|analyze|monitor|review|prepare|handle|perform|deliver|facilitate|conduct|define|establish)/i.test(line)) continue;
+    const token = cleanSkillPhrase(line);
+    if (!token) continue;
+    const key = token.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      found.push({ skill: token, tier: tier || 60 });
+    }
+  }
+  return found;
+}
+
+function extractCommaListedSkills(text, tier) {
   const found = [];
   const seen = new Set();
 
@@ -327,13 +518,13 @@ function extractCommaListedSkills(text) {
         const key = p.toLowerCase();
         if (!seen.has(key)) {
           seen.add(key);
-          found.push(p);
+          found.push({ skill: p, tier: tier || 40 });
         }
       });
     });
   }
 
-  const inlineRe = /(?:requirements?|qualifications?|skills?|must have|experience (?:with|in)|proficien(?:t|cy) in|knowledge of)[:\s-]*([^\n]+)/gi;
+  const inlineRe = /(?:requirements?|qualifications?|skills?|must have|experience (?:with|in)|proficien(?:t|cy) in|knowledge of)[:\s-]*([^\n]{3,120})/gi;
   while ((m = inlineRe.exec(text)) !== null) {
     const chunk = m[1].replace(/\band\b/gi, ',');
     chunk.split(/[,;|•]/).forEach((part) => {
@@ -342,45 +533,34 @@ function extractCommaListedSkills(text) {
       const key = token.toLowerCase();
       if (!seen.has(key)) {
         seen.add(key);
-        found.push(token);
+        found.push({ skill: token, tier: tier || 40 });
       }
     });
-  }
-
-  const bulletRe = /(?:^|\n)\s*[-•*]\s+([^\n]+)/g;
-  while ((m = bulletRe.exec(text)) !== null) {
-    const token = cleanSkillPhrase(m[1]);
-    if (!token) continue;
-    if (/^(requirements?|qualifications?|responsibilities|duties|about the role|job description)\b/i.test(token)) continue;
-    const key = token.toLowerCase();
-    if (!seen.has(key)) {
-      seen.add(key);
-      found.push(token);
-    }
   }
 
   return found;
 }
 
-function skillScore(skill, industry, text, requirementTokens) {
-  let score = 0;
+function skillScore(skill, industry, text, requirementTokens, tier) {
+  let score = tier || 50; // base score = tier (lower = higher priority in sort)
   const lower = skill.toLowerCase();
-  if (requirementTokens && requirementTokens.has(lower)) score -= 20;
-  if (isSoftSkill(skill)) score += 100;
-  if (industry && getIndustrySkillList(industry).some((s) => s.toLowerCase() === lower)) score -= 35;
-  if (getRelatedIndustryKeys(industry).some((rel) => getIndustrySkillList(rel).some((s) => s.toLowerCase() === lower))) score -= 20;
-  if (SHARED_TOOLS.some((s) => s.toLowerCase() === lower)) score -= 20;
-  if (CERTIFICATION_PATTERNS.some((c) => c.label.toLowerCase() === lower)) score -= 25;
-  if (KNOWN_ACRONYMS.some((a) => a.toLowerCase() === lower)) score -= 15;
-  if (skillInText(skill, text) && lower.length <= 24) score -= 5;
+  // Years-of-experience skills already got tier 1 — boost them further for specific-sounding names
+  if (requirementTokens && requirementTokens.has(lower)) score -= 10;
+  if (isSoftSkill(skill)) score += 50;
+  if (industry && getIndustrySkillList(industry).some((s) => s.toLowerCase() === lower)) score -= 10;
+  if (getRelatedIndustryKeys(industry).some((rel) => getIndustrySkillList(rel).some((s) => s.toLowerCase() === lower))) score -= 5;
+  if (SHARED_TOOLS.some((s) => s.toLowerCase() === lower)) score -= 5;
+  if (CERTIFICATION_PATTERNS.some((c) => c.label.toLowerCase() === lower)) score -= 8;
+  if (KNOWN_ACRONYMS.some((a) => a.toLowerCase() === lower)) score -= 4;
   return score;
 }
 
 function rankSkills(matches, industry, text, requirementTokens) {
   return [...matches].sort((a, b) => {
-    const scoreDiff = skillScore(a, industry, text, requirementTokens) - skillScore(b, industry, text, requirementTokens);
-    if (scoreDiff !== 0) return scoreDiff;
-    return a.length - b.length;
+    const sa = skillScore(a.skill, industry, text, requirementTokens, a.tier);
+    const sb = skillScore(b.skill, industry, text, requirementTokens, b.tier);
+    if (sa !== sb) return sa - sb;
+    return a.skill.length - b.skill.length;
   });
 }
 
@@ -389,18 +569,12 @@ function isPreferredSkillPhrase(skill, rawLine) {
   return /\b(preferred|nice to have|a plus|plus|desired|optional|bonus)\b/i.test(combined);
 }
 
-function buildRequirementTokenSet(text) {
+function buildRequirementTokenSet(skills) {
   const tokens = new Set();
-  const bulletRe = /(?:^|\n)\s*[-•*]\s+([^\n]+)/g;
-  const bulletLines = [];
-  let m;
-  while ((m = bulletRe.exec(text)) !== null) bulletLines.push(m[1]);
-
-  [...extractCommaListedSkills(text), ...extractInlineSkillPhrases(text)].forEach((skill) => {
+  skills.forEach(({ skill, tier }) => {
+    if (tier > 30) return; // only tier 1 / tier 2 items
     const cleaned = cleanSkillPhrase(skill);
     if (!cleaned) return;
-    const rawLine = bulletLines.find((line) => line.toLowerCase().includes(cleaned.toLowerCase())) || '';
-    if (isPreferredSkillPhrase(cleaned, rawLine)) return;
     tokens.add(cleaned.toLowerCase());
     cleaned.split(/\s+/).forEach((part) => {
       if (part.length >= 2) tokens.add(part.toLowerCase());
@@ -414,36 +588,110 @@ function matchSkills(text, industry) {
   const matches = [];
 
   const resolvedIndustry = normalizeIndustry(industry) || inferIndustryFromText(text) || 'general';
-  const requirementTokens = buildRequirementTokenSet(text);
 
-  for (const token of extractCommaListedSkills(text)) addSkillMatch(matches, seen, token);
-  for (const token of extractInlineSkillPhrases(text)) addSkillMatch(matches, seen, token);
-  for (const token of extractCertifications(text)) addSkillMatch(matches, seen, token);
-  for (const token of extractKnownAcronyms(text)) addSkillMatch(matches, seen, token);
+  // ── Step 1: Split into sections so we know which tier content comes from ──
+  const sections = splitIntoSections(text);
 
-  matchSkillsFromDict(text, getIndustrySkillList(resolvedIndustry), seen, matches, 80);
+  // ── Step 2: Highest-priority — "N years of X" from the whole JD ──
+  for (const skill of extractYearsOfExperience(sections.required || text)) {
+    addSkillMatch(matches, seen, skill, 5); // tier 5 = top priority
+  }
+  // years-of-experience from body too, but lower priority
+  if (sections.body) {
+    for (const skill of extractYearsOfExperience(sections.body)) {
+      addSkillMatch(matches, seen, skill, 15);
+    }
+  }
 
+  // ── Step 3: Parenthetical skill lists ──
+  for (const skill of extractParentheticalSkillLists(sections.required || text)) {
+    addSkillMatch(matches, seen, skill, 10);
+  }
+
+  // ── Step 4: Bullet points and inline phrases from Required section ──
+  for (const item of extractBulletSkills(sections.required, 20)) addSkillMatch(matches, seen, item.skill, item.tier);
+  for (const item of extractInlineSkillPhrases(sections.required, 20)) addSkillMatch(matches, seen, item.skill, item.tier);
+  for (const item of extractCommaListedSkills(sections.required, 25)) addSkillMatch(matches, seen, item.skill, item.tier);
+
+  // ── Step 5: Certifications and acronyms (document-wide) ──
+  for (const token of extractCertifications(text)) addSkillMatch(matches, seen, token, 12);
+  for (const token of extractKnownAcronyms(sections.required || text)) addSkillMatch(matches, seen, token, 18);
+
+  // ── Step 6: Preferred / nice-to-have section ──
+  for (const item of extractBulletSkills(sections.preferred, 40)) addSkillMatch(matches, seen, item.skill, item.tier);
+  for (const item of extractInlineSkillPhrases(sections.preferred, 40)) addSkillMatch(matches, seen, item.skill, item.tier);
+  for (const item of extractParentheticalSkillLists(sections.preferred)) addSkillMatch(matches, seen, item, 38);
+
+  // ── Step 7: Responsibilities section (lower priority) ──
+  for (const item of extractInlineSkillPhrases(sections.responsibilities, 55)) addSkillMatch(matches, seen, item.skill, item.tier);
+  for (const token of extractKnownAcronyms(sections.responsibilities || '')) addSkillMatch(matches, seen, token, 50);
+
+  // ── Step 8: Industry dictionary — only skills that appear in the JD ──
+  matchSkillsFromDict(text, getIndustrySkillList(resolvedIndustry), seen, matches, 80, 60);
   for (const relatedKey of getRelatedIndustryKeys(resolvedIndustry)) {
-    matchSkillsFromDict(text, getIndustrySkillList(relatedKey), seen, matches, 80);
+    matchSkillsFromDict(text, getIndustrySkillList(relatedKey), seen, matches, 80, 65);
   }
-
-  matchSkillsFromDict(text, SHARED_TOOLS, seen, matches, 80);
-
+  matchSkillsFromDict(text, SHARED_TOOLS, seen, matches, 80, 70);
   if (resolvedIndustry !== 'general') {
-    matchSkillsFromDict(text, getIndustrySkillList('general'), seen, matches, 80);
+    matchSkillsFromDict(text, getIndustrySkillList('general'), seen, matches, 80, 75);
+  }
+  matchSkillsFromDict(text, [...SOFT_SKILLS], seen, matches, 80, 90);
+
+  const requirementTokens = buildRequirementTokenSet(matches);
+  const ranked = rankSkills(matches, resolvedIndustry, text, requirementTokens);
+
+  // Deduplicate with subsumption rules:
+  // 1. If a skill phrase contains " or " / " and " joining two variants, split it.
+  //    e.g. "OSHA 10 or OSHA 30" → ["OSHA 10", "OSHA 30"]
+  // 2. Skip a generic shorter form when a more-specific version exists, UNLESS
+  //    the shorter form is a recognised acronym/certification (those are always valid).
+  const knownAcronymsLower = new Set(KNOWN_ACRONYMS.map((a) => a.toLowerCase()));
+  const certLabelsLower = new Set(CERTIFICATION_PATTERNS.map((c) => c.label.toLowerCase()));
+
+  // Expand "X or Y" / "X and Y" skill phrases into separate items
+  const expanded = [];
+  for (const item of ranked) {
+    if (/\b(?:or|and)\b/i.test(item.skill) && item.skill.split(/\s+/).length <= 8) {
+      const parts = item.skill.split(/\s+(?:or|and)\s+/i);
+      if (parts.length > 1) {
+        parts.forEach((p) => {
+          const c = cleanSkillPhrase(p.trim());
+          if (c) expanded.push({ skill: c, tier: item.tier });
+        });
+        continue;
+      }
+    }
+    expanded.push(item);
   }
 
-  matchSkillsFromDict(text, [...SOFT_SKILLS], seen, matches, 80);
-
-  const ranked = rankSkills(matches, resolvedIndustry, text, requirementTokens);
+  const expandedLower = expanded.map((r) => r.skill.toLowerCase());
   const deduped = [];
   const rankedSeen = new Set();
-  for (const skill of ranked) {
-    const lower = skill.toLowerCase();
-    if (lower === 'cdl' && ranked.some((s) => /^cdl class [ab]$/i.test(s))) continue;
+  for (const item of expanded) {
+    const lower = item.skill.toLowerCase();
     if (rankedSeen.has(lower)) continue;
+    // Subsumption: skip a shorter form when a more-specific version exists in the list.
+    // Exception: a known acronym/cert is protected from subsumption UNLESS the longer
+    // form is itself a recognised cert/acronym (e.g. "CDL" loses to "CDL Class A",
+    // "OSHA" loses to "OSHA 10", but "CI/CD" does NOT lose to "CI/CD pipeline").
+    // "X certification" / "X certified" phrases are redundant when X itself is a cert label
+    const withoutCertSuffix = lower.replace(/\s+certifi(?:cation|ed)$/, '').trim();
+    if (withoutCertSuffix !== lower && certLabelsLower.has(withoutCertSuffix)) continue;
+
+    const longerRecognizedExists = expandedLower.some((other) => {
+      if (other === lower || !other.startsWith(lower + ' ')) return false;
+      return knownAcronymsLower.has(other) || certLabelsLower.has(other);
+    });
+    if (longerRecognizedExists) continue; // always yield to a more-specific recognised term
+    const isProtected = knownAcronymsLower.has(lower) || certLabelsLower.has(lower);
+    if (!isProtected) {
+      const subsumedByLonger = expandedLower.some((other) =>
+        other !== lower && other.startsWith(lower + ' ') && other.length > lower.length
+      );
+      if (subsumedByLonger) continue;
+    }
     rankedSeen.add(lower);
-    deduped.push(skill);
+    deduped.push(item.skill);
   }
   return deduped.slice(0, MAX_SUGGESTED_SKILLS);
 }
