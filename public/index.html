@@ -635,7 +635,10 @@ function render(){
   var pageEl=content?content.querySelector(".page"):null;
   var pageScroll=pageEl?pageEl.scrollTop:0;
   var winScroll=window.scrollY||0;
+  // Signal to blur handlers that this blur is from a DOM rebuild, not user action
+  STATE._rendering=true;
   root.innerHTML=renderApp();
+  STATE._rendering=false;
   bindApp();
   startClock();
   // Restore scroll positions after re-render
@@ -5255,53 +5258,77 @@ window.raFormEdit=function(jobId){
   render();
 };
 
+// ── Autocomplete DOM patchers — update only the dropdown, never the whole page ──
+function _patchZipSuggestions(){
+  var input=document.getElementById('ra-zip');
+  if(!input)return;
+  var wrap=input.parentElement;if(!wrap)return;
+  var existing=document.getElementById('zip-suggestions');
+  var sugs=STATE.raFormZipSuggestions||[];
+  if(!sugs.length){if(existing)existing.remove();return;}
+  var html='<div id="zip-suggestions" style="position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);z-index:100;margin-top:2px">'+
+    sugs.map(function(z,i){return'<div class="_zip-sug" data-idx="'+i+'" style="padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px">'+htmlEsc(z.display)+'</div>';}).join('')+'</div>';
+  if(existing){existing.outerHTML=html;}else{var d=document.createElement('div');d.innerHTML=html;wrap.appendChild(d.firstChild);}
+  Array.prototype.forEach.call(document.querySelectorAll('._zip-sug'),function(el){
+    el.addEventListener('mouseenter',function(){this.style.background='var(--accent-l)';});
+    el.addEventListener('mouseleave',function(){this.style.background='';});
+    el.addEventListener('mousedown',function(e){
+      e.preventDefault(); // prevent input blur before selection
+      var z=STATE.raFormZipSuggestions[parseInt(this.getAttribute('data-idx'))];
+      if(!z)return;
+      STATE.raForm.location=z.display;STATE.raForm.zipCode=z.zip;STATE.raFormZipSuggestions=[];
+      var loc=document.getElementById('ra-location');if(loc)loc.value=z.display;
+      render();
+    });
+  });
+}
+
+function _patchCoSuggestions(){
+  var input=document.getElementById('ra-co-name');
+  if(!input)return;
+  var wrap=input.parentElement;if(!wrap)return;
+  var existing=document.getElementById('co-suggestions');
+  var sugs=STATE.raFormCoSuggestions||[];
+  if(!sugs.length){if(existing)existing.remove();return;}
+  var html='<div id="co-suggestions" style="position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:var(--r2);box-shadow:var(--sh2);z-index:100;max-height:200px;overflow-y:auto;margin-top:2px">'+
+    sugs.map(function(co,i){
+      var cool=companyCooldownCheck(co.name);
+      return'<div class="_co-sug" data-idx="'+i+'" style="padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border);opacity:'+(cool?'.5':'1')+'">'+
+        '<div style="font-weight:500;font-size:13px">'+htmlEsc(co.name)+(cool?'<span style="margin-left:6px;font-size:10px;background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px">Cooldown '+cool.daysLeft+'d</span>':'')+'</div>'+
+        '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(co.industry||'')+(co.location?' · '+htmlEsc(co.location):'')+(co.job_count?' · '+co.job_count+' jobs':'')+(co.bd_name?' · '+htmlEsc(co.bd_name):'')+'</div>'+
+      '</div>';
+    }).join('')+'</div>';
+  if(existing){existing.outerHTML=html;}else{var d=document.createElement('div');d.innerHTML=html;wrap.appendChild(d.firstChild);}
+  Array.prototype.forEach.call(document.querySelectorAll('._co-sug'),function(el){
+    el.addEventListener('mouseenter',function(){this.style.background='var(--accent-l)';});
+    el.addEventListener('mouseleave',function(){this.style.background='';});
+    el.addEventListener('mousedown',function(e){
+      e.preventDefault(); // prevent input blur before selection
+      var co=STATE.raFormCoSuggestions[parseInt(this.getAttribute('data-idx'))];
+      if(!co)return;
+      STATE.raForm.coName=co.name;STATE.raForm.coId=co.id;STATE.raForm.coInfo=co;
+      STATE.raForm.industry=co.industry||STATE.raForm.industry;
+      STATE.raForm.location=co.location||STATE.raForm.location;
+      STATE.raForm.website=co.website||STATE.raForm.website;
+      STATE.raFormCoSuggestions=[];
+      if(co.location)raFormDetectTimezone(co.location);
+      render();
+    });
+  });
+}
+
 window.raFormZipSearch=function(val){
   STATE.raForm.zipCode=val;
   STATE.raFormTouchedAt=Date.now();
-  if(!val||val.length<3){
-    STATE.raFormZipSuggestions=[];
-    var _zi=document.getElementById('ra-zip');
-    if(_zi){var _zw=_zi.parentElement;if(_zw){var _zs=_zw.querySelectorAll('._zip-sug');if(_zs.length&&_zs[0].parentElement&&_zs[0].parentElement!==_zw)_zs[0].parentElement.remove();}}
-    return;
-  }
+  if(!val||val.length<3){STATE.raFormZipSuggestions=[];_patchZipSuggestions();return;}
   apiGet('/lookup/zipcode?zip='+encodeURIComponent(val)).then(function(results){
-    STATE.raFormZipSuggestions=results;
-    scheduleRender();
-    setTimeout(function(){
-      var items=document.querySelectorAll('._zip-sug');
-      Array.prototype.forEach.call(items,function(el){
-        el.addEventListener('mouseenter',function(){this.style.background='var(--accent-l)';});
-        el.addEventListener('mouseleave',function(){this.style.background='';});
-        el.addEventListener('click',function(){
-          var idx=parseInt(this.getAttribute('data-idx'));
-          var z=STATE.raFormZipSuggestions[idx];
-          if(!z)return;
-          STATE.raForm.location=z.display;
-          STATE.raForm.zipCode=z.zip;
-          STATE.raFormZipSuggestions=[];
-          // Update location field directly
-          var el2=document.getElementById('ra-location');
-          if(el2)el2.value=z.display;
-          render();
-        });
-      });
-    },50);
-  }).catch(function(){STATE.raFormZipSuggestions=[];});
+    STATE.raFormZipSuggestions=results;_patchZipSuggestions();
+  }).catch(function(){STATE.raFormZipSuggestions=[];_patchZipSuggestions();});
 };
 
 window.raFormZipBlur=function(){
-  // Clear suggestions without a full DOM rebuild — prevents flicker when switching windows
-  setTimeout(function(){
-    STATE.raFormZipSuggestions=[];
-    var zipInput=document.getElementById('ra-zip');
-    if(zipInput){
-      var wrap=zipInput.parentElement;
-      if(wrap){
-        var items=wrap.querySelectorAll('._zip-sug');
-        if(items.length){var sugBox=items[0].parentElement;if(sugBox&&sugBox!==wrap)sugBox.remove();}
-      }
-    }
-  },200);
+  if(STATE._rendering)return; // blur from DOM rebuild, not user action — skip
+  setTimeout(function(){STATE.raFormZipSuggestions=[];_patchZipSuggestions();},200);
 };
 
 // ── Company cooldown helper ─────────────────────
@@ -5321,51 +5348,17 @@ function companyCooldownCheck(coName){
 }
 
 window.raFormCoSearch=function(val){
-  STATE.raForm.coName=val;
-  STATE.raForm.coId=null;
-  STATE.raForm.coInfo=null;
+  STATE.raForm.coName=val;STATE.raForm.coId=null;STATE.raForm.coInfo=null;
   STATE.raFormTouchedAt=Date.now();
-  if(!val||val.length<3){
-    STATE.raFormCoSuggestions=[];
-    var _cs=document.getElementById('co-suggestions');
-    if(_cs)_cs.remove();
-    return;
-  }
+  if(!val||val.length<3){STATE.raFormCoSuggestions=[];_patchCoSuggestions();return;}
   apiGet('/companies/search?q='+encodeURIComponent(val)).then(function(results){
-    STATE.raFormCoSuggestions=results;
-    scheduleRender();
-    // Bind click handlers after render
-    setTimeout(function(){
-      var items=document.querySelectorAll('._co-sug');
-      Array.prototype.forEach.call(items,function(el){
-        el.addEventListener('mouseenter',function(){this.style.background='var(--accent-l)';});
-        el.addEventListener('mouseleave',function(){this.style.background='';});
-        el.addEventListener('click',function(){
-          var idx=parseInt(this.getAttribute('data-idx'));
-          var co=STATE.raFormCoSuggestions[idx];
-          if(!co)return;
-          STATE.raForm.coName=co.name;
-          STATE.raForm.coId=co.id;
-          STATE.raForm.coInfo=co;
-          STATE.raForm.industry=co.industry||STATE.raForm.industry;
-          STATE.raForm.location=co.location||STATE.raForm.location;
-          STATE.raForm.website=co.website||STATE.raForm.website;
-          STATE.raFormCoSuggestions=[];
-          if(co.location)raFormDetectTimezone(co.location);
-          render();
-        });
-      });
-    },50);
+    STATE.raFormCoSuggestions=results;_patchCoSuggestions();
   }).catch(function(){STATE.raFormCoSuggestions=[];});
 };
 
 window.raFormCoBlur=function(){
-  // Clear suggestions without a full DOM rebuild — prevents flicker when switching windows
-  setTimeout(function(){
-    STATE.raFormCoSuggestions=[];
-    var el=document.getElementById('co-suggestions');
-    if(el)el.remove();
-  },200);
+  if(STATE._rendering)return; // blur from DOM rebuild, not user action — skip
+  setTimeout(function(){STATE.raFormCoSuggestions=[];_patchCoSuggestions();},200);
 };
 
 window.raFormCheckEmail=function(idx,email){
