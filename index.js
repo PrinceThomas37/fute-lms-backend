@@ -2101,16 +2101,14 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
   const failDetails = [], sentContactIds = [], sentJobIds = [];
   const startedAt = new Date().toISOString();
 
-  const followupContactIds = [...new Set(
-    pendingEmails
-      .filter(e => e.followup_type === 'fu1' || e.followup_type === 'fu2')
-      .map(e => e.contact_id)
-      .filter(Boolean)
-  )];
+  // Load delivery status for every pending recipient (not just follow-ups) so we can
+  // skip known-bad addresses on initial outreach too — hard bounces to invalid/deactivated
+  // mailboxes are a primary driver of sender-reputation damage and "compromised account" flags.
+  const statusContactIds = [...new Set(pendingEmails.map(e => e.contact_id).filter(Boolean))];
   const contactStatusById = {};
-  if (followupContactIds.length) {
-    const { data: followupContacts } = await supabase.from('contacts').select('id,email,email_status').in('id', followupContactIds);
-    (followupContacts || []).forEach(c => { contactStatusById[c.id] = c; });
+  if (statusContactIds.length) {
+    const { data: statusContacts } = await supabase.from('contacts').select('id,email,email_status').in('id', statusContactIds);
+    (statusContacts || []).forEach(c => { contactStatusById[c.id] = c; });
   }
 
   const mailboxIds = [...new Set(pendingEmails.map(e => e.job?.sending_email_id).filter(Boolean))];
@@ -2195,6 +2193,23 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
     }
 
     const isFollowup = email.followup_type === 'fu1' || email.followup_type === 'fu2';
+
+    // Skip recipients flagged as permanently undeliverable (invalid/deactivated) for ALL
+    // email types. Sending to addresses we already know bounce damages domain reputation.
+    if (email.contact_id) {
+      const contact = contactStatusById[email.contact_id];
+      if (contact && isPermanentFollowupBlock(contact.email_status)) {
+        skippedContactStatus++;
+        if (isFollowup) {
+          await cancelBlockedFollowupSend(email, contact.email_status);
+        } else {
+          try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch (_) {}
+        }
+        await setSendProgress(userId, { ...progressBase, current: `${email.to_email} (skipped: ${contactEmailStatus(contact)} address)` });
+        continue;
+      }
+    }
+
     if (isFollowup && email.contact_id) {
       const contact = contactStatusById[email.contact_id];
       if (contact && !isFollowupEligibleContact(contact)) {
