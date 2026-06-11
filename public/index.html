@@ -630,6 +630,14 @@ function render(){
   if(winScroll)window.scrollTo(0,winScroll);
 }
 
+// Debounced render — collapses multiple rapid async render() calls into one.
+// Use scheduleRender() in background/API callbacks; use render() for direct user interactions.
+var _scheduleRenderTimer=null;
+function scheduleRender(){
+  if(_scheduleRenderTimer)return;
+  _scheduleRenderTimer=setTimeout(function(){_scheduleRenderTimer=null;render();},16);
+}
+
 // ════════════════════════════════════════════════
 // HELPERS
 // ════════════════════════════════════════════════
@@ -2982,15 +2990,15 @@ function startProgressPoll(){
       var hadProgress=!!STATE.sendProgress;
       STATE.sendProgress=newProgress;
       if(d&&d.active){
-        render();
+        scheduleRender();
         _emailRefreshCount++;
         if(_emailRefreshCount%3===0)loadEmailsForCurrentUser();
       }
-      else if(!!newProgress!==hadProgress){render();}
+      else if(!!newProgress!==hadProgress){scheduleRender();}
       if(d&&d.done&&!d.active){
         _emailRefreshCount=0;
         loadEmailsForCurrentUser();
-        setTimeout(function(){STATE.sendProgress=null;render();},30000);
+        setTimeout(function(){STATE.sendProgress=null;scheduleRender();},30000);
       }
       var delay=(d&&d.active)?2000:10000;
       STATE._progressPollTimer=setTimeout(pollOnce,delay);
@@ -3015,11 +3023,11 @@ function loadEmailsForCurrentUser(){
         STATE.pendingEmails=all.filter(function(e){return e.status==='pending';});
         STATE.allBDEmails=all;
         loadPendingSummary();
-        render();
+        scheduleRender();
       }).catch(function(){});
     } else {
-      apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];loadPendingSummary();render();}).catch(function(){});
-      apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];render();}).catch(function(){});
+      apiGet('/emails?status=pending').then(function(d){STATE.pendingEmails=d||[];loadPendingSummary();scheduleRender();}).catch(function(){});
+      apiGet('/emails?status=sent').then(function(d){STATE.sentEmails=d||[];scheduleRender();}).catch(function(){});
     }
   }
 }
@@ -7273,11 +7281,11 @@ function loadAppData(){
     STATE.emailAccounts=[];
     // Load pool stats for ra_lead/admin
     if(STATE.user&&(STATE.user.role==='ra_lead'||STATE.user.role==='admin')){
-      apiGet('/distribute/pool-stats').then(function(d){STATE.distributePoolStats=d;render();}).catch(function(){});
+      apiGet('/distribute/pool-stats').then(function(d){STATE.distributePoolStats=d;scheduleRender();}).catch(function(){});
     }
     // Load today's summary for BD
     if(STATE.user&&(STATE.user.role==='bd'||STATE.user.role==='bd_lead')){
-      apiGet('/distribute/today-summary').then(function(d){STATE.todaySummary=d;render();}).catch(function(){});
+      apiGet('/distribute/today-summary').then(function(d){STATE.todaySummary=d;scheduleRender();}).catch(function(){});
     }
     if(isBD){
       STATE.pendingEmails=(r[5]||[]);
@@ -7347,7 +7355,7 @@ function loadAppData(){
     showToast('Could not connect: '+err.message,'error');render();
   });
 }
-function refreshJobs(){return apiGet('/jobs').then(function(j){STATE.jobs=j.map(normaliseJob);STATE.contacts=flattenContacts(j);render();});}
+function refreshJobs(){return apiGet('/jobs').then(function(j){STATE.jobs=j.map(normaliseJob);STATE.contacts=flattenContacts(j);scheduleRender();});}
 
 // ── Background polling — keeps UI in sync ──────
 var _bgPollTimer=null;
@@ -7360,17 +7368,17 @@ function startBackgroundPoll(){
     apiGet('/jobs').then(function(j){
       STATE.jobs=j.map(normaliseJob);
       STATE.contacts=flattenContacts(j);
-      render();
+      scheduleRender();
     }).catch(function(){});
     // Refresh emails when on email page
     if(pg==='email'){loadEmailsForCurrentUser();}
     // Refresh pool stats when on assign page
     if(pg==='assign'&&STATE.user&&userHasAnyRole(STATE.user,'ra_lead','admin')){
-      apiGet('/distribute/pool-stats').then(function(d){STATE.distributePoolStats=d;render();}).catch(function(){});
+      apiGet('/distribute/pool-stats').then(function(d){STATE.distributePoolStats=d;scheduleRender();}).catch(function(){});
     }
     // Refresh reminders when on reminders or dashboard page
     if(pg==='reminders'||pg==='dashboard'){
-      apiGet('/reminders').then(function(d){STATE.reminders=d||[];render();}).catch(function(){});
+      apiGet('/reminders').then(function(d){STATE.reminders=d||[];scheduleRender();}).catch(function(){});
     }
   },30000);
 }
