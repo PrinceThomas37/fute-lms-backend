@@ -1982,8 +1982,7 @@ async function sendMicrosoftThreadReply(userEmailId, parentGraphMessageId, { htm
   return { graphMessageId: draft.id, conversationId: full.conversationId || draft.conversationId || null, inReplyTo: parentGraphMessageId };
 }
 
-async function findSentMessageInMailbox(accessToken, { toEmail, subjectHint, minDate, conversationId }) {
-  const params = new URLSearchParams({ '$select': 'id,subject,toRecipients,sentDateTime,conversationId', '$orderby': 'sentDateTime desc', '$top': '75' });
+async function findSentMessageInMailbox(accessToken, { toEmail, subjectHint, minDate, conversationId }) {  const params = new URLSearchParams({ '$select': 'id,subject,toRecipients,sentDateTime,conversationId', '$orderby': 'sentDateTime desc', '$top': '75' });
   if (minDate) params.set('$filter', `sentDateTime ge ${minDate}T00:00:00Z`);
   const data = await graphMailRequest(accessToken, `/me/mailFolders/sentitems/messages?${params}`);
   const to = toEmail.toLowerCase().trim();
@@ -1999,6 +1998,30 @@ async function findSentMessageInMailbox(accessToken, { toEmail, subjectHint, min
     return m.id;
   }
   return null;
+}
+
+// Locate a live message we sent in this conversation, by conversationId. This
+// finds the parent no matter how old or how deep in Sent Items it is (the
+// recency-limited sentitems scan misses originals for high-volume mailboxes).
+async function findThreadMessageByConversation(accessToken, { conversationId, toEmail }) {
+  if (!conversationId) return null;
+  const params = new URLSearchParams({
+    '$filter': `conversationId eq '${conversationId}'`,
+    '$select': 'id,subject,toRecipients,sentDateTime',
+    '$orderby': 'sentDateTime desc',
+    '$top': '50'
+  });
+  let data;
+  try { data = await graphMailRequest(accessToken, `/me/messages?${params}`); }
+  catch (_) { return null; }
+  const to = (toEmail || '').toLowerCase().trim();
+  const msgs = data.value || [];
+  // Prefer a message WE sent to this recipient (reply threads from our side).
+  for (const m of msgs) {
+    const recipients = (m.toRecipients || []).map(r => (r.emailAddress?.address || '').toLowerCase());
+    if (recipients.includes(to)) return m.id;
+  }
+  return msgs[0]?.id || null;
 }
 
 async function loadSentEmailRecord({ jobId, contactId, followupType }) {
@@ -2018,7 +2041,10 @@ async function resolveThreadParentMessageId({ jobId, contactId, followupType, us
   const prior = await loadSentEmailRecord({ jobId, contactId, followupType });
   if (prior?.graph_message_id) return { parentId: prior.graph_message_id, priorSubject: prior.subject, conversationId: prior.conversation_id, priorEmailRowId: prior.id, priorSentAt: prior.sent_at };
   const accessToken = await getMicrosoftToken(userEmailId);
-  const parentId = await findSentMessageInMailbox(accessToken, {
+  let parentId = await findThreadMessageByConversation(accessToken, {
+    conversationId: prior?.conversation_id, toEmail
+  });
+  if (!parentId) parentId = await findSentMessageInMailbox(accessToken, {
     toEmail, subjectHint: subjectHint || prior?.subject, minDate: prior?.sent_at, conversationId: prior?.conversation_id
   });
   if (!parentId) return null;
@@ -2102,7 +2128,12 @@ async function deliverOutboundEmail(email, userEmailId, signatureHtml, sendingEm
       // the message moves to Sent Items. Re-find the real sent message and
       // heal the stored id so FU2 doesn't hit this again.
       const accessToken = await getMicrosoftToken(userEmailId);
-      const freshId = await findSentMessageInMailbox(accessToken, {
+      // Look up by conversationId first — reliable regardless of how old/buried
+      // the original is — then fall back to the recency-limited Sent Items scan.
+      let freshId = await findThreadMessageByConversation(accessToken, {
+        conversationId: thread.conversationId, toEmail: email.to_email
+      });
+      if (!freshId) freshId = await findSentMessageInMailbox(accessToken, {
         toEmail: email.to_email,
         subjectHint: thread.priorSubject || email.subject,
         minDate: thread.priorSentAt,
