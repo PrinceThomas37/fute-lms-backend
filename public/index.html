@@ -1834,7 +1834,7 @@ function renderEmail(){
           (bd.pending&&(bd.sent||bd.failed)?' · ':'')+
           (bd.sent?'<span style="color:var(--green);font-weight:600">'+bd.sent+' sent</span>':'')+
           (bd.sent&&bd.failed?' · ':'')+
-          (bd.failed?'<span style="color:var(--red,#dc2626);font-weight:600">'+bd.failed+' failed</span>':'')
+          (bd.failed?'<span style="color:var(--red,#dc2626);font-weight:600">'+bd.failed+' failed (all runs)</span>':'')
         );
         return '<div onclick="STATE.raLeadSelectedBD=\''+bd.id+'\';STATE.pendingEmailPage=0;loadPendingSummary();render()" style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s" onmouseover="this.style.background=\'var(--accent-l)\'" onmouseout="this.style.background=\'\'" >'+
           '<div style="width:38px;height:38px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0">'+htmlEsc(initials)+'</div>'+

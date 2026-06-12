@@ -1932,11 +1932,24 @@ app.post('/distribute/generate-ratio', auth, async (req, res) => {
 async function graphMailRequest(accessToken, path, options = {}) {
   const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
     ...options,
-    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', ...(options.headers || {}) }
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      // Mutable Graph ids change when a message moves folders (Drafts -> Sent
+      // Items on send), which strands stored ids used for follow-up threading.
+      // Immutable ids survive folder moves.
+      Prefer: 'IdType="ImmutableId"',
+      ...(options.headers || {})
+    }
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error?.message || `Graph API ${res.status}`);
   return data;
+}
+
+// Graph's "the item moved / id no longer resolves" family of errors.
+function isGraphItemNotFound(err) {
+  return /not found in the store|ErrorItemNotFound|ItemNotFound|ErrorInvalidIdMalformed/i.test(String(err?.message || ''));
 }
 
 async function sendMicrosoftNewMessage(userEmailId, { to, subject, htmlBody }) {
@@ -2003,13 +2016,13 @@ async function loadSentEmailRecord({ jobId, contactId, followupType }) {
 
 async function resolveThreadParentMessageId({ jobId, contactId, followupType, userEmailId, toEmail, subjectHint }) {
   const prior = await loadSentEmailRecord({ jobId, contactId, followupType });
-  if (prior?.graph_message_id) return { parentId: prior.graph_message_id, priorSubject: prior.subject, conversationId: prior.conversation_id };
+  if (prior?.graph_message_id) return { parentId: prior.graph_message_id, priorSubject: prior.subject, conversationId: prior.conversation_id, priorEmailRowId: prior.id, priorSentAt: prior.sent_at };
   const accessToken = await getMicrosoftToken(userEmailId);
   const parentId = await findSentMessageInMailbox(accessToken, {
     toEmail, subjectHint: subjectHint || prior?.subject, minDate: prior?.sent_at, conversationId: prior?.conversation_id
   });
   if (!parentId) return null;
-  return { parentId, priorSubject: prior?.subject || subjectHint, conversationId: prior?.conversation_id };
+  return { parentId, priorSubject: prior?.subject || subjectHint, conversationId: prior?.conversation_id, priorEmailRowId: prior?.id, priorSentAt: prior?.sent_at };
 }
 
 function formatQuoteDate(sentAt) {
@@ -2080,14 +2093,40 @@ async function deliverOutboundEmail(email, userEmailId, signatureHtml, sendingEm
     userEmailId, toEmail: email.to_email, subjectHint: email.subject
   });
   if (thread?.parentId) {
-    return sendMicrosoftThreadReply(userEmailId, thread.parentId, { htmlBody, subject: email.subject });
+    try {
+      return await sendMicrosoftThreadReply(userEmailId, thread.parentId, { htmlBody, subject: email.subject });
+    } catch (e) {
+      if (!isGraphItemNotFound(e)) throw e;
+      // The stored parent id is stale: ids saved before immutable ids were
+      // requested point at the pre-send Drafts copy, and mutable ids die when
+      // the message moves to Sent Items. Re-find the real sent message and
+      // heal the stored id so FU2 doesn't hit this again.
+      const accessToken = await getMicrosoftToken(userEmailId);
+      const freshId = await findSentMessageInMailbox(accessToken, {
+        toEmail: email.to_email,
+        subjectHint: thread.priorSubject || email.subject,
+        minDate: thread.priorSentAt,
+        conversationId: thread.conversationId
+      });
+      if (freshId && freshId !== thread.parentId) {
+        const graph = await sendMicrosoftThreadReply(userEmailId, freshId, { htmlBody, subject: email.subject });
+        if (thread.priorEmailRowId) {
+          try { await supabase.from('emails').update({ graph_message_id: freshId }).eq('id', thread.priorEmailRowId); } catch (_) {}
+        }
+        return graph;
+      }
+      throwDeferFollowup();
+    }
   }
-  // No real parent message to reply to. Do NOT fall back to a fresh send with a
-  // "Re:" subject — a brand-new message that carries a Re: subject but no
-  // In-Reply-To/References headers and starts a new conversation is a classic
-  // spoofed-thread spam signal. Defer instead; the parent id usually resolves on
-  // a later run once the original outreach has persisted its graph_message_id
-  // (or becomes findable in the Sent Items mailbox).
+  throwDeferFollowup();
+}
+
+// No real parent message to reply to. Do NOT fall back to a fresh send with a
+// "Re:" subject — a brand-new message that carries a Re: subject but no
+// In-Reply-To/References headers and starts a new conversation is a classic
+// spoofed-thread spam signal. Defer instead; the parent usually becomes
+// resolvable on a later run (id persisted, or message findable in Sent Items).
+function throwDeferFollowup() {
   const deferErr = new Error('Follow-up deferred: original thread message not found yet — skipping to avoid a fake-threaded "Re:" send.');
   deferErr.deferFollowup = true;
   throw deferErr;
