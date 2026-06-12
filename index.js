@@ -2022,7 +2022,7 @@ function formatQuoteDate(sentAt) {
 function buildOutlookQuoteBlock({ fromName, fromEmail, sentAt, subject, body }) {
   const bodyHtml = (body || '').includes('<')
     ? body
-    : buildHtmlEmailBody(body, '');
+    : buildHtmlEmailBody(body, '', false);
   const dateStr = formatQuoteDate(sentAt);
   return `<div style="border:none;border-top:solid #B5C4DF 1.0pt;padding:3.0pt 0in 0in 0in;margin-top:12pt">` +
     `<p style="font-size:11pt;font-family:Calibri,sans-serif;margin:0 0 8pt 0">` +
@@ -2082,9 +2082,15 @@ async function deliverOutboundEmail(email, userEmailId, signatureHtml, sendingEm
   if (thread?.parentId) {
     return sendMicrosoftThreadReply(userEmailId, thread.parentId, { htmlBody, subject: email.subject });
   }
-  const quotedHtml = await buildQuotedChainFromDb({ jobId: email.job_id, contactId: email.contact_id, followupType: email.followup_type });
-  if (!quotedHtml) throw new Error('Could not find the original outreach email — follow-up must include quoted context.');
-  return sendMicrosoftNewMessage(userEmailId, { to: email.to_email, subject: email.subject, htmlBody: `${htmlBody}<br><br>${quotedHtml}` });
+  // No real parent message to reply to. Do NOT fall back to a fresh send with a
+  // "Re:" subject — a brand-new message that carries a Re: subject but no
+  // In-Reply-To/References headers and starts a new conversation is a classic
+  // spoofed-thread spam signal. Defer instead; the parent id usually resolves on
+  // a later run once the original outreach has persisted its graph_message_id
+  // (or becomes findable in the Sent Items mailbox).
+  const deferErr = new Error('Follow-up deferred: original thread message not found yet — skipping to avoid a fake-threaded "Re:" send.');
+  deferErr.deferFollowup = true;
+  throw deferErr;
 }
 
 // Auto-send all pending emails for a specific BD manager (called after assignment)
@@ -2110,7 +2116,7 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
   const { autoSend = false } = opts;
   const sendWindow = await getSendWindowHours();
   const totalCount = pendingEmails.length;
-  let sent = 0, failed = 0, skippedWindow = 0, skippedQuota = 0, skippedDomain = 0, skippedContactStatus = 0;
+  let sent = 0, failed = 0, skippedWindow = 0, skippedQuota = 0, skippedDomain = 0, skippedContactStatus = 0, skippedThread = 0;
   const failDetails = [], sentContactIds = [], sentJobIds = [];
   const startedAt = new Date().toISOString();
 
@@ -2258,6 +2264,13 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
       sent++;
       await setSendProgress(userId, { ...progressBase, sent, current: email.to_email });
     } catch (e) {
+      if (e && e.deferFollowup) {
+        // Thread parent not resolvable yet — leave the row pending so a later
+        // run can send it as a true reply, rather than failing it or faking a thread.
+        skippedThread++;
+        await setSendProgress(userId, { ...progressBase, current: `${email.to_email} (follow-up waiting for thread)` });
+        continue;
+      }
       failed++;
       failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: e.message });
       try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch (_) {}
@@ -2266,7 +2279,7 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
     }
   }
 
-  return { sent, failed, skippedWindow, skippedQuota, skippedDomain, skippedContactStatus, failDetails, sentContactIds, sentJobIds, totalCount, sendWindow };
+  return { sent, failed, skippedWindow, skippedQuota, skippedDomain, skippedContactStatus, skippedThread, failDetails, sentContactIds, sentJobIds, totalCount, sendWindow };
 }
 
 async function retryDeferredPendingSends() {
@@ -3167,14 +3180,26 @@ async function getMicrosoftToken(userEmailId) {
 // Build an HTML email body from plain text + optional HTML signature.
 // Plain text is escaped and wrapped in <p> tags with <br> for line breaks.
 // The signature (already HTML) is appended after a ruled separator.
-function buildHtmlEmailBody(plainText, signatureHtml) {
+// CAN-SPAM compliance footer: a clear opt-out and a physical postal address on
+// every message we originate. Besides being a legal requirement for US B2B mail,
+// giving recipients an easy "no thanks" route diverts them from the spam button —
+// spam complaints are the single most damaging sender-reputation signal.
+const COMPLIANCE_POSTAL_ADDRESS = 'Fute Global LLC, 8111 Lyndon B. Johnson Freeway, Suite 1340, Dallas, TX 75251';
+const COMPLIANCE_FOOTER_HTML =
+  '<div style="margin-top:20px;font-size:11px;line-height:1.5;color:#94A3B8;font-family:Arial,sans-serif">'
+  + 'If you\'d prefer not to hear from me, just reply "unsubscribe" and I\'ll remove you from my list.'
+  + '<br>' + COMPLIANCE_POSTAL_ADDRESS
+  + '</div>';
+
+function buildHtmlEmailBody(plainText, signatureHtml, includeFooter = true) {
   const escaped = (plainText || '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const htmlBody = '<p>' + escaped.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>') + '</p>';
   const sig = signatureHtml && signatureHtml.trim()
     ? '<hr style="border:none;border-top:1px solid #e2e8f0;margin:18px 0">' + signatureHtml
     : '';
-  return '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#0F172A">' + htmlBody + sig + '</div>';
+  const footer = includeFooter ? COMPLIANCE_FOOTER_HTML : '';
+  return '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#0F172A">' + htmlBody + sig + footer + '</div>';
 }
 
 app.post('/emails/send-microsoft', auth, async (req, res) => {
