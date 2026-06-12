@@ -2024,6 +2024,30 @@ async function findThreadMessageByConversation(accessToken, { conversationId, to
   return msgs[0]?.id || null;
 }
 
+// Mailbox-wide search for a sent message to this recipient. $search scans the
+// whole Sent Items folder (not recency-limited like the $top scan), so it finds
+// originals even when conversationId/stored id no longer resolve.
+async function findSentMessageBySearch(accessToken, { toEmail, subjectHint }) {
+  if (!toEmail) return null;
+  const params = new URLSearchParams({
+    '$search': `"${toEmail}"`,
+    '$select': 'id,subject,toRecipients,sentDateTime',
+    '$top': '25'
+  });
+  let data;
+  try { data = await graphMailRequest(accessToken, `/me/mailFolders/sentitems/messages?${params}`); }
+  catch (_) { return null; }
+  const to = toEmail.toLowerCase().trim();
+  const hint = (subjectHint || '').toLowerCase().replace(/^re:\s*/i, '').trim();
+  const mine = (data.value || []).filter(m =>
+    (m.toRecipients || []).some(r => (r.emailAddress?.address || '').toLowerCase() === to));
+  const subjMatch = mine.find(m => {
+    const s = (m.subject || '').toLowerCase().replace(/^re:\s*/i, '').trim();
+    return hint && (s.includes(hint) || hint.includes(s.slice(0, 20)));
+  });
+  return (subjMatch || mine[0])?.id || null;
+}
+
 async function loadSentEmailRecord({ jobId, contactId, followupType }) {
   if (followupType === 'fu2') {
     const { data: fu1 } = await supabase.from('emails').select('id,graph_message_id,conversation_id,subject,body,sent_at,from_email')
@@ -2046,6 +2070,9 @@ async function resolveThreadParentMessageId({ jobId, contactId, followupType, us
   });
   if (!parentId) parentId = await findSentMessageInMailbox(accessToken, {
     toEmail, subjectHint: subjectHint || prior?.subject, minDate: prior?.sent_at, conversationId: prior?.conversation_id
+  });
+  if (!parentId) parentId = await findSentMessageBySearch(accessToken, {
+    toEmail, subjectHint: subjectHint || prior?.subject
   });
   if (!parentId) return null;
   return { parentId, priorSubject: prior?.subject || subjectHint, conversationId: prior?.conversation_id, priorEmailRowId: prior?.id, priorSentAt: prior?.sent_at };
@@ -2138,6 +2165,9 @@ async function deliverOutboundEmail(email, userEmailId, signatureHtml, sendingEm
         subjectHint: thread.priorSubject || email.subject,
         minDate: thread.priorSentAt,
         conversationId: thread.conversationId
+      });
+      if (!freshId) freshId = await findSentMessageBySearch(accessToken, {
+        toEmail: email.to_email, subjectHint: thread.priorSubject || email.subject
       });
       if (freshId && freshId !== thread.parentId) {
         const graph = await sendMicrosoftThreadReply(userEmailId, freshId, { htmlBody, subject: email.subject });
