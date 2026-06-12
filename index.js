@@ -3180,15 +3180,14 @@ async function getMicrosoftToken(userEmailId) {
 // Build an HTML email body from plain text + optional HTML signature.
 // Plain text is escaped and wrapped in <p> tags with <br> for line breaks.
 // The signature (already HTML) is appended after a ruled separator.
-// CAN-SPAM compliance footer: a clear opt-out and a physical postal address on
-// every message we originate. Besides being a legal requirement for US B2B mail,
-// giving recipients an easy "no thanks" route diverts them from the spam button —
+// CAN-SPAM compliance footer: a clear opt-out on every message we originate.
+// Giving recipients an easy "no thanks" route diverts them from the spam button —
 // spam complaints are the single most damaging sender-reputation signal.
-const COMPLIANCE_POSTAL_ADDRESS = 'Fute Global LLC, 8111 Lyndon B. Johnson Freeway, Suite 1340, Dallas, TX 75251';
+// (The required physical postal address lives in the signature — see
+// ensureSignatureAddress in email-signature.js — so it is not repeated here.)
 const COMPLIANCE_FOOTER_HTML =
   '<div style="margin-top:20px;font-size:11px;line-height:1.5;color:#94A3B8;font-family:Arial,sans-serif">'
   + 'If you\'d prefer not to hear from me, just reply "unsubscribe" and I\'ll remove you from my list.'
-  + '<br>' + COMPLIANCE_POSTAL_ADDRESS
   + '</div>';
 
 function buildHtmlEmailBody(plainText, signatureHtml, includeFooter = true) {
