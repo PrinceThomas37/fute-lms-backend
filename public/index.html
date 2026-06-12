@@ -488,11 +488,11 @@ var STATE = {
   aiPrompt: null,
   aiPromptDefault: "Write a concise, professional cold outreach email (3-4 short paragraphs). Open with a personalised hook referencing their company or role. Briefly introduce Fute Global as a specialist staffing firm. Include a soft CTA asking for a 15-min call. Be warm but direct — no fluff.",
   emailSubj: "Candidates for your {{pos}} role in {{loc}}",
-  emailBody: "Hi {{fn}},\n\nI'm {{sender}} with Fute Global LLC. I came across your {{pos}} opening in {{loc}} and read through the requirements — we have several people with {{job_resp}} experience on {{company_service}} work who look like a strong fit. They're open to direct hire and haven't been screened for your role yet.\n\nWould you like to review their resumes?\n\nLooking forward to your thoughts.",
+  emailBody: "Hi {{fn}},\n\nI'm {{sender}} with Fute Global LLC. I came across your {{pos}} opening in {{loc}} and read through the requirements, and we have several people with {{job_resp}} experience on {{company_service}} work who look like a strong fit. They're open to direct hire and haven't been screened for your role yet.\n\nWould you like to review their resumes?\n\nLooking forward to your thoughts.",
   fu1Subj: "Re: Candidates for your {{pos}} role in {{loc}}",
-  fu1Body: "Hi {{fn}},\n\nCircling back on your {{pos}} role in {{loc}} — those candidates with {{job_resp}} experience on {{company_service}} projects are still available.\n\nWant me to send their resumes over?\n\nLooking forward to your thoughts.",
+  fu1Body: "Hi {{fn}},\n\nCircling back on your {{pos}} role in {{loc}}. Those candidates with {{job_resp}} experience on {{company_service}} projects are still available.\n\nWant me to send their resumes over?\n\nLooking forward to your thoughts.",
   fu2Subj: "Re: Candidates for your {{pos}} role in {{loc}}",
-  fu2Body: "Hi {{fn}},\n\nI'll keep this short — still holding a few screened-ready candidates with {{job_resp}} backgrounds for your {{pos}} opening in {{loc}} whenever the timing suits.\n\nShall I share their resumes?\n\nLooking forward to your thoughts.",
+  fu2Body: "Hi {{fn}},\n\nI'll keep this short. Still holding a few screened-ready candidates with {{job_resp}} backgrounds for your {{pos}} opening in {{loc}} whenever the timing suits.\n\nShall I share their resumes?\n\nLooking forward to your thoughts.",
   appSettings: {},
   teamAssignments: [],
   userEmailsCache: {},      // userId -> array of user_emails
@@ -827,37 +827,37 @@ var OUTREACH_STYLE_PRESETS={
   v1:{
     label:'Introduction',
     hint:'Classic introduction, candidates + fit',
-    o1:{subj:'Candidates for your {{pos}} role in {{loc}}',body:"Hi {{fn}},\n\nI'm {{sender}} with Fute Global LLC. I came across your {{pos}} opening in {{loc}} and read through the requirements — we have several people with {{job_resp}} experience on {{company_service}} work who look like a strong fit. They're open to direct hire and haven't been screened for your role yet.\n\nWould you like to review their resumes?\n\nLooking forward to your thoughts."},
-    fu1:{subj:'Re: Candidates for your {{pos}} role in {{loc}}',body:"Hi {{fn}},\n\nCircling back on your {{pos}} role in {{loc}} — those candidates with {{job_resp}} experience on {{company_service}} projects are still available.\n\nWant me to send their resumes over?\n\nLooking forward to your thoughts."},
-    fu2:{subj:'Re: Candidates for your {{pos}} role in {{loc}}',body:"Hi {{fn}},\n\nI'll keep this short — still holding a few screened-ready candidates with {{job_resp}} backgrounds for your {{pos}} opening in {{loc}} whenever the timing suits.\n\nShall I share their resumes?\n\nLooking forward to your thoughts."}
+    o1:{subj:'Candidates for your {{pos}} role in {{loc}}',body:"Hi {{fn}},\n\nI'm {{sender}} with Fute Global LLC. I came across your {{pos}} opening in {{loc}} and read through the requirements, and we have several people with {{job_resp}} experience on {{company_service}} work who look like a strong fit. They're open to direct hire and haven't been screened for your role yet.\n\nWould you like to review their resumes?\n\nLooking forward to your thoughts."},
+    fu1:{subj:'Re: Candidates for your {{pos}} role in {{loc}}',body:"Hi {{fn}},\n\nCircling back on your {{pos}} role in {{loc}}. Those candidates with {{job_resp}} experience on {{company_service}} projects are still available.\n\nWant me to send their resumes over?\n\nLooking forward to your thoughts."},
+    fu2:{subj:'Re: Candidates for your {{pos}} role in {{loc}}',body:"Hi {{fn}},\n\nI'll keep this short. Still holding a few screened-ready candidates with {{job_resp}} backgrounds for your {{pos}} opening in {{loc}} whenever the timing suits.\n\nShall I share their resumes?\n\nLooking forward to your thoughts."}
   },
   v2:{
     label:'Candidates first',
     hint:'Leads with the candidates, short and direct',
-    o1:{subj:'{{pos}} in {{loc}} — a few resumes worth a look',body:"Hi {{fn}},\n\nA few direct-hire candidates with strong {{job_resp}} experience on {{company_service}} projects just became available, and they line up well with your {{pos}} opening in {{loc}}.\n\nShould I send their resumes across?\n\nHappy to share whenever you're ready."},
-    fu1:{subj:'Re: {{pos}} in {{loc}} — a few resumes worth a look',body:"Hi {{fn}},\n\nQuick nudge on this — the {{job_resp}} candidates I mentioned for your {{pos}} role in {{loc}} are still on the market.\n\nShould I pass along their resumes?\n\nHappy to share whenever you're ready."},
-    fu2:{subj:'Re: {{pos}} in {{loc}} — a few resumes worth a look',body:"Hi {{fn}},\n\nLast note from me on the {{pos}} opening in {{loc}} — happy to forward those {{company_service}} candidates' resumes if it's useful.\n\nHappy to share whenever you're ready."}
+    o1:{subj:'{{pos}} in {{loc}}: a few resumes worth a look',body:"Hi {{fn}},\n\nA few direct-hire candidates with strong {{job_resp}} experience on {{company_service}} projects just became available, and they line up well with your {{pos}} opening in {{loc}}.\n\nShould I send their resumes across?\n\nHappy to share whenever you're ready."},
+    fu1:{subj:'Re: {{pos}} in {{loc}}: a few resumes worth a look',body:"Hi {{fn}},\n\nQuick nudge on this. The {{job_resp}} candidates I mentioned for your {{pos}} role in {{loc}} are still on the market.\n\nShould I pass along their resumes?\n\nHappy to share whenever you're ready."},
+    fu2:{subj:'Re: {{pos}} in {{loc}}: a few resumes worth a look',body:"Hi {{fn}},\n\nLast note from me on the {{pos}} opening in {{loc}}. Happy to forward those {{company_service}} candidates' resumes if it's useful.\n\nHappy to share whenever you're ready."}
   },
   v3:{
     label:'Question opener',
     hint:'Opens with a question about the role',
-    o1:{subj:'A question about your {{pos}} opening in {{loc}}',body:"Hi {{fn}},\n\nIs your {{pos}} role in {{loc}} still open? I ask because I'm {{sender}} at Fute Global LLC, and after reading the job description I have a shortlist of people with {{job_resp}} experience on {{company_service}} projects who fit it well. They're direct-hire ready and haven't been put in front of you yet.\n\nOpen to a quick look at a couple of profiles?\n\nNo rush at all — just let me know."},
-    fu1:{subj:'Re: A question about your {{pos}} opening in {{loc}}',body:"Hi {{fn}},\n\nFollowing up in case my earlier note slipped by — I still have those {{job_resp}} candidates lined up for your {{pos}} role in {{loc}}.\n\nWorth a quick look at a couple of profiles?\n\nNo rush at all — just let me know."},
-    fu2:{subj:'Re: A question about your {{pos}} opening in {{loc}}',body:"Hi {{fn}},\n\nOne final check-in on the {{pos}} role in {{loc}}. If it's still active, I'd be glad to share a couple of {{company_service}} profiles for your review.\n\nNo rush at all — just let me know."}
+    o1:{subj:'A question about your {{pos}} opening in {{loc}}',body:"Hi {{fn}},\n\nIs your {{pos}} role in {{loc}} still open? I ask because I'm {{sender}} at Fute Global LLC, and after reading the job description I have a shortlist of people with {{job_resp}} experience on {{company_service}} projects who fit it well. They're direct-hire ready and haven't been put in front of you yet.\n\nOpen to a quick look at a couple of profiles?\n\nNo rush at all. Just let me know."},
+    fu1:{subj:'Re: A question about your {{pos}} opening in {{loc}}',body:"Hi {{fn}},\n\nFollowing up in case my earlier note slipped by. I still have those {{job_resp}} candidates lined up for your {{pos}} role in {{loc}}.\n\nWorth a quick look at a couple of profiles?\n\nNo rush at all. Just let me know."},
+    fu2:{subj:'Re: A question about your {{pos}} opening in {{loc}}',body:"Hi {{fn}},\n\nOne final check-in on the {{pos}} role in {{loc}}. If it's still active, I'd be glad to share a couple of {{company_service}} profiles for your review.\n\nNo rush at all. Just let me know."}
   },
   v4:{
     label:'Concise',
     hint:'Shortest version, straight to the point',
-    o1:{subj:'{{pos}} ({{loc}}) — direct-hire candidates available',body:"Hi {{fn}},\n\nSaw your {{pos}} opening in {{loc}}. We've got candidates with hands-on {{job_resp}} experience on {{company_service}} work, ready for direct hire and your screening — no obligation to proceed.\n\nWant me to forward a few resumes?\n\nAppreciate you taking a look."},
-    fu1:{subj:'Re: {{pos}} ({{loc}}) — direct-hire candidates available',body:"Hi {{fn}},\n\nFollowing up — the {{job_resp}} candidates for your {{pos}} role in {{loc}} are still available for review.\n\nWant me to forward a few resumes?\n\nAppreciate you taking a look."},
-    fu2:{subj:'Re: {{pos}} ({{loc}}) — direct-hire candidates available',body:"Hi {{fn}},\n\nFinal follow-up on {{pos}} in {{loc}} — happy to forward those resumes whenever you'd like to take a look.\n\nAppreciate you taking a look."}
+    o1:{subj:'{{pos}} ({{loc}}): direct-hire candidates available',body:"Hi {{fn}},\n\nSaw your {{pos}} opening in {{loc}}. We've got candidates with hands-on {{job_resp}} experience on {{company_service}} work, ready for direct hire and your screening, no obligation to proceed.\n\nWant me to forward a few resumes?\n\nAppreciate you taking a look."},
+    fu1:{subj:'Re: {{pos}} ({{loc}}): direct-hire candidates available',body:"Hi {{fn}},\n\nFollowing up. The {{job_resp}} candidates for your {{pos}} role in {{loc}} are still available for review.\n\nWant me to forward a few resumes?\n\nAppreciate you taking a look."},
+    fu2:{subj:'Re: {{pos}} ({{loc}}): direct-hire candidates available',body:"Hi {{fn}},\n\nFinal follow-up on {{pos}} in {{loc}}. Happy to forward those resumes whenever you'd like to take a look.\n\nAppreciate you taking a look."}
   },
   v5:{
     label:'Direct value',
     hint:'Direct-hire focus, clear value proposition',
-    o1:{subj:'Direct-hire talent for your {{pos}} need in {{loc}}',body:"Hi {{fn}},\n\nI'm {{sender}}, and at Fute Global LLC we place direct-hire talent. Your {{pos}} opening in {{loc}} stood out — we currently have candidates with solid {{job_resp}} experience on {{company_service}} projects who match what the role calls for, available for your screening at no cost or commitment.\n\nIs it worth sharing their resumes with you?\n\nI'll keep an eye out for your reply."},
-    fu1:{subj:'Re: Direct-hire talent for your {{pos}} need in {{loc}}',body:"Hi {{fn}},\n\nWanted to resurface this — the candidates with {{job_resp}} experience on {{company_service}} work are still available for your {{pos}} role in {{loc}}.\n\nIs it worth sharing their resumes?\n\nI'll keep an eye out for your reply."},
-    fu2:{subj:'Re: Direct-hire talent for your {{pos}} need in {{loc}}',body:"Hi {{fn}},\n\nI'll leave it here for now — but the {{job_resp}} candidates remain ready whenever your {{pos}} search in {{loc}} calls for them.\n\nGlad to share resumes at any point."}
+    o1:{subj:'Direct-hire talent for your {{pos}} need in {{loc}}',body:"Hi {{fn}},\n\nI'm {{sender}}, and at Fute Global LLC we place direct-hire talent. Your {{pos}} opening in {{loc}} stood out, and we currently have candidates with solid {{job_resp}} experience on {{company_service}} projects who match what the role calls for, available for your screening at no cost or commitment.\n\nIs it worth sharing their resumes with you?\n\nI'll keep an eye out for your reply."},
+    fu1:{subj:'Re: Direct-hire talent for your {{pos}} need in {{loc}}',body:"Hi {{fn}},\n\nWanted to resurface this. The candidates with {{job_resp}} experience on {{company_service}} work are still available for your {{pos}} role in {{loc}}.\n\nIs it worth sharing their resumes?\n\nI'll keep an eye out for your reply."},
+    fu2:{subj:'Re: Direct-hire talent for your {{pos}} need in {{loc}}',body:"Hi {{fn}},\n\nI'll leave it here for now, but the {{job_resp}} candidates remain ready whenever your {{pos}} search in {{loc}} calls for them.\n\nGlad to share resumes at any point."}
   }
 };
 var MERGE_VAR_GROUPS=[
@@ -4039,7 +4039,7 @@ window.dismissReminder=function(rid){
 window.sendReminderEmail=function(rid){
   var r=STATE.reminders.find(function(x){return x.id===rid});
   if(!r)return;
-  var subj="Following up — hope you're back!";
+  var subj="Following up, hope you're back!";
   var body="Hi "+((r.contact_name||r.name||"").split(" ")[0]||"there")+",\n\nHope you had a great break! I wanted to follow up on my earlier message.\n\nWould you have 15 minutes for a quick call this week?\n\nWarm regards,\n"+STATE.user.name+"\nFute Global LLC";
   var plt=STATE.user.plt||"Gmail";
   window.open(plt==="Gmail"
