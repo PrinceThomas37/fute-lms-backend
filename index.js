@@ -2112,6 +2112,26 @@ async function fetchPendingEmailsForUser(userId) {
   return pendingEmails;
 }
 
+// Translate noisy provider/Graph errors into something a BD user can act on.
+function friendlySendError(msg) {
+  const m = String(msg || '').trim();
+  if (!m) return 'Send failed (unknown error)';
+  const low = m.toLowerCase();
+  if (low.includes('not found in the store') || low.includes('failed to get the correct properties'))
+    return "Outlook couldn't process this message (mailbox sync issue). Try resending; if it keeps failing, reconnect the sending mailbox.";
+  if (low.includes('no microsoft token') || low.includes('please reconnect') || low.includes('token refresh failed') || low.includes('invalidauthenticationtoken'))
+    return 'Sending mailbox sign-in expired — reconnect it under Settings → Email IDs.';
+  if (low.includes('inactivemailbox') || low.includes('mailboxnotenabledforrestapi'))
+    return 'Sending mailbox is inactive or unlicensed — check the Microsoft 365 account.';
+  if (low.includes('throttl') || low.includes('429') || low.includes('too many requests') || low.includes('quota'))
+    return 'Microsoft rate limit reached — wait and resend.';
+  if (low.includes('restricted') || low.includes('submission') && low.includes('block'))
+    return 'Microsoft has restricted this mailbox from sending — check Defender → Restricted users.';
+  if (low.includes('recipient') && (low.includes('invalid') || low.includes('reject')))
+    return 'Recipient address was rejected by the mail server.';
+  return m;
+}
+
 async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
   const { autoSend = false } = opts;
   const sendWindow = await getSendWindowHours();
@@ -2174,7 +2194,7 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
     if (!userEmailId) {
       sendAttempts++;
       failed++;
-      failDetails.push({ id: email.id, to: email.to_email, from: email.from_email || '—', error: 'No sending email configured for this job' });
+      failDetails.push({ id: email.id, job_id: email.job_id, contact_id: email.contact_id, to: email.to_email, from: email.from_email || '—', error: 'No sending email configured for this job' });
       try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch (_) {}
       await setSendProgress(userId, { ...progressBase, current: email.to_email });
       continue;
@@ -2197,7 +2217,7 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
     if (platform === 'gmail' || platform === 'google') {
       sendAttempts++;
       failed++;
-      failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || '—', error: 'Gmail sending not connected yet' });
+      failDetails.push({ id: email.id, job_id: email.job_id, contact_id: email.contact_id, to: email.to_email, from: sendingEmail?.email_address || '—', error: 'Gmail sending not connected yet' });
       try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch (_) {}
       await setSendProgress(userId, { ...progressBase, current: email.to_email });
       continue;
@@ -2205,7 +2225,7 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
     if (!isValidEmail(email.to_email)) {
       sendAttempts++;
       failed++;
-      failDetails.push({ id: email.id, to: email.to_email || '(empty)', from: sendingEmail?.email_address || email.from_email || '—', error: `Invalid recipient address: "${email.to_email}" — not an email` });
+      failDetails.push({ id: email.id, job_id: email.job_id, contact_id: email.contact_id, to: email.to_email || '(empty)', from: sendingEmail?.email_address || email.from_email || '—', error: `Invalid recipient address: "${email.to_email}" — not an email` });
       try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch (_) {}
       await setSendProgress(userId, { ...progressBase, current: email.to_email });
       continue;
@@ -2272,7 +2292,7 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
         continue;
       }
       failed++;
-      failDetails.push({ id: email.id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: e.message });
+      failDetails.push({ id: email.id, job_id: email.job_id, contact_id: email.contact_id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: friendlySendError(e.message) });
       try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch (_) {}
       lastSendAtByMailbox[userEmailId] = Date.now();
       await setSendProgress(userId, { ...progressBase, failed, current: email.to_email });
