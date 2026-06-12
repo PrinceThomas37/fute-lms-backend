@@ -1966,7 +1966,7 @@ async function sendMicrosoftNewMessage(userEmailId, { to, subject, htmlBody }) {
   return { graphMessageId: msg.id, conversationId: msg.conversationId || null, inReplyTo: null };
 }
 
-async function sendMicrosoftThreadReply(userEmailId, parentGraphMessageId, { htmlBody, subject }) {
+async function sendMicrosoftThreadReply(userEmailId, parentGraphMessageId, { htmlBody, subject, to }) {
   const accessToken = await getMicrosoftToken(userEmailId);
   const draft = await graphMailRequest(accessToken, `/me/messages/${parentGraphMessageId}/createReply`, {
     method: 'POST',
@@ -1977,6 +1977,11 @@ async function sendMicrosoftThreadReply(userEmailId, parentGraphMessageId, { htm
   const combinedHtml = quotedPart ? `${htmlBody}<br><br>${quotedPart}` : htmlBody;
   const patch = { body: { contentType: 'HTML', content: combinedHtml } };
   if (subject) patch.subject = subject;
+  // CRITICAL: createReply addresses the draft to the parent message's SENDER.
+  // The parent is a message WE sent (it lives in our Sent Items), so the sender
+  // is us — without this override the follow-up is addressed back to ourselves.
+  // Force the recipient to the actual prospect.
+  if (to) patch.toRecipients = [{ emailAddress: { address: to } }];
   await graphMailRequest(accessToken, `/me/messages/${draft.id}`, { method: 'PATCH', body: JSON.stringify(patch) });
   await graphMailRequest(accessToken, `/me/messages/${draft.id}/send`, { method: 'POST' });
   return { graphMessageId: draft.id, conversationId: full.conversationId || draft.conversationId || null, inReplyTo: parentGraphMessageId };
@@ -2120,7 +2125,7 @@ async function deliverOutboundEmail(email, userEmailId, signatureHtml, sendingEm
   });
   if (thread?.parentId) {
     try {
-      return await sendMicrosoftThreadReply(userEmailId, thread.parentId, { htmlBody, subject: email.subject });
+      return await sendMicrosoftThreadReply(userEmailId, thread.parentId, { htmlBody, subject: email.subject, to: email.to_email });
     } catch (e) {
       if (!isGraphItemNotFound(e)) throw e;
       // The stored parent id is stale: ids saved before immutable ids were
@@ -2140,7 +2145,7 @@ async function deliverOutboundEmail(email, userEmailId, signatureHtml, sendingEm
         conversationId: thread.conversationId
       });
       if (freshId && freshId !== thread.parentId) {
-        const graph = await sendMicrosoftThreadReply(userEmailId, freshId, { htmlBody, subject: email.subject });
+        const graph = await sendMicrosoftThreadReply(userEmailId, freshId, { htmlBody, subject: email.subject, to: email.to_email });
         if (thread.priorEmailRowId) {
           try { await supabase.from('emails').update({ graph_message_id: freshId }).eq('id', thread.priorEmailRowId); } catch (_) {}
         }
