@@ -6,7 +6,7 @@ const DEFAULT_TEMPLATES = {
   o1_subject: 'Candidates for your {{pos}} role in {{loc}}',
   o1_body: `Hi {{fn}},
 
-I'm {{sender}} with Fute Global LLC. I came across your {{pos}} opening in {{loc}} and read through the requirements — we have several people with {{job_resp}} experience on {{company_service}} work who look like a strong fit. They're open to direct hire and haven't been screened for your role yet.
+I'm {{sender}} with Fute Global LLC. I came across your {{pos}} opening in {{loc}} and read through the requirements, and we have several people with {{job_resp}} experience on {{company_service}} work who look like a strong fit. They're open to direct hire and haven't been screened for your role yet.
 
 Would you like to review their resumes?
 
@@ -14,7 +14,7 @@ Looking forward to your thoughts.`,
   fu1_subject: 'Re: Candidates for your {{pos}} role in {{loc}}',
   fu1_body: `Hi {{fn}},
 
-Circling back on your {{pos}} role in {{loc}} — those candidates with {{job_resp}} experience on {{company_service}} projects are still available.
+Circling back on your {{pos}} role in {{loc}}. Those candidates with {{job_resp}} experience on {{company_service}} projects are still available.
 
 Want me to send their resumes over?
 
@@ -22,7 +22,7 @@ Looking forward to your thoughts.`,
   fu2_subject: 'Re: Candidates for your {{pos}} role in {{loc}}',
   fu2_body: `Hi {{fn}},
 
-I'll keep this short — still holding a few screened-ready candidates with {{job_resp}} backgrounds for your {{pos}} opening in {{loc}} whenever the timing suits.
+I'll keep this short. Still holding a few screened-ready candidates with {{job_resp}} backgrounds for your {{pos}} opening in {{loc}} whenever the timing suits.
 
 Shall I share their resumes?
 
@@ -41,7 +41,7 @@ const OUTREACH_VARIANTS = [
       subject: 'Candidates for your {{pos}} role in {{loc}}',
       body: `Hi {{fn}},
 
-I'm {{sender}} with Fute Global LLC. I came across your {{pos}} opening in {{loc}} and read through the requirements — we have several people with {{job_resp}} experience on {{company_service}} work who look like a strong fit. They're open to direct hire and haven't been screened for your role yet.
+I'm {{sender}} with Fute Global LLC. I came across your {{pos}} opening in {{loc}} and read through the requirements, and we have several people with {{job_resp}} experience on {{company_service}} work who look like a strong fit. They're open to direct hire and haven't been screened for your role yet.
 
 Would you like to review their resumes?
 
@@ -51,7 +51,7 @@ Looking forward to your thoughts.`
       subject: 'Re: Candidates for your {{pos}} role in {{loc}}',
       body: `Hi {{fn}},
 
-Circling back on your {{pos}} role in {{loc}} — those candidates with {{job_resp}} experience on {{company_service}} projects are still available.
+Circling back on your {{pos}} role in {{loc}}. Those candidates with {{job_resp}} experience on {{company_service}} projects are still available.
 
 Want me to send their resumes over?
 
@@ -61,7 +61,7 @@ Looking forward to your thoughts.`
       subject: 'Re: Candidates for your {{pos}} role in {{loc}}',
       body: `Hi {{fn}},
 
-I'll keep this short — still holding a few screened-ready candidates with {{job_resp}} backgrounds for your {{pos}} opening in {{loc}} whenever the timing suits.
+I'll keep this short. Still holding a few screened-ready candidates with {{job_resp}} backgrounds for your {{pos}} opening in {{loc}} whenever the timing suits.
 
 Shall I share their resumes?
 
@@ -72,7 +72,7 @@ Looking forward to your thoughts.`
     id: 'v2',
     label: 'Candidates first',
     o1: {
-      subject: '{{pos}} in {{loc}} — a few resumes worth a look',
+      subject: '{{pos}} in {{loc}}: a few resumes worth a look',
       body: `Hi {{fn}},
 
 A few direct-hire candidates with strong {{job_resp}} experience on {{company_service}} projects just became available, and they line up well with your {{pos}} opening in {{loc}}.
@@ -82,20 +82,20 @@ Should I send their resumes across?
 Happy to share whenever you're ready.`
     },
     fu1: {
-      subject: 'Re: {{pos}} in {{loc}} — a few resumes worth a look',
+      subject: 'Re: {{pos}} in {{loc}}: a few resumes worth a look',
       body: `Hi {{fn}},
 
-Quick nudge on this — the {{job_resp}} candidates I mentioned for your {{pos}} role in {{loc}} are still on the market.
+Quick nudge on this. The {{job_resp}} candidates I mentioned for your {{pos}} role in {{loc}} are still on the market.
 
 Should I pass along their resumes?
 
 Happy to share whenever you're ready.`
     },
     fu2: {
-      subject: 'Re: {{pos}} in {{loc}} — a few resumes worth a look',
+      subject: 'Re: {{pos}} in {{loc}}: a few resumes worth a look',
       body: `Hi {{fn}},
 
-Last note from me on the {{pos}} opening in {{loc}} — happy to forward those {{company_service}} candidates' resumes if it's useful.
+Last note from me on the {{pos}} opening in {{loc}}. Happy to forward those {{company_service}} candidates' resumes if it's useful.
 
 Happy to share whenever you're ready.`
     }
@@ -111,17 +111,17 @@ Is your {{pos}} role in {{loc}} still open? I ask because I'm {{sender}} at Fute
 
 Open to a quick look at a couple of profiles?
 
-No rush at all — just let me know.`
+No rush at all. Just let me know.`
     },
     fu1: {
       subject: 'Re: A question about your {{pos}} opening in {{loc}}',
       body: `Hi {{fn}},
 
-Following up in case my earlier note slipped by — I still have those {{job_resp}} candidates lined up for your {{pos}} role in {{loc}}.
+Following up in case my earlier note slipped by. I still have those {{job_resp}} candidates lined up for your {{pos}} role in {{loc}}.
 
 Worth a quick look at a couple of profiles?
 
-No rush at all — just let me know.`
+No rush at all. Just let me know.`
     },
     fu2: {
       subject: 'Re: A question about your {{pos}} opening in {{loc}}',
@@ -129,37 +129,37 @@ No rush at all — just let me know.`
 
 One final check-in on the {{pos}} role in {{loc}}. If it's still active, I'd be glad to share a couple of {{company_service}} profiles for your review.
 
-No rush at all — just let me know.`
+No rush at all. Just let me know.`
     }
   },
   {
     id: 'v4',
     label: 'Concise',
     o1: {
-      subject: '{{pos}} ({{loc}}) — direct-hire candidates available',
+      subject: '{{pos}} ({{loc}}): direct-hire candidates available',
       body: `Hi {{fn}},
 
-Saw your {{pos}} opening in {{loc}}. We've got candidates with hands-on {{job_resp}} experience on {{company_service}} work, ready for direct hire and your screening — no obligation to proceed.
+Saw your {{pos}} opening in {{loc}}. We've got candidates with hands-on {{job_resp}} experience on {{company_service}} work, ready for direct hire and your screening, no obligation to proceed.
 
 Want me to forward a few resumes?
 
 Appreciate you taking a look.`
     },
     fu1: {
-      subject: 'Re: {{pos}} ({{loc}}) — direct-hire candidates available',
+      subject: 'Re: {{pos}} ({{loc}}): direct-hire candidates available',
       body: `Hi {{fn}},
 
-Following up — the {{job_resp}} candidates for your {{pos}} role in {{loc}} are still available for review.
+Following up. The {{job_resp}} candidates for your {{pos}} role in {{loc}} are still available for review.
 
 Want me to forward a few resumes?
 
 Appreciate you taking a look.`
     },
     fu2: {
-      subject: 'Re: {{pos}} ({{loc}}) — direct-hire candidates available',
+      subject: 'Re: {{pos}} ({{loc}}): direct-hire candidates available',
       body: `Hi {{fn}},
 
-Final follow-up on {{pos}} in {{loc}} — happy to forward those resumes whenever you'd like to take a look.
+Final follow-up on {{pos}} in {{loc}}. Happy to forward those resumes whenever you'd like to take a look.
 
 Appreciate you taking a look.`
     }
@@ -171,7 +171,7 @@ Appreciate you taking a look.`
       subject: 'Direct-hire talent for your {{pos}} need in {{loc}}',
       body: `Hi {{fn}},
 
-I'm {{sender}}, and at Fute Global LLC we place direct-hire talent. Your {{pos}} opening in {{loc}} stood out — we currently have candidates with solid {{job_resp}} experience on {{company_service}} projects who match what the role calls for, available for your screening at no cost or commitment.
+I'm {{sender}}, and at Fute Global LLC we place direct-hire talent. Your {{pos}} opening in {{loc}} stood out, and we currently have candidates with solid {{job_resp}} experience on {{company_service}} projects who match what the role calls for, available for your screening at no cost or commitment.
 
 Is it worth sharing their resumes with you?
 
@@ -181,7 +181,7 @@ I'll keep an eye out for your reply.`
       subject: 'Re: Direct-hire talent for your {{pos}} need in {{loc}}',
       body: `Hi {{fn}},
 
-Wanted to resurface this — the candidates with {{job_resp}} experience on {{company_service}} work are still available for your {{pos}} role in {{loc}}.
+Wanted to resurface this. The candidates with {{job_resp}} experience on {{company_service}} work are still available for your {{pos}} role in {{loc}}.
 
 Is it worth sharing their resumes?
 
@@ -191,7 +191,7 @@ I'll keep an eye out for your reply.`
       subject: 'Re: Direct-hire talent for your {{pos}} need in {{loc}}',
       body: `Hi {{fn}},
 
-I'll leave it here for now — but the {{job_resp}} candidates remain ready whenever your {{pos}} search in {{loc}} calls for them.
+I'll leave it here for now, but the {{job_resp}} candidates remain ready whenever your {{pos}} search in {{loc}} calls for them.
 
 Glad to share resumes at any point.`
     }
