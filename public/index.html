@@ -538,6 +538,8 @@ var STATE = {
   composeFromEmailId: null,
   composeSubj: '',
   composeBody: '',
+  composeContext: null,
+  composeReminderId: null,
   showAIPanel: false,
   signatureHtml: '',
   sigEmailId: null,
@@ -821,6 +823,59 @@ function fillEmail(tmpl,l,co,sender){
     return map[k]!==undefined?map[k]:m;
   }));
 }
+
+// Reminder (OOO-return) follow-up templates — only offered when composing from a reminder.
+var REMINDER_TEMPLATES=[
+  {name:'Welcome back',subject:"Following up on {{pos}} now that you're back",body:"Hi {{fn}},\n\nHope you had a good time away. I wanted to circle back on the {{pos}} opening at {{company}}. We have candidates ready whenever you'd like to take a look.\n\nWould a quick call this week work?\n\nBest,\n{{sender}}"},
+  {name:'Quick check-in',subject:"Re-connecting on {{pos}} at {{company}}",body:"Hi {{fn}},\n\nWelcome back! I wanted to pick up where we left off on your {{pos}} search. Happy to share a few profiles that fit the key requirements.\n\nShould I send them over?\n\nThanks,\n{{sender}}"},
+  {name:'Candidates ready',subject:"Candidates ready for your {{pos}} role",body:"Hi {{fn}},\n\nNow that you're back in the office, I'd love to help move your {{pos}} search forward at {{company}}. We've shortlisted strong candidates experienced in {{ind}}.\n\nOpen to a 15-minute call?\n\nWarm regards,\n{{sender}}"}
+];
+window.composeReminderEmail=function(reminderId,cid){
+  var rem=(STATE.reminders||[]).find(function(r){return r.id===reminderId;});
+  STATE.composeContext='reminder';
+  STATE.composeReminderId=reminderId;
+  STATE.manualEmail=null;STATE.genEmail=null;STATE.emailTab='compose';STATE.showAIPanel=false;
+  STATE.composeSubj='';STATE.composeBody='';
+  var c=cid?STATE.contacts.find(function(x){return x.id===cid;}):null;
+  var contactId=cid||(rem&&rem.contact_id)||'';
+  var jobId=(c&&c.job_id)||(rem&&(rem.job_id||(rem.job&&rem.job.id)))||'';
+  STATE.composeContactId=contactId?(contactId+'|'+jobId):null;
+  STATE.composeCompanyId=(c?(jobById(c.job_id)||{}).company_id:null)||null;
+  STATE.page='email';STATE.modal=null;
+  showToast('Pick a reminder template, then Send','info');render();
+};
+window.applyReminderTemplate=function(i){
+  var t=REMINDER_TEMPLATES[i];if(!t)return;
+  var recip=resolveComposeRecipient();
+  var lead=recip&&recip.lead,co=recip&&recip.co;
+  var fromEm=STATE.composeFromEmailId?((STATE.userEmailsCache[STATE.user.id]||[]).find(function(e){return e.id===STATE.composeFromEmailId;})):null;
+  var senderName=(fromEm&&fromEm.display_name)||STATE.user.name||'';
+  STATE.composeSubj=lead?fillEmail(t.subject,lead,co,senderName):t.subject;
+  STATE.composeBody=lead?fillEmail(t.body,lead,co,senderName):t.body;
+  render();
+};
+window.sendReminderViaEngine=function(){
+  var subjEl=document.getElementById('email-subj'),bodyEl=document.getElementById('email-body');
+  var subject=(subjEl&&subjEl.value)||STATE.composeSubj||'';
+  var body=(bodyEl&&bodyEl.value)||STATE.composeBody||'';
+  if(!subject.trim()){showToast('Add a subject line','warning');return;}
+  if(!body.trim()){showToast('Write a message','warning');return;}
+  var rem=STATE.composeReminderId?((STATE.reminders||[]).find(function(r){return r.id===STATE.composeReminderId;})):null;
+  var parts=(STATE.composeContactId||'').split('|');
+  var contactId=parts[0]||(rem&&rem.contact_id)||null;
+  var jobId=parts[1]||(rem&&(rem.job_id||(rem.job&&rem.job.id)))||null;
+  var c=contactId?STATE.contacts.find(function(x){return x.id===contactId;}):null;
+  var to=(c&&c.email)||(rem&&rem.email)||null;
+  if(!to){showToast('No recipient email on record','warning');return;}
+  if(!jobId){showToast('This reminder is not linked to a job, so it cannot send through the engine','warning');return;}
+  apiPost('/emails/reminder-send',{reminder_id:STATE.composeReminderId,contact_id:contactId,job_id:jobId,to_email:to,subject:subject,body:body}).then(function(){
+    showToast('Reminder queued — the engine will send it shortly','success');
+    var rid=STATE.composeReminderId;
+    if(rid)STATE.reminders=(STATE.reminders||[]).map(function(r){return r.id===rid?Object.assign({},r,{status:'sent'}):r;});
+    STATE.composeContext=null;STATE.composeReminderId=null;STATE.composeSubj='';STATE.composeBody='';STATE.composeContactId=null;STATE.composeCompanyId=null;STATE.genEmail=null;
+    STATE.page='reminders';render();
+  }).catch(function(e){showToast('Send failed: '+(e&&e.message||e),'error');});
+};
 
 // Five matched outreach styles — each with its own O1, FU1, and FU2 (keep in sync with email-vars.js)
 var OUTREACH_STYLE_PRESETS={
@@ -1718,6 +1773,7 @@ function sendEmailToContact(cid){
   var j=jobById(c.job_id)||{};
   STATE.composeContactId=cid+'|'+(j.id||'');
   STATE.composeCompanyId=j.company_id||null;
+  STATE.composeContext=null;STATE.composeReminderId=null;
   STATE.manualEmail=null;STATE.genEmail=null;STATE.emailTab='compose';STATE.showAIPanel=false;
   STATE.page="email"; STATE.modal=null; showToast("Compose email to "+c.first_name,"info"); render();
 }
@@ -2201,11 +2257,17 @@ function renderEmail(){
           '<div class="fgrp" style="margin-bottom:0"><label class="flbl">From</label><select class="sel" onchange="selectComposeFromEmail(this.value)">'+composeFromOpts+'</select></div>'
           :'<div style="font-size:12px;color:var(--amber)">No sending email ID assigned — ask your admin to add one.</div>')+
       '</div>'+
+      (STATE.composeContext==='reminder'?
+        '<div class="card cp mb3">'+
+          '<div class="fw6 mb2" style="font-size:13px">Reminder templates</div>'+
+          '<div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">Pick a template (fills from the lead), edit if needed, then Send. It goes through the email engine.</div>'+
+          REMINDER_TEMPLATES.map(function(t,i){return '<button type="button" class="btn btn-outline btn-sm" style="margin:0 6px 6px 0" onclick="applyReminderTemplate('+i+')">'+escHtml(t.name)+'</button>';}).join('')+
+        '</div>':'')+
       '<div class="card cp mb3">'+
         '<div class="fgrp"><label class="flbl">Subject</label><input class="inp" id="email-subj" value="'+htmlEsc(STATE.composeSubj)+'" oninput="STATE.composeSubj=this.value" placeholder="Email subject"/></div>'+
         '<div class="fgrp"><label class="flbl">Message</label><textarea class="txta w100" style="min-height:180px" id="email-body" oninput="STATE.composeBody=this.value" placeholder="Write your message here...">'+htmlEsc(STATE.composeBody)+'</textarea></div>'+
         '<div style="display:flex;justify-content:flex-end;margin-top:12px">'+
-          '<button class="btn btn-primary" onclick="sendEmail()" '+((hasRecipient&&composeEmails.length)?'':'disabled style="opacity:.5;cursor:not-allowed"')+'>'+ico('send',13)+' Send</button>'+
+          '<button class="btn btn-primary" onclick="'+(STATE.composeContext==='reminder'?'sendReminderViaEngine()':'sendEmail()')+'" '+((hasRecipient&&composeEmails.length)?'':'disabled style="opacity:.5;cursor:not-allowed"')+'>'+ico('send',13)+' Send</button>'+
         '</div>'+
       '</div>'+
     '</div>';
@@ -2232,7 +2294,7 @@ function renderEmail(){
           '<div style="font-weight:600;font-size:13px;color:var(--text)">'+htmlEsc(r.contact_name||'Contact')+' has returned from OOO</div>'+
           '<div style="font-size:12px;color:var(--text2);margin-top:2px">'+htmlEsc(r.company_name||'')+(r.return_date?' \u00b7 Returned '+htmlEsc(r.return_date):'')+'</div>'+
         '</div>'+
-        (cid?'<button onclick="sendEmailToContact(\''+cid+'\');dismissReminder(\''+r.id+'\')" style="background:var(--green);color:#fff;border:0;padding:6px 12px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer">Compose Email</button>':'')+
+        (cid?'<button onclick="composeReminderEmail(\''+r.id+'\',\''+cid+'\')" style="background:var(--green);color:#fff;border:0;padding:6px 12px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer">Compose Email</button>':'')+
         '<button onclick="dismissReminder(\''+r.id+'\')" style="background:transparent;border:1px solid var(--green);color:var(--green);padding:6px 10px;border-radius:7px;font-size:12px;cursor:pointer">Dismiss</button>'+
       '</div>';
     }).join('')+'</div>';
@@ -2475,7 +2537,7 @@ function renderReminders(){
           '<span style="font-size:11px;padding:2px 7px;background:var(--amber);color:#fff;border-radius:10px">'+(isOOO?'OOO Return':'Due today')+'</span>'+
         '</div>'+
         '<div style="display:flex;gap:8px">'+
-          (contactId?'<button class="btn btn-sm" style="background:var(--amber);color:#fff" onclick="sendEmailToContact(\''+contactId+'\');dismissReminder(\''+r.id+'\')">'+ico('send',13)+' Compose email</button>':'')+
+          (contactId?'<button class="btn btn-sm" style="background:var(--amber);color:#fff" onclick="composeReminderEmail(\''+r.id+'\',\''+contactId+'\')">'+ico('send',13)+' Compose email</button>':'')+
           '<button class="btn btn-outline btn-sm" onclick="dismissReminder(\''+r.id+'\')">Dismiss</button>'+
         '</div>'+
       '</div>'+
@@ -2884,7 +2946,7 @@ window.doLogin=function(){
   else{var e=document.getElementById("login-err");if(e){e.textContent="No account found. Use a @futeglobal.com email.";e.style.display="block";}}
 }
 window.signOut=function(){stopBackgroundPoll();stopProgressPoll();STATE.user=null;STATE.token=null;sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');STATE.page='login';STATE.modal=null;render();}
-window.goPage=function(p){STATE.page=p;STATE.detailLead=null;STATE.modal=null;if(p!=="dashboard")STATE.viewingUser=null;if(p!=='bdleadinsights')STATE.bdLeadSelectedBD=null;if(p!=='bdinsights')STATE.bdInsightsData=null;if(p==='email')loadEmailsForCurrentUser();render();}
+window.goPage=function(p){if(p==='email'){STATE.composeContext=null;STATE.composeReminderId=null;}STATE.page=p;STATE.detailLead=null;STATE.modal=null;if(p!=="dashboard")STATE.viewingUser=null;if(p!=='bdleadinsights')STATE.bdLeadSelectedBD=null;if(p!=='bdinsights')STATE.bdInsightsData=null;if(p==='email')loadEmailsForCurrentUser();render();}
 window.setPeriod=function(p){STATE.period=p;render();}
 window.setSearch=function(v){STATE.leadsFilter.search=v;STATE.leadsPage=0;render();}
 window.setFilt=function(k,v){STATE.leadsFilter[k]=v;STATE.leadsPage=0;render();}
