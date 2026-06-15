@@ -99,7 +99,7 @@ const LEAD_TZ_IANA = {
   PST: 'America/Los_Angeles', PDT: 'America/Los_Angeles',
   Unknown: 'America/New_York'
 };
-const PENDING_EMAIL_JOB_SELECT = 'id, to_email, subject, body, contact_id, job_id, from_email, followup_type, follow_up_id, job:jobs(timezone, sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform,daily_send_limit))';
+const PENDING_EMAIL_JOB_SELECT = 'id, to_email, subject, body, contact_id, job_id, from_email, followup_type, follow_up_id, job:jobs(timezone, sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform,daily_send_limit,is_active))';
 
 function getTimezoneFromLocation(location) {
   if (!location) return 'EST';
@@ -1545,7 +1545,7 @@ app.post('/emails/send-selected', auth, async (req, res) => {
 
     const { data: pendingEmails, error: fetchErr } = await supabase
       .from('emails')
-      .select('id, to_email, subject, body, contact_id, job_id, from_email, followup_type, follow_up_id, job:jobs(timezone, sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform,daily_send_limit))')
+      .select('id, to_email, subject, body, contact_id, job_id, from_email, followup_type, follow_up_id, job:jobs(timezone, sending_email_id, sending_email:user_emails!sending_email_id(id,email_address,display_name,platform,daily_send_limit,is_active))')
       .eq('sent_by', req.user.id)
       .eq('status', 'pending')
       .in('id', email_ids);
@@ -2044,7 +2044,7 @@ async function loadSentEmailRecord({ jobId, contactId, followupType }) {
 
 async function resolveThreadParentMessageId({ jobId, contactId, followupType, userEmailId, toEmail, subjectHint }) {
   const prior = await loadSentEmailRecord({ jobId, contactId, followupType });
-  if (prior?.graph_message_id) return { parentId: prior.graph_message_id, priorSubject: prior.subject, conversationId: prior.conversation_id, priorEmailRowId: prior.id, priorSentAt: prior.sent_at };
+  if (prior?.graph_message_id) return { parentId: prior.graph_message_id, priorSubject: prior.subject, conversationId: prior.conversation_id, priorEmailRowId: prior.id, priorSentAt: prior.sent_at, storedId: true };
   const accessToken = await getMicrosoftToken(userEmailId);
   let parentId = await findThreadMessageByConversation(accessToken, {
     conversationId: prior?.conversation_id, toEmail
@@ -2053,7 +2053,7 @@ async function resolveThreadParentMessageId({ jobId, contactId, followupType, us
     toEmail, subjectHint: subjectHint || prior?.subject, minDate: prior?.sent_at, conversationId: prior?.conversation_id
   });
   if (!parentId) return null;
-  return { parentId, priorSubject: prior?.subject || subjectHint, conversationId: prior?.conversation_id, priorEmailRowId: prior?.id, priorSentAt: prior?.sent_at };
+  return { parentId, priorSubject: prior?.subject || subjectHint, conversationId: prior?.conversation_id, priorEmailRowId: prior?.id, priorSentAt: prior?.sent_at, storedId: false };
 }
 
 function formatQuoteDate(sentAt) {
@@ -2125,7 +2125,13 @@ async function deliverOutboundEmail(email, userEmailId, signatureHtml, sendingEm
   });
   if (thread?.parentId) {
     try {
-      return await sendMicrosoftThreadReply(userEmailId, thread.parentId, { htmlBody, subject: email.subject, to: email.to_email });
+      const graph = await sendMicrosoftThreadReply(userEmailId, thread.parentId, { htmlBody, subject: email.subject, to: email.to_email });
+      // Self-heal: if the parent was located via mailbox lookup (no id stored on the original),
+      // backfill it so later follow-ups in this thread resolve instantly instead of re-scanning.
+      if (thread.priorEmailRowId && thread.storedId === false) {
+        try { await supabase.from('emails').update({ graph_message_id: thread.parentId }).eq('id', thread.priorEmailRowId); } catch (_) {}
+      }
+      return graph;
     } catch (e) {
       if (!isGraphItemNotFound(e)) throw e;
       // The stored parent id is stale: ids saved before immutable ids were
@@ -2211,7 +2217,7 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
   const { autoSend = false } = opts;
   const sendWindow = await getSendWindowHours();
   const totalCount = pendingEmails.length;
-  let sent = 0, failed = 0, skippedWindow = 0, skippedQuota = 0, skippedDomain = 0, skippedContactStatus = 0, skippedThread = 0;
+  let sent = 0, failed = 0, skippedWindow = 0, skippedQuota = 0, skippedDomain = 0, skippedContactStatus = 0, skippedThread = 0, skippedInactive = 0;
   const failDetails = [], sentContactIds = [], sentJobIds = [];
   const startedAt = new Date().toISOString();
 
@@ -2252,11 +2258,18 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
 
     const progressBase = {
       active: true, total: totalCount, sent, failed,
-      deferred: skippedWindow + skippedQuota + skippedDomain + skippedContactStatus,
+      deferred: skippedWindow + skippedQuota + skippedDomain + skippedContactStatus + skippedThread + skippedInactive,
       deferredWindow: skippedWindow, deferredQuota: skippedQuota, deferredDomain: skippedDomain,
+      deferredThread: skippedThread, deferredInactive: skippedInactive,
       skippedContactStatus,
       failDetails, startedAt, autoSend
     };
+
+    if (sendingEmail && sendingEmail.is_active === false) {
+      skippedInactive++;
+      await setSendProgress(userId, { ...progressBase, current: `${email.to_email} (sending mailbox disabled — skipped)` });
+      continue;
+    }
 
     if (!isInLeadSendWindow(leadTz, new Date(), sendWindow)) {
       skippedWindow++;
@@ -2374,7 +2387,7 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
     }
   }
 
-  return { sent, failed, skippedWindow, skippedQuota, skippedDomain, skippedContactStatus, skippedThread, failDetails, sentContactIds, sentJobIds, totalCount, sendWindow };
+  return { sent, failed, skippedWindow, skippedQuota, skippedDomain, skippedContactStatus, skippedThread, skippedInactive, failDetails, sentContactIds, sentJobIds, totalCount, sendWindow };
 }
 
 async function retryDeferredPendingSends() {
@@ -2848,10 +2861,10 @@ app.post('/follow-ups/run', auth, async (req, res) => {
 
 async function runFollowupEngine() {
   const todayDate = today();
-  const log = { checked: 0, fu1_queued: 0, fu2_queued: 0, skipped_quota: 0, skipped_stage: 0, skipped_contact_status: 0 };
+  const log = { checked: 0, fu1_queued: 0, fu2_queued: 0, skipped_quota: 0, skipped_stage: 0, skipped_contact_status: 0, skipped_inactive_mailbox: 0 };
   try {
     const { data: dueFu, error: fuErr } = await supabase.from('follow_ups')
-      .select(`*, contact:contacts(id,first_name,last_name,email,designation,email_status,ooo_until), job:jobs(id,position,location,salary_range,research,industry,stage,timezone,assigned_to_bd,company:companies(name,industry,location),sending_email:user_emails!sending_email_id(id,email_address,display_name))`)
+      .select(`*, contact:contacts(id,first_name,last_name,email,designation,email_status,ooo_until), job:jobs(id,position,location,salary_range,research,industry,stage,timezone,assigned_to_bd,company:companies(name,industry,location),sending_email:user_emails!sending_email_id(id,email_address,display_name,is_active))`)
       .eq('status', 'active');
     if (fuErr) throw fuErr;
     log.checked = (dueFu || []).length;
@@ -2913,6 +2926,8 @@ async function runFollowupEngine() {
         }
         const acId = job.sending_email?.id;
         if (!acId) continue;
+        // Don't queue follow-ups from a disabled mailbox — disabling must actually stop sends.
+        if (job.sending_email?.is_active === false) { log.skipped_inactive_mailbox++; continue; }
         const rem = (limitMap[acId] || 150) - (sentToday[acId] || 0) - (acCountDelta[acId] || 0);
         if (rem <= 0) { log.skipped_quota++; continue; }
         const contact = fu.contact;
