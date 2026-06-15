@@ -1374,6 +1374,46 @@ app.post('/emails', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Send a reminder follow-up through the Graph engine (fresh, non-threaded), like outreach.
+app.post('/emails/reminder-send', auth, async (req, res) => {
+  try {
+    if (notGuest(req, res)) return;
+    const { reminder_id, contact_id, job_id, to_email, subject, body } = req.body;
+    if (!to_email || !isValidEmail(to_email)) return res.status(400).json({ error: 'Valid recipient email required' });
+    if (!subject || !subject.trim() || !body || !body.trim()) return res.status(400).json({ error: 'Subject and body required' });
+    if (!job_id) return res.status(400).json({ error: 'Reminder must be linked to a job to send through the engine' });
+
+    // The engine resolves the sending mailbox from the job, so make sure it has one.
+    const { data: job } = await supabase
+      .from('jobs')
+      .select('sending_email_id, sending_email:user_emails!sending_email_id(email_address)')
+      .eq('id', job_id).single();
+    let sendingAddr = job?.sending_email?.email_address || null;
+    if (!job?.sending_email_id) {
+      const { data: ue } = await supabase.from('user_emails')
+        .select('id,email_address,is_primary').eq('user_id', req.user.id).eq('is_active', true)
+        .order('is_primary', { ascending: false }).limit(1);
+      if (!ue || !ue.length) return res.status(400).json({ error: 'No active sending mailbox available' });
+      await supabase.from('jobs').update({ sending_email_id: ue[0].id }).eq('id', job_id);
+      sendingAddr = ue[0].email_address;
+    }
+
+    // Queue as a fresh send (followup_type 'reminder' is not a thread reply) so the engine delivers it.
+    const { data: row, error } = await supabase.from('emails').insert({
+      contact_id: contact_id || null, job_id, to_email, subject, body,
+      platform: 'Outlook', sent_by: req.user.id, from_email: sendingAddr,
+      status: 'pending', followup_type: 'reminder'
+    }).select().single();
+    if (error) throw error;
+
+    if (reminder_id) await supabase.from('reminders').update({ status: 'sent' }).eq('id', reminder_id).eq('user_id', req.user.id);
+    await logActivity(job_id, contact_id || null, req.user.id, 'reminder_email_queued', `Reminder follow-up queued: ${subject}`, null, null);
+
+    res.status(201).json({ success: true, email_id: row.id });
+    autoSendForManager(req.user.id).catch(e => console.error('[ReminderSend]', e.message));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 function buildPendingEmailsFromJobs(jobs, callerUserId, bdMap, bdPrimaryEmailMap, tmplSettings) {
   const tasksByBd = {};
   let contactsSkipped = 0;
