@@ -2573,11 +2573,9 @@ app.post('/distribute/execute', auth, async (req, res) => {
       assignedLeads.push({ job_id: job.id, user_email_id: emailId });
     }
 
-    const countPerAccount = {};
-    assignedLeads.forEach(l => { countPerAccount[l.user_email_id] = (countPerAccount[l.user_email_id] || 0) + 1; });
-    for (const [eid, cnt] of Object.entries(countPerAccount)) {
-      await supabase.from('email_send_log').upsert({ user_email_id: eid, send_date: todayDate, emails_sent: (sentToday[eid] || 0) + cnt }, { onConflict: 'user_email_id,send_date' });
-    }
+    // Daily send quota is charged on actual delivery (see processPendingEmailSends), not at
+    // assignment time. Pre-charging here made the auto-sender read a phantom "full" quota and
+    // defer every queued email, so nothing actually left the mailbox.
 
     // Create follow-up rows
     const jobIds = selected.map(j => j.id);
@@ -3030,9 +3028,9 @@ async function runFollowupEngine() {
     const nowTs = new Date().toISOString();
     if (fu1Updates.length) await supabase.from('follow_ups').update({ followup1_sent_at: nowTs }).in('id', fu1Updates);
     if (fu2Updates.length) { await supabase.from('follow_ups').update({ followup2_sent_at: nowTs, status: 'completed' }).in('id', fu2Updates); }
-    for (const [acId, cnt] of Object.entries(acCountDelta)) {
-      await supabase.from('email_send_log').upsert({ user_email_id: acId, send_date: todayDate, emails_sent: (sentToday[acId] || 0) + cnt }, { onConflict: 'user_email_id,send_date' });
-    }
+    // Quota is charged on actual delivery (processPendingEmailSends), not at queue time.
+    // Pre-charging the day's quota here marked it "used" before anything sent, which made the
+    // auto-sender defer every just-queued follow-up on phantom quota — so they never left.
     console.log(`[FollowupEngine] FU1: ${log.fu1_queued}, FU2: ${log.fu2_queued}, skipped_quota: ${log.skipped_quota}, skipped_stage: ${log.skipped_stage}, skipped_contact_status: ${log.skipped_contact_status}`);
     return log;
   } catch (err) { console.error('[FollowupEngine] Error:', err.message); return { ...log, error: err.message }; }
