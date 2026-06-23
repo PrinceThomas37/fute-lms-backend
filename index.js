@@ -1536,6 +1536,28 @@ function isGraphItemNotFound(err) {
   return /not found in the store|ErrorItemNotFound|ItemNotFound|ErrorInvalidIdMalformed/i.test(String(err?.message || ''));
 }
 
+// After a send, the durable message id lives on the Sent Items copy. The draft id we created
+// the message with can go stale once it moves out of Drafts, stranding follow-up threading.
+// Look the real sent message up by its (stable) conversationId and return its durable id so the
+// stored thread parent survives the Drafts->Sent move. Best-effort: falls back to the draft id.
+async function resolveSentMessageId(accessToken, { conversationId, toEmail, fallbackId }) {
+  if (!conversationId) return { id: fallbackId, conversationId: conversationId || null };
+  try {
+    const params = new URLSearchParams({
+      '$filter': `conversationId eq '${conversationId}'`,
+      '$select': 'id,conversationId,toRecipients,sentDateTime,isDraft',
+      '$orderby': 'sentDateTime desc',
+      '$top': '10'
+    });
+    const data = await graphMailRequest(accessToken, `/me/messages?${params}`);
+    const to = (toEmail || '').toLowerCase().trim();
+    const sent = (data.value || []).filter(m => m.isDraft === false);
+    const match = sent.find(m => (m.toRecipients || []).some(r => (r.emailAddress?.address || '').toLowerCase() === to)) || sent[0];
+    if (match?.id) return { id: match.id, conversationId: match.conversationId || conversationId };
+  } catch (_) {}
+  return { id: fallbackId, conversationId };
+}
+
 async function sendMicrosoftNewMessage(userEmailId, { to, subject, htmlBody }) {
   const accessToken = await getMicrosoftToken(userEmailId);
   const msg = await graphMailRequest(accessToken, '/me/messages', {
@@ -1547,7 +1569,10 @@ async function sendMicrosoftNewMessage(userEmailId, { to, subject, htmlBody }) {
     })
   });
   await graphMailRequest(accessToken, `/me/messages/${msg.id}/send`, { method: 'POST' });
-  return { graphMessageId: msg.id, conversationId: msg.conversationId || null, inReplyTo: null };
+  // msg.id is the DRAFT id; once sent, the durable id lives on the Sent Items copy. Re-fetch it
+  // so follow-up threading has a parent that survives the Drafts->Sent move.
+  const real = await resolveSentMessageId(accessToken, { conversationId: msg.conversationId, toEmail: to, fallbackId: msg.id });
+  return { graphMessageId: real.id, conversationId: real.conversationId || msg.conversationId || null, inReplyTo: null };
 }
 
 async function sendMicrosoftThreadReply(userEmailId, parentGraphMessageId, { htmlBody, subject, to }) {
@@ -1568,7 +1593,9 @@ async function sendMicrosoftThreadReply(userEmailId, parentGraphMessageId, { htm
   if (to) patch.toRecipients = [{ emailAddress: { address: to } }];
   await graphMailRequest(accessToken, `/me/messages/${draft.id}`, { method: 'PATCH', body: JSON.stringify(patch) });
   await graphMailRequest(accessToken, `/me/messages/${draft.id}/send`, { method: 'POST' });
-  return { graphMessageId: draft.id, conversationId: full.conversationId || draft.conversationId || null, inReplyTo: parentGraphMessageId };
+  // Same as the new-message path: store the durable Sent Items id, not the reply draft's id.
+  const real = await resolveSentMessageId(accessToken, { conversationId: full.conversationId || draft.conversationId, toEmail: to, fallbackId: draft.id });
+  return { graphMessageId: real.id, conversationId: real.conversationId || full.conversationId || draft.conversationId || null, inReplyTo: parentGraphMessageId };
 }
 
 async function findSentMessageInMailbox(accessToken, { toEmail, subjectHint, minDate, conversationId }) {  const params = new URLSearchParams({ '$select': 'id,subject,toRecipients,sentDateTime,conversationId', '$orderby': 'sentDateTime desc', '$top': '75' });
