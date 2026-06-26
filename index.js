@@ -2659,7 +2659,7 @@ app.post('/distribute/execute', auth, async (req, res) => {
       }
     });
 
-    res.json({ success: true, total_assigned: selected.length, manager_id, by_freshness: used.freshness, by_industry: used.industry, by_timezone: used.timezone, email_accounts_used: Object.keys(countPerAccount).length, ratio_summary: ratio.summary || '', assigned_at: now.toISOString(), auto_send: true });
+    res.json({ success: true, total_assigned: selected.length, manager_id, by_freshness: used.freshness, by_industry: used.industry, by_timezone: used.timezone, email_accounts_used: new Set(assignedLeads.map(l => l.user_email_id)).size, ratio_summary: ratio.summary || '', assigned_at: now.toISOString(), auto_send: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
