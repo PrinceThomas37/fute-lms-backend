@@ -1768,21 +1768,33 @@ async function deliverOutboundEmail(email, userEmailId, signatureHtml, sendingEm
         }
         return graph;
       }
-      throwDeferFollowup();
+      return await sendFollowupFreshWithQuote(email, userEmailId, htmlBody);
     }
   }
-  throwDeferFollowup();
+  return await sendFollowupFreshWithQuote(email, userEmailId, htmlBody);
 }
 
-// No real parent message to reply to. Do NOT fall back to a fresh send with a
-// "Re:" subject — a brand-new message that carries a Re: subject but no
-// In-Reply-To/References headers and starts a new conversation is a classic
-// spoofed-thread spam signal. Defer instead; the parent usually becomes
-// resolvable on a later run (id persisted, or message findable in Sent Items).
+// Kept for the processPendingEmailSends deferral path, but the live send path no longer defers
+// follow-ups forever — see sendFollowupFreshWithQuote below.
 function throwDeferFollowup() {
-  const deferErr = new Error('Follow-up deferred: original thread message not found yet — skipping to avoid a fake-threaded "Re:" send.');
+  const deferErr = new Error('Follow-up deferred: original thread message not found yet.');
   deferErr.deferFollowup = true;
   throw deferErr;
+}
+
+// When threading can't resolve a real parent in the mailbox (e.g. a stale draft-era id on an old
+// original), send the follow-up as a fresh message with the original quoted underneath — built
+// from the DB — so the "original below the follow-up" design still holds and the email actually
+// goes out instead of getting stuck. The "Re:" is stripped so it reads as a clean message rather
+// than a fake-threaded "Re:" that carries no In-Reply-To/References headers.
+async function sendFollowupFreshWithQuote(email, userEmailId, htmlBody) {
+  let quote = '';
+  try {
+    quote = await buildQuotedChainFromDb({ jobId: email.job_id, contactId: email.contact_id, followupType: email.followup_type });
+  } catch (_) {}
+  const combinedHtml = quote ? `${htmlBody}<br><br>${quote}` : htmlBody;
+  const subject = (email.subject || '').replace(/^(Re:\s*)+/i, '');
+  return sendMicrosoftNewMessage(userEmailId, { to: email.to_email, subject, htmlBody: combinedHtml });
 }
 
 // Auto-send all pending emails for a specific BD manager (called after assignment)
@@ -2191,7 +2203,7 @@ app.post('/distribute/execute', auth, async (req, res) => {
       }
     });
 
-    res.json({ success: true, total_assigned: selected.length, manager_id, by_freshness: used.freshness, by_industry: used.industry, by_timezone: used.timezone, email_accounts_used: Object.keys(countPerAccount).length, ratio_summary: ratio.summary || '', assigned_at: now.toISOString(), auto_send: true });
+    res.json({ success: true, total_assigned: selected.length, manager_id, by_freshness: used.freshness, by_industry: used.industry, by_timezone: used.timezone, email_accounts_used: new Set(assignedLeads.map(l => l.user_email_id)).size, ratio_summary: ratio.summary || '', assigned_at: now.toISOString(), auto_send: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
