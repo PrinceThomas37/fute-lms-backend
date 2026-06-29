@@ -32,6 +32,8 @@ const {
   resolveSignatureHtml
 } = require('./email-signature');
 const {
+  emailSyntaxValid,
+  emailDomain,
   classifyEmailDeliverability,
   annotateContactEmailStatus
 } = require('./email-validation');
@@ -165,11 +167,6 @@ function padHour(h) {
   const hr = h % 12 || 12;
   const ap = h < 12 ? 'AM' : 'PM';
   return `${hr}:00 ${ap}`;
-}
-
-function extractEmailDomain(addr) {
-  if (!addr || typeof addr !== 'string' || !addr.includes('@')) return '';
-  return addr.split('@').pop().toLowerCase().trim();
 }
 
 let bulkSendSettingsCache = { loadedAt: 0, delayMin: 30, delayMax: 60, domainMaxPerHour: 8, defaultDailyLimit: 300, maxPerRun: 0 };
@@ -324,7 +321,7 @@ async function logActivity(job_id, contact_id, user_id, action_type, description
 const INDUSTRIES = ["Accounting & Finance","Advertising & Public Relations","Agriculture","Airline, Aviation & Transportation","Architecture, Construction & Building Materials","Art, Photography & Journalism","Automotive & Motor Vehicles","Banking & Financial Services","Biotechnology & Pharmaceutical","Broadcasting, Media & Printing","Chemical & Industrial","Computer Hardware & Software","Consulting & Consulting Engineering","Consumer Products & Retail","Credit, Loan, Mortgage & Collections","Defense, Military & Aerospace","Education, Training & Library Science","Electronics & Semiconductor","Employment, Recruiting & Staffing","Energy, Utilities, Oil & Petroleum","Entertainment & Recreation","Environmental","Fashion, Apparel & Textile","Food & Restaurant","Funeral & Cemetery","Government & Civil Service","Healthcare & Health Services","Homebuilding & Real Estate","Hospitality, Hotel & Resort","HVAC","Import & Export","Insurance & Managed Care","Internet & ECommerce","Landscaping","Law Enforcement, Legal & Security","Manufacturing & Manufacturing Engineering","Medical Equipment","Not for Profit & Social Services","Office Supplies & Equipment","Packaging","Sales & Marketing","Securities","Social Media & Wireless Telecommunications","Travel"];
 function normInd(raw) {
   if (!raw) return 'Unknown';
-  if (INDUSTRIES.includes(raw)) return raw;
+  if (INDUSTRIES.includes(raw)) return raw; // already a known value
   const r = raw.toLowerCase();
   if (r.includes('account')||r.includes('cpa')||r.includes('bookkeep')) return 'Accounting & Finance';
   if (r.includes('advertis')||r.includes('public relation')) return 'Advertising & Public Relations';
@@ -342,35 +339,35 @@ function normInd(raw) {
   if (r.includes('consumer')||r.includes('retail')||r.includes('ecommerce')) return 'Consumer Products & Retail';
   if (r.includes('credit')||r.includes('loan')||r.includes('mortgage')||r.includes('collection')) return 'Credit, Loan, Mortgage & Collections';
   if (r.includes('defense')||r.includes('military')||r.includes('aerospace')) return 'Defense, Military & Aerospace';
-  if (r.includes('educat')||r.includes('school')||r.includes('university')||r.includes('training')||r.includes('library')) return 'Education, Training & Library Science';
-  if (r.includes('electron')||r.includes('semiconductor')) return 'Electronics & Semiconductor';
-  if (r.includes('staffing')||r.includes('recruiting')||r.includes('employment')) return 'Employment, Recruiting & Staffing';
-  if (r.includes('energy')||r.includes('utilit')||r.includes('oil')||r.includes('gas')||r.includes('petroleum')||r.includes('solar')||r.includes('renewable')) return 'Energy, Utilities, Oil & Petroleum';
-  if (r.includes('entertain')||r.includes('recreation')||r.includes('gaming')||r.includes('casino')) return 'Entertainment & Recreation';
-  if (r.includes('environ')) return 'Environmental';
+  if (r.includes('education')||r.includes('training')||r.includes('school')||r.includes('university')||r.includes('college')||r.includes('library')) return 'Education, Training & Library Science';
+  if (r.includes('electronic')||r.includes('semiconductor')||r.includes('chip')) return 'Electronics & Semiconductor';
+  if (r.includes('employ')||r.includes('recruit')||r.includes('staffing')||r.includes('human resource')) return 'Employment, Recruiting & Staffing';
+  if (r.includes('energy')||r.includes('utilities')||r.includes('oil ')||r.includes('gas ')||r.includes('petroleum')||r.includes('solar')||r.includes('renewable')) return 'Energy, Utilities, Oil & Petroleum';
+  if (r.includes('entertainment')||r.includes('recreation')||r.includes('gaming')||r.includes('sport')) return 'Entertainment & Recreation';
+  if (r.includes('environment')||r.includes('sustainability')||r.includes('waste')||r.includes('recycl')) return 'Environmental';
   if (r.includes('fashion')||r.includes('apparel')||r.includes('textile')||r.includes('clothing')) return 'Fashion, Apparel & Textile';
   if (r.includes('food')||r.includes('restaurant')||r.includes('beverage')||r.includes('catering')) return 'Food & Restaurant';
-  if (r.includes('funeral')||r.includes('cemetery')) return 'Funeral & Cemetery';
-  if (r.includes('government')||r.includes('civil service')||r.includes('public sector')) return 'Government & Civil Service';
-  if (r.includes('health')||r.includes('medical')||r.includes('hospital')||r.includes('dental')||r.includes('clinic')||r.includes('nurs')) return 'Healthcare & Health Services';
-  if (r.includes('real estate')||r.includes('homebuilding')||r.includes('property')) return 'Homebuilding & Real Estate';
-  if (r.includes('hotel')||r.includes('hospitality')||r.includes('resort')) return 'Hospitality, Hotel & Resort';
-  if (r.includes('hvac')||r.includes('heating')||r.includes('ventilat')) return 'HVAC';
+  if (r.includes('funeral')||r.includes('cemetery')||r.includes('mortuary')) return 'Funeral & Cemetery';
+  if (r.includes('government')||r.includes('civil service')||r.includes('public sector')||r.includes('municipal')) return 'Government & Civil Service';
+  if (r.includes('health')||r.includes('medical')||r.includes('hospital')||r.includes('clinic')||r.includes('wellness')||r.includes('dental')) return 'Healthcare & Health Services';
+  if (r.includes('real estate')||r.includes('homebuilding')||r.includes('property')||r.includes('realty')) return 'Homebuilding & Real Estate';
+  if (r.includes('hotel')||r.includes('resort')||r.includes('hospitality')||r.includes('lodging')) return 'Hospitality, Hotel & Resort';
+  if (r.includes('hvac')||r.includes('heating')||r.includes('cooling')||r.includes('air condition')) return 'HVAC';
   if (r.includes('import')||r.includes('export')) return 'Import & Export';
   if (r.includes('insurance')||r.includes('managed care')) return 'Insurance & Managed Care';
-  if (r.includes('internet')||r.includes('ecommerce')||r.includes('e-commerce')) return 'Internet & ECommerce';
-  if (r.includes('landscap')) return 'Landscaping';
-  if (r.includes('law')||r.includes('legal')||r.includes('security')||r.includes('enforce')) return 'Law Enforcement, Legal & Security';
-  if (r.includes('manufactur')||r.includes('engineering')) return 'Manufacturing & Manufacturing Engineering';
-  if (r.includes('medical equip')||r.includes('medical device')) return 'Medical Equipment';
-  if (r.includes('non-profit')||r.includes('nonprofit')||r.includes('not for profit')||r.includes('social service')||r.includes('charity')) return 'Not for Profit & Social Services';
-  if (r.includes('office suppli')||r.includes('office equip')) return 'Office Supplies & Equipment';
-  if (r.includes('packag')) return 'Packaging';
+  if (r.includes('internet')||r.includes('online')||r.includes('digital')||r.includes('web ')) return 'Internet & ECommerce';
+  if (r.includes('landscap')||r.includes('lawn')||r.includes('garden')) return 'Landscaping';
+  if (r.includes('legal')||r.includes('law')||r.includes('attorney')||r.includes('compliance')||r.includes('litigation')||r.includes('law enforce')) return 'Law Enforcement, Legal & Security';
+  if (r.includes('manufactur')||r.includes('engineering')||r.includes('mechanical')||r.includes('production')) return 'Manufacturing & Manufacturing Engineering';
+  if (r.includes('medical equip')||r.includes('medical device')||r.includes('surgical')) return 'Medical Equipment';
+  if (r.includes('nonprofit')||r.includes('not for profit')||r.includes('social service')||r.includes('charity')||r.includes('ngo')) return 'Not for Profit & Social Services';
+  if (r.includes('office suppl')||r.includes('stationery')) return 'Office Supplies & Equipment';
+  if (r.includes('packag')||r.includes('container')) return 'Packaging';
   if (r.includes('sales')||r.includes('marketing')) return 'Sales & Marketing';
-  if (r.includes('securit')||r.includes('investment')) return 'Securities';
-  if (r.includes('telecom')||r.includes('wireless')||r.includes('social media')) return 'Social Media & Wireless Telecommunications';
+  if (r.includes('securit')||r.includes('investment')||r.includes('hedge fund')||r.includes('private equity')) return 'Securities';
+  if (r.includes('social media')||r.includes('wireless')||r.includes('telecom')||r.includes('mobile')) return 'Social Media & Wireless Telecommunications';
   if (r.includes('travel')||r.includes('tourism')) return 'Travel';
-  return raw || 'Unknown';
+  return raw; // keep original if no match
 }
 
 // ── HEALTH ─────────────────────────────────────────────────────
@@ -1119,7 +1116,7 @@ app.post('/emails/reminder-send', auth, async (req, res) => {
   try {
     if (notGuest(req, res)) return;
     const { reminder_id, contact_id, job_id, to_email, subject, body } = req.body;
-    if (!to_email || !isValidEmail(to_email)) return res.status(400).json({ error: 'Valid recipient email required' });
+    if (!to_email || !emailSyntaxValid(to_email)) return res.status(400).json({ error: 'Valid recipient email required' });
     if (!subject || !subject.trim() || !body || !body.trim()) return res.status(400).json({ error: 'Subject and body required' });
     if (!job_id) return res.status(400).json({ error: 'Reminder must be linked to a job to send through the engine' });
 
@@ -1136,6 +1133,12 @@ app.post('/emails/reminder-send', auth, async (req, res) => {
       if (!ue || !ue.length) return res.status(400).json({ error: 'No active sending mailbox available' });
       await supabase.from('jobs').update({ sending_email_id: ue[0].id }).eq('id', job_id);
       sendingAddr = ue[0].email_address;
+    }
+
+    // Double-send guard: if a follow-up or reminder to this contact is already
+    // queued or was sent today, skip to avoid emailing them twice in one day.
+    if (await hasLiveOutreachEmail(job_id, contact_id)) {
+      return res.status(409).json({ error: 'A follow-up to this contact is already queued or was sent today — skipped to avoid a duplicate email.' });
     }
 
     // Queue as a fresh send (followup_type 'reminder' is not a thread reply) so the engine delivers it.
@@ -1160,7 +1163,7 @@ function buildPendingEmailsFromJobs(jobs, callerUserId, bdMap, bdPrimaryEmailMap
 
   for (const job of jobs) {
     const bd = bdMap[job.assigned_to_bd] || { id: callerUserId, name: '', email: '' };
-    const contacts = (job.contacts || []).filter(c => isValidEmail(c.email));
+    const contacts = (job.contacts || []).filter(c => emailSyntaxValid(c.email));
     if (!contacts.length) {
       contactsSkipped++;
       continue;
@@ -1918,7 +1921,7 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
       continue;
     }
 
-    const domain = extractEmailDomain(email.to_email);
+    const domain = emailDomain(email.to_email);
     if (domain && domainSendsInLastHour(domainTimestamps, domain) >= settings.domainMaxPerHour) {
       skippedDomain++;
       await setSendProgress(userId, { ...progressBase, current: `${email.to_email} (domain ${domain} throttled)` });
@@ -1933,7 +1936,7 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
       await setSendProgress(userId, { ...progressBase, current: email.to_email });
       continue;
     }
-    if (!isValidEmail(email.to_email)) {
+    if (!emailSyntaxValid(email.to_email)) {
       sendAttempts++;
       failed++;
       failDetails.push({ id: email.id, job_id: email.job_id, contact_id: email.contact_id, to: email.to_email || '(empty)', from: sendingEmail?.email_address || email.from_email || '—', error: `Invalid recipient address: "${email.to_email}" — not an email` });
@@ -2175,7 +2178,7 @@ app.post('/distribute/execute', auth, async (req, res) => {
     const { data: assignedJobs } = await supabase.from('jobs').select('id,sending_email_id,contacts(id,email,email_status)').in('id', jobIds);
     const followUpRows = [];
     for (const aj of (assignedJobs || [])) {
-      const contacts = (aj.contacts || []).filter(c => isValidEmail(c.email) && isFollowupEligibleContact(c));
+      const contacts = (aj.contacts || []).filter(c => emailSyntaxValid(c.email) && isFollowupEligibleContact(c));
       for (const c of contacts) {
         followUpRows.push({ job_id: aj.id, contact_id: c.id, user_email_id: aj.sending_email_id, outreach_sent_at: outreachDateStr, followup1_due_date: fu1Str, followup2_due_date: fu2Str, status: 'active' });
       }
@@ -2413,7 +2416,7 @@ app.post('/follow-ups/run', auth, async (req, res) => {
 
 async function runFollowupEngine() {
   const todayDate = today();
-  const log = { checked: 0, fu1_queued: 0, fu2_queued: 0, skipped_quota: 0, skipped_stage: 0, skipped_contact_status: 0, skipped_inactive_mailbox: 0 };
+  const log = { checked: 0, fu1_queued: 0, fu2_queued: 0, skipped_quota: 0, skipped_stage: 0, skipped_contact_status: 0, skipped_inactive_mailbox: 0, skipped_duplicate: 0 };
   try {
     const { data: dueFu, error: fuErr } = await supabase.from('follow_ups')
       .select(`*, contact:contacts(id,first_name,last_name,email,designation,email_status,ooo_until), job:jobs(id,position,location,salary_range,research,industry,stage,timezone,assigned_to_bd,company:companies(name,industry,location),sending_email:user_emails!sending_email_id(id,email_address,display_name,is_active))`)
@@ -2468,6 +2471,19 @@ async function runFollowupEngine() {
       });
     }
 
+    // Double-send guard: skip queueing an automatic follow-up to any contact that
+    // already has a reminder or follow-up email pending or sent today (e.g. a
+    // manual reminder the BD just sent). Deferred follow-ups retry on the next run.
+    const dueContactIds = [...new Set([...fu1Due, ...fu2Due].map(f => f.contact_id).filter(Boolean))];
+    const liveOutreachPairs = new Set();
+    if (dueContactIds.length) {
+      const { data: liveRows } = await supabase.from('emails')
+        .select('job_id, contact_id, status, sent_at, followup_type')
+        .in('contact_id', dueContactIds)
+        .in('followup_type', FOLLOWUP_EMAIL_TYPES);
+      (liveRows || []).forEach(r => { if (isLiveOutreachRow(r)) liveOutreachPairs.add(`${r.job_id}:${r.contact_id}`); });
+    }
+
     for (const fuList of [fu1Due, fu2Due]) {
       const isFu2 = fuList === fu2Due;
       for (const fu of fuList) {
@@ -2491,6 +2507,8 @@ async function runFollowupEngine() {
           }
           continue;
         }
+        const dupKey = `${fu.job_id}:${fu.contact_id}`;
+        if (liveOutreachPairs.has(dupKey)) { log.skipped_duplicate = (log.skipped_duplicate || 0) + 1; continue; }
         const bdId = job.assigned_to_bd;
         // Use sending email display_name so signature matches the From address
         const senderName = job.sending_email?.display_name || bdMap[bdId] || 'Fute Global';
@@ -2527,6 +2545,7 @@ async function runFollowupEngine() {
         };
         if (variantId) fuRow.template_variant = variantId;
         emailsToInsert.push(fuRow);
+        liveOutreachPairs.add(dupKey); // prevent a second same-run follow-up to this contact
         if (isFu2) { fu2Updates.push(fu.id); log.fu2_queued++; } else { fu1Updates.push(fu.id); log.fu1_queued++; }
         acCountDelta[acId] = (acCountDelta[acId] || 0) + 1;
       }
@@ -2545,7 +2564,7 @@ async function runFollowupEngine() {
     // Quota is charged on actual delivery (processPendingEmailSends), not at queue time.
     // Pre-charging the day's quota here marked it "used" before anything sent, which made the
     // auto-sender defer every just-queued follow-up on phantom quota — so they never left.
-    console.log(`[FollowupEngine] FU1: ${log.fu1_queued}, FU2: ${log.fu2_queued}, skipped_quota: ${log.skipped_quota}, skipped_stage: ${log.skipped_stage}, skipped_contact_status: ${log.skipped_contact_status}`);
+    console.log(`[FollowupEngine] FU1: ${log.fu1_queued}, FU2: ${log.fu2_queued}, skipped_quota: ${log.skipped_quota}, skipped_stage: ${log.skipped_stage}, skipped_contact_status: ${log.skipped_contact_status}, skipped_duplicate: ${log.skipped_duplicate}`);
     return log;
   } catch (err) { console.error('[FollowupEngine] Error:', err.message); return { ...log, error: err.message }; }
 }
@@ -2718,11 +2737,8 @@ const MS_SCOPES   = 'Mail.Send Mail.ReadWrite offline_access User.Read';
 
 
 // Random delay between emails to avoid domain flagging (1–120 seconds)
-// Validate recipient email before sending — prevents Microsoft Graph 'not resolved' errors
-function isValidEmail(addr) {
-  return typeof addr === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr.trim());
-}
-
+// Recipient validity (emailSyntaxValid) and domain extraction (emailDomain) are
+// shared from ./email-validation — single source of truth for both.
 const BLOCKED_FOLLOWUP_STATUSES = new Set(['invalid', 'deactivated', 'out_of_office']);
 
 function contactEmailStatus(contact) {
@@ -2730,13 +2746,38 @@ function contactEmailStatus(contact) {
 }
 
 function isFollowupEligibleContact(contact) {
-  if (!contact || !isValidEmail(contact.email)) return false;
+  if (!contact || !emailSyntaxValid(contact.email)) return false;
   return !BLOCKED_FOLLOWUP_STATUSES.has(contactEmailStatus(contact));
 }
 
 function isPermanentFollowupBlock(status) {
   const s = String(status || '').toLowerCase();
   return s === 'invalid' || s === 'deactivated';
+}
+
+// Outreach-class email types (the initial outreach is intentionally excluded).
+// Used by the double-send guard below.
+const FOLLOWUP_EMAIL_TYPES = ['fu1', 'fu2', 'reminder'];
+
+// A follow-up/reminder email row is "live" if it is still queued (pending) or
+// was already delivered today — either way, sending another one now would be a
+// same-day duplicate to that contact.
+function isLiveOutreachRow(r) {
+  return !!r && (r.status === 'pending' || (r.sent_at && String(r.sent_at).slice(0, 10) === today()));
+}
+
+// True if a reminder or follow-up to this contact (optionally scoped to a job)
+// is already queued or was sent today — used to prevent the scheduled follow-up
+// engine and a manual reminder from both emailing the same contact in one day.
+async function hasLiveOutreachEmail(jobId, contactId) {
+  if (!contactId) return false;
+  let q = supabase.from('emails')
+    .select('id,status,sent_at,followup_type')
+    .eq('contact_id', contactId)
+    .in('followup_type', FOLLOWUP_EMAIL_TYPES);
+  if (jobId) q = q.eq('job_id', jobId);
+  const { data } = await q;
+  return (data || []).some(isLiveOutreachRow);
 }
 
 async function skipActiveFollowUpsForContact(contactId) {
