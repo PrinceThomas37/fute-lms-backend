@@ -37,6 +37,8 @@ const {
   classifyEmailDeliverability,
   annotateContactEmailStatus
 } = require('./email-validation');
+const { EVENTS, emit } = require('./events');
+const registerSubscribers = require('./subscribers');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -951,7 +953,7 @@ app.put('/contacts/:id', auth, async (req, res) => {
     const { data, error } = await supabase.from('contacts').update(updates).eq('id', req.params.id).select().single();
     if (error) throw error;
     if (req.body.email_status !== undefined && isPermanentFollowupBlock(req.body.email_status)) {
-      await skipActiveFollowUpsForContact(req.params.id);
+      emit(EVENTS.CONTACT_INVALIDATED, { contactId: req.params.id, jobId: existing.job_id, reason: 'manual', actorUserId: req.user.id });
     }
     res.json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -984,7 +986,7 @@ app.patch('/contacts/:id/email-status', auth, async (req, res) => {
       await logActivity(contact.job_id, contact.id, req.user.id, 'ooo_set', `${contactName} marked OOO until ${ooo_until}`, null, { ooo_until });
     }
     if (isPermanentFollowupBlock(email_status)) {
-      await skipActiveFollowUpsForContact(contact.id);
+      emit(EVENTS.CONTACT_INVALIDATED, { contactId: contact.id, jobId: contact.job_id, reason: 'manual', actorUserId: req.user.id });
     }
     res.json(contact);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1095,7 +1097,7 @@ app.post('/emails/retry-pending-window', auth, async (req, res) => {
       return res.json({ started: false, message: 'Send already in progress for this manager' });
     }
     res.json({ started: true, message: 'Retrying in-window pending emails' });
-    autoSendForManager(managerId).catch(e => console.error('[RetryPendingWindow]', e.message));
+    emit(EVENTS.OUTREACH_QUEUED, { managerId });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1153,7 +1155,7 @@ app.post('/emails/reminder-send', auth, async (req, res) => {
     await logActivity(job_id, contact_id || null, req.user.id, 'reminder_email_queued', `Reminder follow-up queued: ${subject}`, null, null);
 
     res.status(201).json({ success: true, email_id: row.id });
-    autoSendForManager(req.user.id).catch(e => console.error('[ReminderSend]', e.message));
+    emit(EVENTS.OUTREACH_QUEUED, { managerId: req.user.id });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1982,6 +1984,7 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
       const graph = await deliverOutboundEmail(email, userEmailId, sigTemplate, sendingEmail);
       await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email.id);
       await persistGraphIds(email.id, graph);
+      emit(EVENTS.EMAIL_SENT, { emailId: email.id, jobId: email.job_id, contactId: email.contact_id, managerId: userId, followupType: email.followup_type || 'initial', toEmail: email.to_email });
       const todayDate = today();
       sentToday[userEmailId] = (sentToday[userEmailId] || 0) + 1;
       await supabase.from('email_send_log').upsert(
@@ -2185,26 +2188,9 @@ app.post('/distribute/execute', auth, async (req, res) => {
     }
     if (followUpRows.length) await supabase.from('follow_ups').insert(followUpRows);
 
-    // Generate emails then auto-send — run fully in background, no HTTP self-call
-    setImmediate(async () => {
-      try {
-        console.log(`[AutoSend] Starting background generate+send for manager ${manager_id}, ${jobIds.length} jobs`);
-        await setSendProgress(manager_id, { active: true, total: 0, sent: 0, failed: 0, current: 'Generating emails...', failDetails: [], startedAt: new Date().toISOString(), autoSend: true });
-        const generated = await generateEmailsForJobs(jobIds, manager_id);
-        console.log(`[AutoSend] Generated ${generated} emails, now sending...`);
-        if (generated === 0) {
-          console.log(`[AutoSend] No emails generated for manager ${manager_id} — check contacts/templates`);
-          await setSendProgress(manager_id, { active: false, done: true, total: 0, sent: 0, failed: 0, failDetails: [{ error: 'No emails generated — jobs may have no valid contact emails' }], completedAt: new Date().toISOString(), autoSend: true });
-          setTimeout(() => clearSendProgress(manager_id), 300000);
-          return;
-        }
-        await autoSendForManager(manager_id);
-      } catch(e) {
-        console.error('[AutoSend] Background error:', e.message, e.stack);
-        await setSendProgress(manager_id, { active: false, done: true, total: 0, sent: 0, failed: 1, failDetails: [{ error: `Pipeline error: ${e.message}` }], completedAt: new Date().toISOString(), autoSend: true });
-        setTimeout(() => clearSendProgress(manager_id), 300000);
-      }
-    });
+    // Announce the assignment — the lead.assigned subscriber generates the
+    // emails and triggers the send (distribute pipeline, now event-driven).
+    emit(EVENTS.LEAD_ASSIGNED, { jobIds, managerId: manager_id, actorUserId: req.user.id });
 
     res.json({ success: true, total_assigned: selected.length, manager_id, by_freshness: used.freshness, by_industry: used.industry, by_timezone: used.timezone, email_accounts_used: new Set(assignedLeads.map(l => l.user_email_id)).size, ratio_summary: ratio.summary || '', assigned_at: now.toISOString(), auto_send: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -2554,9 +2540,7 @@ async function runFollowupEngine() {
     if (emailsToInsert.length) {
       await supabase.from('emails').insert(emailsToInsert);
       const fuBdIds = [...new Set(emailsToInsert.map(e => e.sent_by).filter(Boolean))];
-      setImmediate(() => {
-        fuBdIds.forEach(bdId => autoSendForManager(bdId).catch(e => console.error('[FollowupEngine] autoSend error:', e.message)));
-      });
+      emit(EVENTS.FOLLOWUP_QUEUED, { bdIds: fuBdIds });
     }
     const nowTs = new Date().toISOString();
     if (fu1Updates.length) await supabase.from('follow_ups').update({ followup1_sent_at: nowTs }).in('id', fu1Updates);
@@ -2679,7 +2663,8 @@ async function sweepMailboxBounces(tokenRow, ownAddresses) {
       for (const c of (matches || [])) {
         if (c.email_status === 'invalid' || c.email_status === 'deactivated') continue;
         await supabase.from('contacts').update({ email_status: 'invalid', updated_at: new Date() }).eq('id', c.id);
-        await skipActiveFollowUpsForContact(c.id);
+        emit(EVENTS.EMAIL_BOUNCED, { contactId: c.id, jobId: c.job_id, address: addr, mailbox: tokenRow.email_address });
+        emit(EVENTS.CONTACT_INVALIDATED, { contactId: c.id, jobId: c.job_id, reason: 'bounce' });
         await logActivity(c.job_id, c.id, null, 'email_bounced',
           `Auto-marked invalid — bounce/NDR received for ${addr}`, null,
           { source: 'ndr', mailbox: tokenRow.email_address });
@@ -2856,6 +2841,23 @@ function buildHtmlEmailBody(plainText, signatureHtml, includeFooter = true) {
 
 
 
+// ── Event timeline ── read-only view of the domain-event stream (the visible
+// proof of the interconnected/"spherical" structure).
+app.get('/events/recent', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Forbidden' });
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+    let q = supabase.from('domain_events')
+      .select('id,event,payload,actor_user_id,created_at')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (req.query.event) q = q.eq('event', req.query.event);
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── BD MANAGER / RECRUITER WORKFLOW (branch: bd-manager-recruiter-workflow) ──
 // Additive module — registers new routes only; nothing above is modified.
 // ── Modularized route groups (extracted from index.js) ──────────────────────
@@ -2872,6 +2874,18 @@ app.use(require('./routes/microsoft')(routeCtx));
 app.use(require('./routes/workflows')(routeCtx));
 
 require('./bd_recruiter_routes')(app, { supabase, auth, hasRole, notGuest, today });
+
+// ── Event-bus subscribers (the "react" half of the spherical structure) ─────
+// Registered after the work functions above exist; emitters elsewhere just
+// announce events and these reactions run.
+registerSubscribers({
+  supabase,
+  skipActiveFollowUpsForContact,
+  autoSendForManager,
+  generateEmailsForJobs,
+  setSendProgress,
+  clearSendProgress,
+});
 
 // ── START ──────────────────────────────────────────────────────
 app.listen(PORT, () => console.log(`Fute Global LMS API v3.0.0 running on port ${PORT}`));
