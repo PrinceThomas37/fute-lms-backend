@@ -10,6 +10,8 @@
 // All routes here are NEW paths; none collide with existing routes.
 // ============================================================================
 
+const { EVENTS, emit } = require('./events');
+
 module.exports = function (app, deps) {
   const { supabase, auth, hasRole, notGuest, today } = deps;
 
@@ -448,6 +450,7 @@ module.exports = function (app, deps) {
       if (error) throw error;
 
       await logSubmissionActivity(data.id, sub.job_order_id, sub.recruiter_id, action, sub.stage, newStage, req.body.note || null);
+      emit(EVENTS.SUBMISSION_ADVANCED, { submissionId: data.id, jobOrderId: sub.job_order_id, fromStage: sub.stage, toStage: newStage, actorUserId: req.user.id });
       res.json(data);
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
