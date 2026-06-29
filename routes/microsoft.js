@@ -67,27 +67,12 @@ router.get('/auth/microsoft/callback', async (req, res) => {
   }
 });
 
-router.post('/emails/send-microsoft', auth, async (req, res) => {
-  try {
-    const { user_email_id, to_email, subject, body, email_id, signature_html } = req.body;
-    if (!user_email_id || !to_email || !subject || !body) return res.status(400).json({ error: 'user_email_id, to_email, subject, body required' });
-    const { data: mailbox } = await supabase.from('user_emails').select('id,user_id,email_address,display_name').eq('id', user_email_id).single();
-    const sigTemplate = resolveSignatureHtml(signature_html || await getMailboxSignature(user_email_id, mailbox?.user_id || req.user.id));
-    const filledSig = fillSignatureHtml(sigTemplate, {
-      displayName: mailbox?.display_name || '',
-      emailAddress: mailbox?.email_address || ''
-    });
-    const accessToken = await getMicrosoftToken(user_email_id);
-    const htmlContent = buildHtmlEmailBody(body, filledSig);
-    const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', { method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: { subject, body: { contentType: 'HTML', content: htmlContent }, toRecipients: [{ emailAddress: { address: to_email } }] }, saveToSentItems: true }) });
-    if (!sendRes.ok) { const errData = await sendRes.json().catch(() => ({})); throw new Error(errData?.error?.message || `Send failed: ${sendRes.status}`); }
-    if (email_id) await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email_id);
-    const todayDate = today();
-    const { data: logRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', user_email_id).eq('send_date', todayDate).single();
-    await supabase.from('email_send_log').upsert({ user_email_id, send_date: todayDate, emails_sent: (logRow?.emails_sent || 0) + 1 }, { onConflict: 'user_email_id,send_date' });
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+// NOTE: the legacy POST /emails/send-microsoft route was removed here. It sent
+// straight through Graph /me/sendMail, bypassing the send-window, per-mailbox
+// daily quota, domain throttling, bounce-skipping and follow-up threading that
+// processPendingEmailSends() enforces in index.js. It was unused by the app
+// (the frontend sends via /emails/queue-all and /emails/reminder-send). All
+// outbound mail now goes through the single safe engine.
 
 router.get('/auth/microsoft/status/:userEmailId', auth, async (req, res) => {
   try {
