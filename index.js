@@ -326,7 +326,28 @@ async function setSendingPaused(paused, actorUserId) {
   try {
     await supabase.from('app_settings').upsert({ key: 'sending_paused', value: paused ? 'true' : 'false', updated_at: new Date() }, { onConflict: 'key' });
   } catch (e) { console.error('[EmergencyStop] persist failed:', e.message); }
-  emit(paused ? EVENTS.SENDING_PAUSED : EVENTS.SENDING_RESUMED, { actorUserId: actorUserId || null });
+  emit(paused ? EVENTS.SENDING_PAUSED : EVENTS.SENDING_RESUMED, { scope: 'global', actorUserId: actorUserId || null });
+}
+
+// Per-manager pause — an RA lead (or admin) can stop emailing for one specific
+// BD manager (e.g. a batch they just assigned) without affecting anyone else.
+// Durable in app_settings as a JSON array; mirrored to an in-memory Set.
+let pausedManagers = new Set();
+function isManagerPaused(id) { return !!id && pausedManagers.has(id); }
+async function loadPausedManagers() {
+  try {
+    const { data } = await supabase.from('app_settings').select('value').eq('key', 'sending_paused_managers').maybeSingle();
+    const arr = data?.value ? JSON.parse(data.value) : [];
+    pausedManagers = new Set(Array.isArray(arr) ? arr : []);
+    if (pausedManagers.size) console.log(`[EmergencyStop] Loaded ${pausedManagers.size} paused manager(s)`);
+  } catch (e) { console.error('[EmergencyStop] load managers failed:', e.message); }
+}
+async function setManagerPaused(managerId, paused, actorUserId) {
+  if (paused) pausedManagers.add(managerId); else pausedManagers.delete(managerId);
+  try {
+    await supabase.from('app_settings').upsert({ key: 'sending_paused_managers', value: JSON.stringify([...pausedManagers]), updated_at: new Date() }, { onConflict: 'key' });
+  } catch (e) { console.error('[EmergencyStop] persist managers failed:', e.message); }
+  emit(paused ? EVENTS.SENDING_PAUSED : EVENTS.SENDING_RESUMED, { scope: 'manager', managerId, actorUserId: actorUserId || null });
 }
 
 async function logActivity(job_id, contact_id, user_id, action_type, description, old_value, new_value) {
@@ -1901,8 +1922,8 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
   const ordered = interleaveByMailbox(inWindow).concat(outWindow);
 
   for (const email of ordered) {
-    if (isSendingPaused()) {
-      console.log('[EmergencyStop] Sending paused mid-run — halting; remaining emails stay pending');
+    if (isSendingPaused() || isManagerPaused(userId)) {
+      console.log(`[EmergencyStop] Sending paused (global or manager ${userId}) mid-run — halting; remaining emails stay pending`);
       break;
     }
     const leadTz = email.job?.timezone || 'EST';
@@ -2057,8 +2078,8 @@ async function retryDeferredPendingSends() {
 }
 
 async function autoSendForManager(managerId) {
-  if (isSendingPaused()) {
-    console.log(`[EmergencyStop] Sending paused — not starting auto-send for manager ${managerId}`);
+  if (isSendingPaused() || isManagerPaused(managerId)) {
+    console.log(`[EmergencyStop] Sending paused (global or manager) — not starting auto-send for manager ${managerId}`);
     return;
   }
   if (activeSendByUser.has(managerId)) {
@@ -2738,21 +2759,35 @@ app.post('/admin/bounce-sweep', auth, async (req, res) => {
 // and resume on the next trigger once unpaused.
 app.get('/admin/sending/status', auth, (req, res) => {
   if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Forbidden' });
-  res.json({ paused: isSendingPaused() });
+  res.json({ paused: isSendingPaused(), pausedManagers: [...pausedManagers] });
 });
+// Pass `manager_id` to pause/resume one BD manager's sending; omit it for the
+// global switch. Per-manager control is available to admins and leads.
 app.post('/admin/sending/pause', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Forbidden' });
+    const managerId = req.body && req.body.manager_id;
+    if (managerId) {
+      await setManagerPaused(managerId, true, req.user.id);
+      console.log(`[EmergencyStop] Manager ${managerId} PAUSED by user ${req.user.id}`);
+      return res.json({ paused: true, manager_id: managerId });
+    }
     await setSendingPaused(true, req.user.id);
-    console.log(`[EmergencyStop] PAUSED by user ${req.user.id}`);
+    console.log(`[EmergencyStop] GLOBAL PAUSED by user ${req.user.id}`);
     res.json({ paused: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.post('/admin/sending/resume', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Forbidden' });
+    const managerId = req.body && req.body.manager_id;
+    if (managerId) {
+      await setManagerPaused(managerId, false, req.user.id);
+      console.log(`[EmergencyStop] Manager ${managerId} RESUMED by user ${req.user.id}`);
+      return res.json({ paused: false, manager_id: managerId });
+    }
     await setSendingPaused(false, req.user.id);
-    console.log(`[EmergencyStop] RESUMED by user ${req.user.id}`);
+    console.log(`[EmergencyStop] GLOBAL RESUMED by user ${req.user.id}`);
     res.json({ paused: false });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2767,6 +2802,7 @@ setTimeout(() => { retryDeferredPendingSends(); }, 3 * 60 * 1000);
 
 // Restore the emergency-stop state on boot so a pause survives a redeploy.
 loadSendingPaused();
+loadPausedManagers();
 
 // ══════════════════════════════════════════════════════════════
 // MICROSOFT OAUTH
