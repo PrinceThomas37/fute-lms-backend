@@ -1412,6 +1412,7 @@ app.post('/emails/generate', auth, async (req, res) => {
 app.post('/emails/send-selected', auth, async (req, res) => {
   try {
     if (isSendingPaused()) return res.status(409).json({ error: 'Sending is paused (emergency stop is on). Resume sending first.' });
+    if (isManagerPaused(req.user.id)) return res.status(409).json({ error: 'Your sending is paused by your team lead/admin — it will resume when they turn it back on.' });
     const { email_ids } = req.body;
     if (!Array.isArray(email_ids) || !email_ids.length) return res.status(400).json({ error: 'email_ids required' });
 
@@ -1461,6 +1462,7 @@ app.get('/emails/send-progress', auth, async (req, res) => {
 app.post('/emails/queue-all', auth, async (req, res) => {
   try {
     if (isSendingPaused()) return res.status(409).json({ error: 'Sending is paused (emergency stop is on). Resume sending first.' });
+    if (isManagerPaused(req.user.id)) return res.status(409).json({ error: 'Your sending is paused by your team lead/admin — it will resume when they turn it back on.' });
     // Fetch all pending emails for this user, joining job -> sending_email_id + platform
     const pendingEmails = await fetchPendingEmailsForUser(req.user.id);
     if (!pendingEmails.length) return res.json({ success: true, sent: 0, failed: 0, queued: 0 });
@@ -2955,17 +2957,25 @@ app.post('/emails/spam-check', auth, (req, res) => {
   res.json(scoreEmailContent(subject || '', body || ''));
 });
 
+// Human-readable label for a template_variant id, shown next to the raw id
+// in the reply-rate table so PDs/BDs see a real name instead of "v1".
+const VARIANT_LABELS = { v1: 'Style 1', v2: 'Style 2', v3: 'Style 3', v4: 'Style 4', v5: 'Style 5', default: 'Default template' };
+
 // ── Reply rate per template variant (closes the A/B loop) ───────────────────
 app.get('/analytics/templates', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Forbidden' });
-    const { data: sent } = await supabase.from('emails').select('template_variant,contact_id,status').eq('status', 'sent');
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 0, 0), 365);
+    let q = supabase.from('emails').select('template_variant,contact_id,status,subject,body,created_at').eq('status', 'sent');
+    if (days > 0) q = q.gte('created_at', new Date(Date.now() - days * 24 * 3600 * 1000).toISOString());
+    const { data: sent } = await q;
     const byVar = {};
     const contactIds = new Set();
     (sent || []).forEach(e => {
       const v = e.template_variant || 'default';
-      byVar[v] = byVar[v] || { variant: v, sent: 0, contacts: new Set() };
+      byVar[v] = byVar[v] || { variant: v, sent: 0, contacts: new Set(), sample: null };
       byVar[v].sent++;
+      if (!byVar[v].sample && e.subject) byVar[v].sample = { subject: e.subject, body: e.body || '' };
       if (e.contact_id) { byVar[v].contacts.add(e.contact_id); contactIds.add(e.contact_id); }
     });
     let repliedSet = new Set();
@@ -2977,7 +2987,12 @@ app.get('/analytics/templates', auth, async (req, res) => {
     }
     const rows = Object.values(byVar).map(r => {
       const repliedContacts = [...r.contacts].filter(id => repliedSet.has(id)).length;
-      return { variant: r.variant, sent: r.sent, replied: repliedContacts, reply_rate: r.sent ? Math.round(repliedContacts / r.sent * 1000) / 10 : 0 };
+      return {
+        variant: r.variant, label: VARIANT_LABELS[r.variant] || r.variant,
+        sent: r.sent, replied: repliedContacts,
+        reply_rate: r.sent ? Math.round(repliedContacts / r.sent * 1000) / 10 : 0,
+        sample: r.sample
+      };
     }).sort((a, b) => b.reply_rate - a.reply_rate);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -2987,7 +3002,8 @@ app.get('/analytics/templates', auth, async (req, res) => {
 app.get('/admin/deliverability', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Forbidden' });
-    const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+    const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
     const { data: emails } = await supabase.from('emails').select('status,created_at').gte('created_at', since);
     const all = emails || [];
     const sent = all.filter(e => e.status === 'sent').length;
@@ -3007,7 +3023,7 @@ app.get('/admin/deliverability', auth, async (req, res) => {
         warmup: dc.warmup_start_date ? { since: dc.warmup_start_date, today_cap: warmupLimit(dc) } : null
       };
     });
-    res.json({ window_days: 30, sent, failed, bounced_contacts: bounced, replied_contacts: replied, suppression_count: suppression, mailboxes: mailboxHealth });
+    res.json({ window_days: days, sent, failed, bounced_contacts: bounced, replied_contacts: replied, suppression_count: suppression, mailboxes: mailboxHealth });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -3027,6 +3043,13 @@ app.post('/admin/mailbox/:id/resume', auth, async (req, res) => {
 app.get('/admin/sending/status', auth, (req, res) => {
   if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Forbidden' });
   res.json({ paused: isSendingPaused(), pausedManagers: [...pausedManagers] });
+});
+// Any user can check whether THEIR OWN sending is paused (global or per-manager) —
+// used to show a paused banner on the BD's own Email page.
+app.get('/sending/my-status', auth, (req, res) => {
+  const global = isSendingPaused();
+  const mine = isManagerPaused(req.user.id);
+  res.json({ paused: global || mine, global, manager: mine });
 });
 // Pass `manager_id` to pause/resume one BD manager's sending; omit it for the
 // global switch. Per-manager control is available to admins and leads.

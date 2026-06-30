@@ -1500,6 +1500,13 @@ function sendEmailToContact(cid){
 function closeModal(){ STATE.modal=null; render(); }
 
 // ── EMAIL ──────────────────────────────────────
+function loadMySendingStatus(){
+  apiGet('/sending/my-status').then(function(s){
+    STATE.mySendingPaused=!!(s&&s.paused);
+    scheduleRender();
+  }).catch(function(){if(STATE.mySendingPaused===undefined)STATE.mySendingPaused=false;});
+}
+
 function renderEmail(){
   var u=STATE.user;
   // BD sees pending+queued+sent; others see sent only
@@ -1508,6 +1515,15 @@ function renderEmail(){
   var sentEmails=STATE.sentEmails||[];
   var tabs=isBD?['pending','compose','sent','outreachplan']:['compose','sent','outreachplan'];
   if(!STATE.emailTab)STATE.emailTab=isBD?'pending':'compose';
+
+  // ── Sending paused banner — shown BEFORE the user tries to send, not just
+  // as an error after the fact. Refreshed each time the Email page is viewed.
+  if(STATE.mySendingPaused===undefined)loadMySendingStatus();
+  var pausedBanner=STATE.mySendingPaused?
+    '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:var(--r2);padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;gap:10px">'+
+      '<span style="width:9px;height:9px;border-radius:50%;background:#dc2626;display:inline-block;flex-shrink:0"></span>'+
+      '<div style="font-size:13px;color:#b91c1c"><strong>Sending is paused</strong> — your team lead/admin has stopped outbound email for you. New sends won\'t go out until they resume it.</div>'+
+    '</div>':'';
 
   // ── Send progress bar ──
   var sp=STATE.sendProgress;
@@ -1639,7 +1655,8 @@ function renderEmail(){
       var _pPg=Math.min(STATE.pendingEmailPage||0,Math.max(0,Math.ceil(totalRecipients/20)-1));
       var _pTp=Math.max(1,Math.ceil(totalRecipients/20));
       var pendingPaged=displayPending.slice(_pPg*20,(_pPg+1)*20);
-      var sendAllBtn=isRaLead?'':('<button onclick="openSendAllConfirm()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer'+(totalRecipients?'':';opacity:.4;cursor:not-allowed')+'"'+(totalRecipients?'':'disabled')+'>Send all pending ('+totalRecipients+')</button>');
+      var sendBlocked=!totalRecipients||STATE.mySendingPaused;
+      var sendAllBtn=isRaLead?'':('<button onclick="openSendAllConfirm()" style="background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer'+(sendBlocked?';opacity:.4;cursor:not-allowed':'')+'"'+(sendBlocked?'disabled':'')+(STATE.mySendingPaused?' title="Sending is paused"':'')+'>Send all pending ('+totalRecipients+')</button>');
 
       var pendingRows=pendingPaged.map(function(e){
         var isSelected=STATE.previewPendingId===e.id;
@@ -2042,6 +2059,7 @@ function renderEmail(){
     '<div class="ph"><div class="ptitle">Email</div>'+
       '<div class="psub">'+(isBD?'Compose emails or manage your outreach plan':'Email')+' · '+u.name+'</div>'+
     '</div>'+
+    pausedBanner+
     progressBar+
     '<div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:18px;overflow-x:auto">'+tabBar+'</div>'+
     (STATE.emailTab==='pending'?pendingHtml:'')+
@@ -2084,52 +2102,87 @@ window.toggleManagerSending=function(managerId,pause){
 };
 
 // ── DELIVERABILITY DASHBOARD ───────────────────────────────────
+// Note: the suppression (opt-out) list still runs in the background — anyone
+// who replies "unsubscribe" is auto-removed from future sends, protecting
+// sender reputation. There's just no browsing UI for it here anymore; the
+// suppressed count still shows as a stat.
 function loadDeliverability(){
   STATE._delivLoading=true;
+  var days=STATE.delivDays||30;
   Promise.all([
-    apiGet('/admin/deliverability').catch(function(){return null;}),
-    apiGet('/analytics/templates').catch(function(){return [];}),
-    apiGet('/suppression').catch(function(){return [];})
+    apiGet('/admin/deliverability?days='+days).catch(function(){return null;}),
+    apiGet('/analytics/templates?days='+days).catch(function(){return [];})
   ]).then(function(r){
-    STATE.deliv=r[0]; STATE.delivTemplates=r[1]||[]; STATE.suppression=r[2]||[];
+    STATE.deliv=r[0]; STATE.delivTemplates=r[1]||[];
     STATE._delivLoading=false; scheduleRender();
   });
 }
 window.openDeliverability=function(){ STATE.page='deliverability'; STATE.deliv=undefined; render(); loadDeliverability(); };
-window.runReplySweepNow=function(){ apiPost('/admin/reply-sweep',{}).then(function(r){ showToast('Reply sweep: '+(r.detected||0)+' detected','success'); loadDeliverability(); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
-window.runBounceSweepNow=function(){ apiPost('/admin/bounce-sweep',{}).then(function(r){ showToast('Bounce sweep: '+(r.marked||0)+' marked','success'); loadDeliverability(); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
+window.setDelivDays=function(days){ STATE.delivDays=days; STATE.deliv=undefined; render(); loadDeliverability(); };
 window.resumeMailbox=function(id){ apiPost('/admin/mailbox/'+id+'/resume',{}).then(function(){ showToast('Mailbox resumed','success'); loadDeliverability(); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
-window.addSuppression=function(){ var el=document.getElementById('suppEmail'); var email=el&&el.value&&el.value.trim(); if(!email){showToast('Enter an email','warning');return;} apiPost('/suppression',{email:email}).then(function(){ showToast('Added to suppression','success'); loadDeliverability(); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
-window.removeSuppression=function(id){ apiDelete('/suppression/'+id).then(function(){ loadDeliverability(); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
 window.runSpamCheck=function(){ apiPost('/emails/spam-check',{subject:STATE.spamSubj||'',body:STATE.spamBody||''}).then(function(r){ STATE.spamResult=r; scheduleRender(); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
+window.previewTemplateSample=function(variant){
+  var t=(STATE.delivTemplates||[]).find(function(x){return x.variant===variant;});
+  if(!t||!t.sample){showToast('No sample available for this template','warning');return;}
+  STATE.modal='<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">'+htmlEsc(t.label||t.variant)+' — sample sent</div></div>'+
+    '<div class="mb_">'+
+      '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px">Subject</div>'+
+      '<div style="font-size:13.5px;font-weight:600;margin-bottom:12px">'+htmlEsc(t.sample.subject||'')+'</div>'+
+      '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px">Body</div>'+
+      '<div style="font-size:13px;white-space:pre-wrap;line-height:1.5;max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:10px 12px">'+htmlEsc(t.sample.body||'')+'</div>'+
+    '</div>'+
+    '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Close</button></div>'+
+  '</div>';
+  render();
+};
 
 function renderDeliverability(){
   var u=STATE.user;
   if(!userHasAnyRole(u,'admin','bd_lead','ra_lead'))return '<div class="page">Forbidden</div>';
   if(STATE.deliv===undefined&&!STATE._delivLoading){loadDeliverability();}
-  var d=STATE.deliv, tpls=STATE.delivTemplates||[], supp=STATE.suppression||[], sr=STATE.spamResult;
+  var days=STATE.delivDays||30;
+  var d=STATE.deliv, tpls=STATE.delivTemplates||[], sr=STATE.spamResult;
   function stat(label,val,color){ return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px 16px;min-width:118px"><div style="font-size:22px;font-weight:700;color:'+(color||'var(--text)')+'">'+(val==null?'—':val)+'</div><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-top:2px">'+label+'</div></div>'; }
-  var statsRow=d?'<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">'+stat('Sent (30d)',d.sent,'var(--accent)')+stat('Failed (30d)',d.failed,'var(--amber)')+stat('Bounced',d.bounced_contacts,'var(--red)')+stat('Replied',d.replied_contacts,'var(--green)')+stat('Suppressed',d.suppression_count,'var(--text2)')+'</div>':'<div style="color:var(--text3);margin-bottom:20px">Loading…</div>';
+  var statsRow=d?'<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">'+stat('Sent ('+days+'d)',d.sent,'var(--accent)')+stat('Failed ('+days+'d)',d.failed,'var(--amber)')+stat('Bounced',d.bounced_contacts,'var(--red)')+stat('Replied',d.replied_contacts,'var(--green)')+stat('Opted out',d.suppression_count,'var(--text2)')+'</div>':'<div style="color:var(--text3);margin-bottom:20px">Loading…</div>';
+  var dayFilter='<div style="display:flex;gap:4px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:3px">'+[7,30,90].map(function(n){
+    var on=days===n;
+    return '<button onclick="setDelivDays('+n+')" style="padding:5px 12px;border:0;border-radius:6px;background:'+(on?'var(--accent)':'transparent')+';color:'+(on?'#fff':'var(--text2)')+';font-size:12px;font-weight:600;cursor:pointer">'+n+'d</button>';
+  }).join('')+'</div>';
   var mbRows=(d&&d.mailboxes||[]).map(function(m){
     var status=m.auto_paused?'<span style="font-size:11px;padding:2px 8px;background:#fee2e2;color:#b91c1c;border-radius:6px;font-weight:700">Auto-paused</span> <button onclick="resumeMailbox(\''+m.id+'\')" style="font-size:11px;color:var(--green);background:transparent;border:0;cursor:pointer">Resume</button>':(m.warmup?'<span style="font-size:11px;padding:2px 8px;background:var(--amber-l);color:var(--amber);border-radius:6px;font-weight:600">Warm-up · cap '+m.warmup.today_cap+'/day</span>':'<span style="font-size:11px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:6px;font-weight:600">Healthy</span>');
     return '<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border)"><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">'+htmlEsc(m.name||m.email)+'</div><div style="font-size:11px;color:var(--text3)">'+htmlEsc(m.email)+' · '+m.daily_limit+'/day cap</div></div>'+status+'</div>';
   }).join('');
-  var tplRows=tpls.length?tpls.map(function(t){ return '<div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border)"><div style="flex:1;font-size:13px;font-weight:500">'+htmlEsc(t.variant)+'</div><div style="font-size:12px;color:var(--text3)">'+t.sent+' sent · '+t.replied+' replied</div><div style="font-size:14px;font-weight:700;color:'+(t.reply_rate>=5?'var(--green)':t.reply_rate>0?'var(--accent)':'var(--text3)')+';min-width:54px;text-align:right">'+t.reply_rate+'%</div></div>'; }).join(''):'<div style="padding:14px;color:var(--text3);font-size:13px">No sent emails with variants yet.</div>';
-  var suppRows=supp.length?supp.map(function(s){ return '<div style="display:flex;align-items:center;gap:10px;padding:7px 14px;border-bottom:1px solid var(--border)"><div style="flex:1;min-width:0"><div style="font-size:13px">'+htmlEsc(s.email)+'</div><div style="font-size:11px;color:var(--text3)">'+htmlEsc(s.reason||'')+(s.source?' · '+htmlEsc(s.source):'')+'</div></div><button onclick="removeSuppression(\''+s.id+'\')" style="font-size:11px;color:var(--red);background:transparent;border:0;cursor:pointer">Remove</button></div>'; }).join(''):'<div style="padding:14px;color:var(--text3);font-size:13px">No suppressed addresses.</div>';
+  var tplRows=tpls.length?tpls.map(function(t){
+    var hasSample=t.sample&&t.sample.subject;
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border)">'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:13px;font-weight:600">'+htmlEsc(t.label||t.variant)+'</div>'+
+        (hasSample?'<div style="font-size:11.5px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:340px">'+htmlEsc(t.sample.subject)+'</div>':'')+
+      '</div>'+
+      (hasSample?'<button onclick="previewTemplateSample(\''+t.variant+'\')" style="font-size:11px;color:var(--accent);background:transparent;border:1px solid var(--border2);padding:4px 10px;border-radius:6px;cursor:pointer;white-space:nowrap">Preview</button>':'')+
+      '<div style="font-size:12px;color:var(--text3);white-space:nowrap">'+t.sent+' sent · '+t.replied+' replied</div>'+
+      '<div style="font-size:14px;font-weight:700;color:'+(t.reply_rate>=5?'var(--green)':t.reply_rate>0?'var(--accent)':'var(--text3)')+';min-width:54px;text-align:right">'+t.reply_rate+'%</div>'+
+    '</div>';
+  }).join(''):'<div style="padding:14px;color:var(--text3);font-size:13px">No sent emails with variants yet in this window.</div>';
   var spamHtml='';
   if(sr){ var col=sr.level==='risk'?'var(--red)':sr.level==='warn'?'var(--amber)':'var(--green)'; spamHtml='<div style="margin-top:10px;padding:10px 12px;border:1px solid '+col+';border-radius:8px">'+'<div style="font-weight:700;color:'+col+';font-size:13px">Spam score: '+sr.score+'/100 ('+sr.level+')</div>'+(sr.warnings&&sr.warnings.length?'<ul style="margin:6px 0 0 16px;font-size:12px;color:var(--text2)">'+sr.warnings.map(function(w){return '<li>'+htmlEsc(w)+'</li>';}).join('')+'</ul>':'<div style="font-size:12px;color:var(--text3);margin-top:4px">Looks clean.</div>')+'</div>'; }
   function card(title,inner,extra){ return '<div style="margin-bottom:20px"><div style="font-weight:600;font-size:13px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">'+title+(extra||'')+'</div><div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+inner+'</div></div>'; }
   return '<div class="page">'+
     '<div class="ph"><div class="flex jb aic">'+
-      '<div><div class="ptitle">Deliverability & Replies</div><div class="psub">Reputation, reply rate, suppression & content health</div></div>'+
-      '<div style="display:flex;gap:8px"><button onclick="runReplySweepNow()" style="background:var(--card);border:1px solid var(--border2);color:var(--text2);padding:7px 13px;border-radius:8px;font-size:12px;cursor:pointer">Run reply sweep</button>'+
-      '<button onclick="runBounceSweepNow()" style="background:var(--card);border:1px solid var(--border2);color:var(--text2);padding:7px 13px;border-radius:8px;font-size:12px;cursor:pointer">Run bounce sweep</button></div>'+
+      '<div><div class="ptitle">Deliverability & Replies</div><div class="psub">Reputation, reply rate & content health</div></div>'+
+      dayFilter+
     '</div></div>'+
     statsRow+
     card('Mailbox health (warm-up & auto-pause)', mbRows||'<div style="padding:14px;color:var(--text3);font-size:13px">No active mailboxes.</div>')+
     card('Reply rate by template', tplRows)+
-    card('Suppression list ('+supp.length+')', suppRows, '<span style="text-transform:none;font-weight:400"><input id="suppEmail" class="inp" placeholder="email to suppress" style="font-size:12px;padding:4px 8px;width:170px;display:inline-block;margin-right:6px"><button onclick="addSuppression()" style="font-size:12px;background:var(--accent);color:#fff;border:0;padding:5px 12px;border-radius:6px;cursor:pointer">Add</button></span>')+
-    card('Spam-content checker', '<div style="padding:14px"><input id="spamSubj" class="inp" placeholder="Subject" value="'+htmlEsc(STATE.spamSubj||'')+'" oninput="STATE.spamSubj=this.value" style="margin-bottom:8px"><textarea id="spamBody" class="inp" placeholder="Paste an email body to score it" oninput="STATE.spamBody=this.value" style="width:100%;min-height:90px;font-family:inherit">'+htmlEsc(STATE.spamBody||'')+'</textarea><button onclick="runSpamCheck()" style="margin-top:8px;background:var(--accent);color:#fff;border:0;padding:7px 16px;border-radius:8px;font-size:13px;cursor:pointer">Check</button>'+spamHtml+'</div>')+
+    card('Spam-content checker',
+      '<div style="padding:14px">'+
+        '<div style="font-size:12.5px;color:var(--text3);margin-bottom:10px">Paste a subject + body to check it for things that hurt deliverability before you send: spam-trigger words, too many links/images, ALL-CAPS, excess exclamation marks, subject/body length, and a missing opt-out line.</div>'+
+        '<input id="spamSubj" class="inp" placeholder="Subject" value="'+htmlEsc(STATE.spamSubj||'')+'" oninput="STATE.spamSubj=this.value" style="margin-bottom:8px">'+
+        '<textarea id="spamBody" class="inp" placeholder="Paste an email body to score it" oninput="STATE.spamBody=this.value" style="width:100%;min-height:90px;font-family:inherit">'+htmlEsc(STATE.spamBody||'')+'</textarea>'+
+        '<button onclick="runSpamCheck()" style="margin-top:8px;background:var(--accent);color:#fff;border:0;padding:7px 16px;border-radius:8px;font-size:13px;cursor:pointer">Check</button>'+spamHtml+
+      '</div>')+
   '</div>';
 }
 
