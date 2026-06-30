@@ -2049,8 +2049,23 @@ function renderEmail(){
 }
 
 // ── ADMIN ──────────────────────────────────────
+function loadSendingStatus(){
+  apiGet('/admin/sending/status').then(function(s){
+    STATE.sendingPaused=!!(s&&s.paused);scheduleRender();
+  }).catch(function(){if(STATE.sendingPaused===undefined){STATE.sendingPaused=false;}});
+}
+window.toggleSending=function(pause){
+  if(pause&&!confirm('EMERGENCY STOP\n\nPause ALL outbound email sending right now?\n\nAny run in progress stops before the next email (already-sent mail cannot be recalled). Queued emails stay pending until you resume.'))return;
+  apiPost(pause?'/admin/sending/pause':'/admin/sending/resume',{}).then(function(r){
+    STATE.sendingPaused=!!(r&&r.paused);
+    showToast(STATE.sendingPaused?'Sending PAUSED — all outbound email stopped':'Sending resumed','success');
+    render();
+  }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');});
+};
+
 function renderAdmin(){
   var u=STATE.user;
+  if(STATE.sendingPaused===undefined){loadSendingStatus();}
   var selectedUserId=STATE.adminSelectedUser||null;
   if(selectedUserId){return renderAdminUserDetail(selectedUserId);}
 
@@ -2115,6 +2130,19 @@ function renderAdmin(){
     'Email Engine Schedule'+
   '</button>';
 
+  var paused=STATE.sendingPaused;
+  var stopCard='<div style="background:'+(paused?'#fef2f2':'var(--card)')+';border:1px solid '+(paused?'#fca5a5':'var(--border)')+';border-radius:var(--r2);padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">'+
+    '<div style="flex:1;min-width:200px">'+
+      '<div style="font-weight:700;font-size:14px;color:'+(paused?'#b91c1c':'var(--text)')+';display:flex;align-items:center;gap:8px">'+
+        '<span style="width:9px;height:9px;border-radius:50%;background:'+(paused?'#dc2626':'var(--green)')+';display:inline-block"></span>'+
+        'Email sending: '+(paused?'PAUSED':'Active')+'</div>'+
+      '<div style="font-size:12px;color:var(--text3);margin-top:3px">'+(paused?'All outbound email is stopped. Queued emails stay pending until you resume.':'Emergency stop halts all outbound email immediately. Already-sent emails cannot be recalled.')+'</div>'+
+    '</div>'+
+    (paused
+      ?'<button onclick="toggleSending(false)" style="padding:9px 18px;background:var(--green);color:#fff;border:0;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">Resume sending</button>'
+      :'<button onclick="toggleSending(true)" style="padding:9px 18px;background:#dc2626;color:#fff;border:0;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">⏸ Emergency stop</button>')+
+  '</div>';
+
   return '<div class="page">'+
     '<div class="ph"><div class="flex jb aic">'+
       '<div><div class="ptitle">Admin</div><div class="psub">'+allUsers.length+' users · Fute Global LLC</div></div>'+
@@ -2123,6 +2151,7 @@ function renderAdmin(){
         '<button class="btn btn-primary btn-sm" onclick="openAddUser()">'+ico('plus',13)+'Add user</button>'+
       '</div>'+
     '</div></div>'+
+    stopCard+
     '<div style="margin-bottom:14px">'+
       '<input class="inp" placeholder="Search by name, email, employee ID…" value="'+htmlEsc(STATE.adminSearch||'')+'" oninput="STATE.adminSearch=this.value;render()" style="max-width:360px">'+
     '</div>'+
