@@ -781,6 +781,8 @@ function renderApp(){
   ];
   // Admin only: Admin panel
   if(userHasRole(u,'admin'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
+  // Admin + leads: Deliverability dashboard
+  if(userHasAnyRole(u,'admin','bd_lead','ra_lead'))navItems.splice(navItems.length-1,0,{id:"deliverability",lbl:"Deliverability",ic:"dashboard"});
   // RA Lead + Admin: Assign Leads + Insights (RA team view)
   if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
   if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(navItems.length-1,0,{id:"insights",lbl:"Insights",ic:"dashboard"});
@@ -800,7 +802,7 @@ function renderApp(){
 
   var switchers=""; // removed — use team list to switch views
 
-  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",bdinsights:"My Insights",bdleadinsights:"Team Insights",profile:"My Profile",reminders:"Reminders"};
+  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",deliverability:"Deliverability & Replies",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",bdinsights:"My Insights",bdleadinsights:"Team Insights",profile:"My Profile",reminders:"Reminders"};
   var viewingName=STATE.viewingUser&&STATE.viewingUser.id!==u.id?" · Viewing: "+STATE.viewingUser.name:"";
 
   return '<div id="sidebar">'+
@@ -856,6 +858,7 @@ function renderPage(){
   if(STATE.page==="email")return renderEmail();
   if(STATE.page==="reminders")return renderReminders();
   if(STATE.page==="admin")return renderAdmin();
+  if(STATE.page==="deliverability")return renderDeliverability();
   if(STATE.page==="profile")return renderProfile();
   return "<div class='page'>Page not found</div>";
 }
@@ -2079,6 +2082,56 @@ window.toggleManagerSending=function(managerId,pause){
     render();
   }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');});
 };
+
+// ── DELIVERABILITY DASHBOARD ───────────────────────────────────
+function loadDeliverability(){
+  STATE._delivLoading=true;
+  Promise.all([
+    apiGet('/admin/deliverability').catch(function(){return null;}),
+    apiGet('/analytics/templates').catch(function(){return [];}),
+    apiGet('/suppression').catch(function(){return [];})
+  ]).then(function(r){
+    STATE.deliv=r[0]; STATE.delivTemplates=r[1]||[]; STATE.suppression=r[2]||[];
+    STATE._delivLoading=false; scheduleRender();
+  });
+}
+window.openDeliverability=function(){ STATE.page='deliverability'; STATE.deliv=undefined; render(); loadDeliverability(); };
+window.runReplySweepNow=function(){ apiPost('/admin/reply-sweep',{}).then(function(r){ showToast('Reply sweep: '+(r.detected||0)+' detected','success'); loadDeliverability(); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
+window.runBounceSweepNow=function(){ apiPost('/admin/bounce-sweep',{}).then(function(r){ showToast('Bounce sweep: '+(r.marked||0)+' marked','success'); loadDeliverability(); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
+window.resumeMailbox=function(id){ apiPost('/admin/mailbox/'+id+'/resume',{}).then(function(){ showToast('Mailbox resumed','success'); loadDeliverability(); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
+window.addSuppression=function(){ var el=document.getElementById('suppEmail'); var email=el&&el.value&&el.value.trim(); if(!email){showToast('Enter an email','warning');return;} apiPost('/suppression',{email:email}).then(function(){ showToast('Added to suppression','success'); loadDeliverability(); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
+window.removeSuppression=function(id){ apiDelete('/suppression/'+id).then(function(){ loadDeliverability(); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
+window.runSpamCheck=function(){ apiPost('/emails/spam-check',{subject:STATE.spamSubj||'',body:STATE.spamBody||''}).then(function(r){ STATE.spamResult=r; scheduleRender(); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
+
+function renderDeliverability(){
+  var u=STATE.user;
+  if(!userHasAnyRole(u,'admin','bd_lead','ra_lead'))return '<div class="page">Forbidden</div>';
+  if(STATE.deliv===undefined&&!STATE._delivLoading){loadDeliverability();}
+  var d=STATE.deliv, tpls=STATE.delivTemplates||[], supp=STATE.suppression||[], sr=STATE.spamResult;
+  function stat(label,val,color){ return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px 16px;min-width:118px"><div style="font-size:22px;font-weight:700;color:'+(color||'var(--text)')+'">'+(val==null?'—':val)+'</div><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-top:2px">'+label+'</div></div>'; }
+  var statsRow=d?'<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">'+stat('Sent (30d)',d.sent,'var(--accent)')+stat('Failed (30d)',d.failed,'var(--amber)')+stat('Bounced',d.bounced_contacts,'var(--red)')+stat('Replied',d.replied_contacts,'var(--green)')+stat('Suppressed',d.suppression_count,'var(--text2)')+'</div>':'<div style="color:var(--text3);margin-bottom:20px">Loading…</div>';
+  var mbRows=(d&&d.mailboxes||[]).map(function(m){
+    var status=m.auto_paused?'<span style="font-size:11px;padding:2px 8px;background:#fee2e2;color:#b91c1c;border-radius:6px;font-weight:700">Auto-paused</span> <button onclick="resumeMailbox(\''+m.id+'\')" style="font-size:11px;color:var(--green);background:transparent;border:0;cursor:pointer">Resume</button>':(m.warmup?'<span style="font-size:11px;padding:2px 8px;background:var(--amber-l);color:var(--amber);border-radius:6px;font-weight:600">Warm-up · cap '+m.warmup.today_cap+'/day</span>':'<span style="font-size:11px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:6px;font-weight:600">Healthy</span>');
+    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border)"><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">'+htmlEsc(m.name||m.email)+'</div><div style="font-size:11px;color:var(--text3)">'+htmlEsc(m.email)+' · '+m.daily_limit+'/day cap</div></div>'+status+'</div>';
+  }).join('');
+  var tplRows=tpls.length?tpls.map(function(t){ return '<div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border)"><div style="flex:1;font-size:13px;font-weight:500">'+htmlEsc(t.variant)+'</div><div style="font-size:12px;color:var(--text3)">'+t.sent+' sent · '+t.replied+' replied</div><div style="font-size:14px;font-weight:700;color:'+(t.reply_rate>=5?'var(--green)':t.reply_rate>0?'var(--accent)':'var(--text3)')+';min-width:54px;text-align:right">'+t.reply_rate+'%</div></div>'; }).join(''):'<div style="padding:14px;color:var(--text3);font-size:13px">No sent emails with variants yet.</div>';
+  var suppRows=supp.length?supp.map(function(s){ return '<div style="display:flex;align-items:center;gap:10px;padding:7px 14px;border-bottom:1px solid var(--border)"><div style="flex:1;min-width:0"><div style="font-size:13px">'+htmlEsc(s.email)+'</div><div style="font-size:11px;color:var(--text3)">'+htmlEsc(s.reason||'')+(s.source?' · '+htmlEsc(s.source):'')+'</div></div><button onclick="removeSuppression(\''+s.id+'\')" style="font-size:11px;color:var(--red);background:transparent;border:0;cursor:pointer">Remove</button></div>'; }).join(''):'<div style="padding:14px;color:var(--text3);font-size:13px">No suppressed addresses.</div>';
+  var spamHtml='';
+  if(sr){ var col=sr.level==='risk'?'var(--red)':sr.level==='warn'?'var(--amber)':'var(--green)'; spamHtml='<div style="margin-top:10px;padding:10px 12px;border:1px solid '+col+';border-radius:8px">'+'<div style="font-weight:700;color:'+col+';font-size:13px">Spam score: '+sr.score+'/100 ('+sr.level+')</div>'+(sr.warnings&&sr.warnings.length?'<ul style="margin:6px 0 0 16px;font-size:12px;color:var(--text2)">'+sr.warnings.map(function(w){return '<li>'+htmlEsc(w)+'</li>';}).join('')+'</ul>':'<div style="font-size:12px;color:var(--text3);margin-top:4px">Looks clean.</div>')+'</div>'; }
+  function card(title,inner,extra){ return '<div style="margin-bottom:20px"><div style="font-weight:600;font-size:13px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">'+title+(extra||'')+'</div><div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+inner+'</div></div>'; }
+  return '<div class="page">'+
+    '<div class="ph"><div class="flex jb aic">'+
+      '<div><div class="ptitle">Deliverability & Replies</div><div class="psub">Reputation, reply rate, suppression & content health</div></div>'+
+      '<div style="display:flex;gap:8px"><button onclick="runReplySweepNow()" style="background:var(--card);border:1px solid var(--border2);color:var(--text2);padding:7px 13px;border-radius:8px;font-size:12px;cursor:pointer">Run reply sweep</button>'+
+      '<button onclick="runBounceSweepNow()" style="background:var(--card);border:1px solid var(--border2);color:var(--text2);padding:7px 13px;border-radius:8px;font-size:12px;cursor:pointer">Run bounce sweep</button></div>'+
+    '</div></div>'+
+    statsRow+
+    card('Mailbox health (warm-up & auto-pause)', mbRows||'<div style="padding:14px;color:var(--text3);font-size:13px">No active mailboxes.</div>')+
+    card('Reply rate by template', tplRows)+
+    card('Suppression list ('+supp.length+')', suppRows, '<span style="text-transform:none;font-weight:400"><input id="suppEmail" class="inp" placeholder="email to suppress" style="font-size:12px;padding:4px 8px;width:170px;display:inline-block;margin-right:6px"><button onclick="addSuppression()" style="font-size:12px;background:var(--accent);color:#fff;border:0;padding:5px 12px;border-radius:6px;cursor:pointer">Add</button></span>')+
+    card('Spam-content checker', '<div style="padding:14px"><input id="spamSubj" class="inp" placeholder="Subject" value="'+htmlEsc(STATE.spamSubj||'')+'" oninput="STATE.spamSubj=this.value" style="margin-bottom:8px"><textarea id="spamBody" class="inp" placeholder="Paste an email body to score it" oninput="STATE.spamBody=this.value" style="width:100%;min-height:90px;font-family:inherit">'+htmlEsc(STATE.spamBody||'')+'</textarea><button onclick="runSpamCheck()" style="margin-top:8px;background:var(--accent);color:#fff;border:0;padding:7px 16px;border-radius:8px;font-size:13px;cursor:pointer">Check</button>'+spamHtml+'</div>')+
+  '</div>';
+}
 
 function renderAdmin(){
   var u=STATE.user;
