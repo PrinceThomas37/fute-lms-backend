@@ -28,6 +28,9 @@ const EVENTS = {
   SUBMISSION_ADVANCED: 'submission.advanced',
   SENDING_PAUSED:      'sending.paused',
   SENDING_RESUMED:     'sending.resumed',
+  CONTACT_REPLIED:     'contact.replied',
+  CONTACT_UNSUBSCRIBED:'contact.unsubscribed',
+  MAILBOX_AUTOPAUSED:  'mailbox.autopaused',
 };
 const KNOWN_EVENTS = new Set(Object.values(EVENTS));
 
