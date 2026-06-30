@@ -26,6 +26,8 @@ const EVENTS = {
   CONTACT_INVALIDATED: 'contact.invalidated',
   FOLLOWUP_QUEUED:     'followup.queued',
   SUBMISSION_ADVANCED: 'submission.advanced',
+  SENDING_PAUSED:      'sending.paused',
+  SENDING_RESUMED:     'sending.resumed',
 };
 const KNOWN_EVENTS = new Set(Object.values(EVENTS));
 

@@ -2049,8 +2049,40 @@ function renderEmail(){
 }
 
 // ── ADMIN ──────────────────────────────────────
+function loadSendingStatus(){
+  apiGet('/admin/sending/status').then(function(s){
+    STATE.sendingPaused=!!(s&&s.paused);
+    STATE.pausedManagers=(s&&s.pausedManagers)||[];
+    scheduleRender();
+  }).catch(function(){
+    if(STATE.sendingPaused===undefined)STATE.sendingPaused=false;
+    if(STATE.pausedManagers===undefined)STATE.pausedManagers=[];
+  });
+}
+window.toggleSending=function(pause){
+  if(pause&&!confirm('EMERGENCY STOP\n\nPause ALL outbound email sending right now?\n\nAny run in progress stops before the next email (already-sent mail cannot be recalled). Queued emails stay pending until you resume.'))return;
+  apiPost(pause?'/admin/sending/pause':'/admin/sending/resume',{}).then(function(r){
+    STATE.sendingPaused=!!(r&&r.paused);
+    showToast(STATE.sendingPaused?'Sending PAUSED — all outbound email stopped':'Sending resumed','success');
+    render();
+  }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');});
+};
+window.toggleManagerSending=function(managerId,pause){
+  var m=(STATE.users||[]).find(function(x){return x.id===managerId;})||{name:'this manager'};
+  if(pause&&!confirm('Stop all outbound emailing for '+m.name+'?\n\nAny send in progress for them stops before the next email; their queued emails stay pending until you resume. Other managers are unaffected.'))return;
+  apiPost(pause?'/admin/sending/pause':'/admin/sending/resume',{manager_id:managerId}).then(function(){
+    STATE.pausedManagers=STATE.pausedManagers||[];
+    var i=STATE.pausedManagers.indexOf(managerId);
+    if(pause&&i<0)STATE.pausedManagers.push(managerId);
+    if(!pause&&i>-1)STATE.pausedManagers.splice(i,1);
+    showToast(pause?('Emailing paused for '+m.name):('Emailing resumed for '+m.name),'success');
+    render();
+  }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');});
+};
+
 function renderAdmin(){
   var u=STATE.user;
+  if(STATE.sendingPaused===undefined){loadSendingStatus();}
   var selectedUserId=STATE.adminSelectedUser||null;
   if(selectedUserId){return renderAdminUserDetail(selectedUserId);}
 
@@ -2115,6 +2147,19 @@ function renderAdmin(){
     'Email Engine Schedule'+
   '</button>';
 
+  var paused=STATE.sendingPaused;
+  var stopCard='<div style="background:'+(paused?'#fef2f2':'var(--card)')+';border:1px solid '+(paused?'#fca5a5':'var(--border)')+';border-radius:var(--r2);padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">'+
+    '<div style="flex:1;min-width:200px">'+
+      '<div style="font-weight:700;font-size:14px;color:'+(paused?'#b91c1c':'var(--text)')+';display:flex;align-items:center;gap:8px">'+
+        '<span style="width:9px;height:9px;border-radius:50%;background:'+(paused?'#dc2626':'var(--green)')+';display:inline-block"></span>'+
+        'Email sending: '+(paused?'PAUSED':'Active')+'</div>'+
+      '<div style="font-size:12px;color:var(--text3);margin-top:3px">'+(paused?'All outbound email is stopped. Queued emails stay pending until you resume.':'Emergency stop halts all outbound email immediately. Already-sent emails cannot be recalled.')+'</div>'+
+    '</div>'+
+    (paused
+      ?'<button onclick="toggleSending(false)" style="padding:9px 18px;background:var(--green);color:#fff;border:0;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">Resume sending</button>'
+      :'<button onclick="toggleSending(true)" style="padding:9px 18px;background:#dc2626;color:#fff;border:0;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">⏸ Emergency stop</button>')+
+  '</div>';
+
   return '<div class="page">'+
     '<div class="ph"><div class="flex jb aic">'+
       '<div><div class="ptitle">Admin</div><div class="psub">'+allUsers.length+' users · Fute Global LLC</div></div>'+
@@ -2123,6 +2168,7 @@ function renderAdmin(){
         '<button class="btn btn-primary btn-sm" onclick="openAddUser()">'+ico('plus',13)+'Add user</button>'+
       '</div>'+
     '</div></div>'+
+    stopCard+
     '<div style="margin-bottom:14px">'+
       '<input class="inp" placeholder="Search by name, email, employee ID…" value="'+htmlEsc(STATE.adminSearch||'')+'" oninput="STATE.adminSearch=this.value;render()" style="max-width:360px">'+
     '</div>'+
@@ -6943,6 +6989,7 @@ window.toggleEmailAccount=function(id,active){
 // ════════════════════════════════════════════════
 function renderAssignLeads(){
   var u=STATE.user;
+  if(STATE.pausedManagers===undefined){loadSendingStatus();}
   // Use API pool stats if loaded, otherwise count from STATE.jobs directly
   var poolStats=STATE.distributePoolStats||{total:0,by_industry:{},by_timezone:{},duplicates:0};
   if(!STATE.distributePoolStats){
@@ -6953,14 +7000,22 @@ function renderAssignLeads(){
   var managers=STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead';});
 
   // Show manager cards
+  var pausedMgrs=STATE.pausedManagers||[];
   var managerCards=managers.map(function(m){
     var emailAccounts=(STATE.userEmailsCache[m.id]||[]).filter(function(a){return a.is_active;});
     var capacity=emailAccounts.reduce(function(s,a){return s+(a.daily_send_limit||300);},0);
     var hasCapacity=emailAccounts.length>0;
-    return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:16px;display:flex;align-items:center;gap:14px;margin-bottom:12px">'+
+    var mPaused=pausedMgrs.indexOf(m.id)>-1;
+    var assignBtn=(hasCapacity&&poolStats.total>0?
+        '<button onclick="openAssignToManager(\''+m.id+'\')" style="background:var(--accent);color:#fff;border:0;padding:10px 20px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap">Assign leads</button>':
+        '<span style="font-size:12px;color:var(--text3);padding:8px 12px">'+(!hasCapacity?'No email IDs':'No leads')+'</span>');
+    var pauseCtl=mPaused
+      ?'<button onclick="toggleManagerSending(\''+m.id+'\',false)" style="background:var(--green);color:#fff;border:0;padding:8px 14px;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap">Resume emailing</button>'
+      :'<button onclick="toggleManagerSending(\''+m.id+'\',true)" style="background:transparent;color:#dc2626;border:1px solid #fca5a5;padding:8px 14px;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap">\u23f8 Stop emailing</button>';
+    return '<div style="background:'+(mPaused?'#fef2f2':'var(--card)')+';border:1px solid '+(mPaused?'#fca5a5':'var(--border)')+';border-radius:var(--r2);padding:16px;display:flex;align-items:center;gap:14px;margin-bottom:12px">'+
       av(m,'40')+
       '<div style="flex:1;min-width:0">'+
-        '<div style="font-weight:600;font-size:14px">'+htmlEsc(m.name)+'</div>'+
+        '<div style="font-weight:600;font-size:14px">'+htmlEsc(m.name)+(mPaused?' <span style="font-size:11px;padding:2px 8px;background:#fee2e2;color:#b91c1c;border-radius:6px;font-weight:700;vertical-align:middle">Emailing paused</span>':'')+'</div>'+
         '<div style="font-size:12px;color:var(--text3);margin-top:3px">'+
           emailAccounts.length+' email ID'+(emailAccounts.length!==1?'s':'')+
           ' \u00b7 '+capacity+' emails/day capacity'+
@@ -6973,9 +7028,7 @@ function renderAssignLeads(){
           '</div>':
           '<div style="font-size:12px;color:var(--red);margin-top:4px">No email IDs assigned</div>')+
       '</div>'+
-      (hasCapacity&&poolStats.total>0?
-        '<button onclick="openAssignToManager(\''+m.id+'\')" style="background:var(--accent);color:#fff;border:0;padding:10px 20px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap">Assign leads</button>':
-        '<span style="font-size:12px;color:var(--text3);padding:8px 12px">'+(!hasCapacity?'No email IDs':'No leads')+'</span>')+
+      '<div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">'+assignBtn+pauseCtl+'</div>'+
     '</div>';
   }).join('');
 
