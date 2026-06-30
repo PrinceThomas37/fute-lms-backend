@@ -39,6 +39,7 @@ const {
 } = require('./email-validation');
 const { EVENTS, emit } = require('./events');
 const registerSubscribers = require('./subscribers');
+const { scoreEmailContent, deliverabilityFlags, isOptOutReply } = require('./deliverability');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -348,6 +349,50 @@ async function setManagerPaused(managerId, paused, actorUserId) {
     await supabase.from('app_settings').upsert({ key: 'sending_paused_managers', value: JSON.stringify([...pausedManagers]), updated_at: new Date() }, { onConflict: 'key' });
   } catch (e) { console.error('[EmergencyStop] persist managers failed:', e.message); }
   emit(paused ? EVENTS.SENDING_PAUSED : EVENTS.SENDING_RESUMED, { scope: 'manager', managerId, actorUserId: actorUserId || null });
+}
+
+// ── Deliverability: suppression list, warm-up ramp, mailbox auto-pause ───────
+// All best-effort and additive: a missing table/column resolves to "off", so
+// none of this changes behaviour until migration 006 is applied and data flows.
+async function loadSuppressedSet(emails) {
+  const set = new Set();
+  if (!emails || !emails.length) return set;
+  try {
+    const { data } = await supabase.from('suppression_list').select('email').in('email', emails);
+    (data || []).forEach(r => set.add(String(r.email).toLowerCase()));
+  } catch (_) {}
+  return set;
+}
+async function addToSuppression(email, reason, source, createdBy, note) {
+  if (!email) return;
+  await supabase.from('suppression_list')
+    .insert({ email: String(email).toLowerCase(), reason: reason || 'manual', source: source || 'admin', created_by: createdBy || null, note: note || null });
+  // A duplicate (already suppressed) or absent table returns an error we ignore.
+}
+async function loadMailboxDelivState(ids) {
+  const map = {};
+  if (!ids || !ids.length) return map;
+  try {
+    const { data } = await supabase.from('user_emails').select('id,warmup_start_date,auto_paused_at').in('id', ids);
+    (data || []).forEach(r => { map[r.id] = r; });
+  } catch (_) {}
+  return map;
+}
+// Warm-up: effective daily cap ramps from a small number; null = no ramp.
+const WARMUP_START = 20, WARMUP_STEP = 5;
+function warmupLimit(mailboxRow) {
+  if (!mailboxRow || !mailboxRow.warmup_start_date) return null;
+  const start = new Date(mailboxRow.warmup_start_date);
+  if (isNaN(start.getTime())) return null;
+  const days = Math.max(0, Math.floor((Date.now() - start.getTime()) / 86400000));
+  return WARMUP_START + WARMUP_STEP * days;
+}
+async function setMailboxAutoPaused(userEmailId, paused, reason) {
+  try { await supabase.from('user_emails').update({ auto_paused_at: paused ? new Date() : null }).eq('id', userEmailId); } catch (_) {}
+  if (paused) {
+    console.log(`[Deliverability] Mailbox ${userEmailId} AUTO-PAUSED: ${reason}`);
+    emit(EVENTS.MAILBOX_AUTOPAUSED, { userEmailId, reason });
+  }
 }
 
 async function logActivity(job_id, contact_id, user_id, action_type, description, old_value, new_value) {
@@ -1888,7 +1933,7 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
   const { autoSend = false } = opts;
   const sendWindow = await getSendWindowHours();
   const totalCount = pendingEmails.length;
-  let sent = 0, failed = 0, skippedWindow = 0, skippedQuota = 0, skippedDomain = 0, skippedContactStatus = 0, skippedThread = 0, skippedInactive = 0;
+  let sent = 0, failed = 0, skippedWindow = 0, skippedQuota = 0, skippedDomain = 0, skippedContactStatus = 0, skippedThread = 0, skippedInactive = 0, skippedSuppressed = 0;
   const failDetails = [], sentContactIds = [], sentJobIds = [];
   const startedAt = new Date().toISOString();
 
@@ -1902,10 +1947,15 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
     (statusContacts || []).forEach(c => { contactStatusById[c.id] = c; });
   }
 
+  // Opt-out / suppression set + per-mailbox warm-up/auto-pause state. Both are
+  // best-effort: absent table/columns => empty => no behaviour change.
+  const suppressed = await loadSuppressedSet([...new Set(pendingEmails.map(e => (e.to_email || '').toLowerCase()).filter(Boolean))]);
+
   const mailboxIds = [...new Set(pendingEmails.map(e => e.job?.sending_email_id).filter(Boolean))];
-  const [mailboxSignatures, quotaState] = await Promise.all([
+  const [mailboxSignatures, quotaState, mailboxDeliv] = await Promise.all([
     loadMailboxSignatures(mailboxIds, userId),
-    loadMailboxQuotaState(mailboxIds)
+    loadMailboxQuotaState(mailboxIds),
+    loadMailboxDelivState(mailboxIds)
   ]);
   const { limits, sentToday, delays, settings } = quotaState;
   const lastSendAtByMailbox = {};
@@ -1946,6 +1996,20 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
       continue;
     }
 
+    if (userEmailId && mailboxDeliv[userEmailId] && mailboxDeliv[userEmailId].auto_paused_at) {
+      skippedInactive++;
+      await setSendProgress(userId, { ...progressBase, current: `${email.to_email} (mailbox auto-paused: high bounce rate)` });
+      continue;
+    }
+
+    if (suppressed.has((email.to_email || '').toLowerCase())) {
+      skippedSuppressed++;
+      failDetails.push({ id: email.id, job_id: email.job_id, contact_id: email.contact_id, to: email.to_email, from: sendingEmail?.email_address || email.from_email || '—', error: 'Recipient is on the opt-out / suppression list — not sent' });
+      try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch (_) {}
+      await setSendProgress(userId, { ...progressBase, current: `${email.to_email} (suppressed — opted out)` });
+      continue;
+    }
+
     if (!isInLeadSendWindow(leadTz, new Date(), sendWindow)) {
       skippedWindow++;
       await setSendProgress(userId, { ...progressBase, current: `${email.to_email} (waiting ${leadTz} send window)` });
@@ -1963,7 +2027,9 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
       continue;
     }
 
-    const limit = limits[userEmailId] || sendingEmail?.daily_send_limit || settings.defaultDailyLimit;
+    const baseLimit = limits[userEmailId] || sendingEmail?.daily_send_limit || settings.defaultDailyLimit;
+    const wl = warmupLimit(mailboxDeliv[userEmailId]);
+    const limit = wl != null ? Math.min(baseLimit, wl) : baseLimit;
     if ((sentToday[userEmailId] || 0) >= limit) {
       skippedQuota++;
       await setSendProgress(userId, { ...progressBase, current: `${email.to_email} (mailbox daily limit ${limit} reached)` });
@@ -2063,7 +2129,7 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
     }
   }
 
-  return { sent, failed, skippedWindow, skippedQuota, skippedDomain, skippedContactStatus, skippedThread, skippedInactive, failDetails, sentContactIds, sentJobIds, totalCount, sendWindow };
+  return { sent, failed, skippedWindow, skippedQuota, skippedDomain, skippedContactStatus, skippedThread, skippedInactive, skippedSuppressed, failDetails, sentContactIds, sentJobIds, totalCount, sendWindow };
 }
 
 async function retryDeferredPendingSends() {
@@ -2686,6 +2752,24 @@ function extractBounceRecipients(text, ownAddresses) {
   return [...out];
 }
 
+// If a mailbox's bounces-today / sent-today exceeds the threshold (with a
+// minimum sample), auto-pause it to protect domain reputation. Counts live in
+// app_settings so this needs no schema change; the pause uses
+// user_emails.auto_paused_at (a no-op until migration 006 is applied).
+const BOUNCE_RATE_THRESHOLD = 0.05, BOUNCE_MIN_SAMPLE = 20;
+async function maybeAutoPauseMailboxOnBounces(userEmailId, newBounces) {
+  if (!userEmailId || !newBounces) return;
+  const bkey = `bounce_count_${userEmailId}_${today()}`;
+  const { data: bRow } = await supabase.from('app_settings').select('value').eq('key', bkey).maybeSingle();
+  const bouncesToday = (parseInt(bRow?.value, 10) || 0) + newBounces;
+  await supabase.from('app_settings').upsert({ key: bkey, value: String(bouncesToday), updated_at: new Date() }, { onConflict: 'key' });
+  const { data: sRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', userEmailId).eq('send_date', today()).maybeSingle();
+  const sentToday = sRow?.emails_sent || 0;
+  if (sentToday >= BOUNCE_MIN_SAMPLE && bouncesToday / sentToday > BOUNCE_RATE_THRESHOLD) {
+    await setMailboxAutoPaused(userEmailId, true, `bounce rate ${(bouncesToday / sentToday * 100).toFixed(1)}% (${bouncesToday}/${sentToday} today)`);
+  }
+}
+
 async function sweepMailboxBounces(tokenRow, ownAddresses) {
   let accessToken;
   try { accessToken = await getMicrosoftToken(tokenRow.user_email_id); }
@@ -2724,6 +2808,10 @@ async function sweepMailboxBounces(tokenRow, ownAddresses) {
     }
   }
   await supabase.from('app_settings').upsert({ key: sinceKey, value: newest, updated_at: new Date() }, { onConflict: 'key' });
+
+  // Auto-pause this mailbox if its recent bounce rate is too high.
+  try { await maybeAutoPauseMailboxOnBounces(tokenRow.user_email_id, marked); } catch (_) {}
+
   return marked;
 }
 
@@ -2744,12 +2832,191 @@ async function runBounceSweep() {
   } catch (e) { console.error('[BounceSweep] error:', e.message); return 0; }
 }
 
+// ══════════════════════════════════════════════════════════════
+// REPLY DETECTION
+// A genuine inbound reply from a prospect STOPS the sequence (the biggest
+// reply-rate leak in cold outreach is following up on people who already
+// replied). Reuses the same Graph inbox machinery as the bounce sweep.
+// Best-effort: if the reply columns aren't present yet the contact select
+// returns nothing, so this safely no-ops until migration 006 is applied.
+// ══════════════════════════════════════════════════════════════
+async function sweepMailboxReplies(tokenRow, ownAddresses) {
+  let accessToken;
+  try { accessToken = await getMicrosoftToken(tokenRow.user_email_id); }
+  catch (e) { console.error(`[ReplySweep] token for ${tokenRow.email_address}: ${e.message}`); return 0; }
+
+  const sinceKey = `reply_sweep_since_${tokenRow.user_email_id}`;
+  const { data: sinceRow } = await supabase.from('app_settings').select('value').eq('key', sinceKey).maybeSingle();
+  const since = sinceRow?.value || new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+
+  const filter = encodeURIComponent(`receivedDateTime ge ${since}`);
+  const path = `/me/mailFolders/Inbox/messages?$top=50&$orderby=receivedDateTime desc`
+    + `&$select=id,subject,from,bodyPreview,body,receivedDateTime&$filter=${filter}`;
+  let data;
+  try { data = await graphMailRequest(accessToken, path); }
+  catch (e) { console.error(`[ReplySweep] list for ${tokenRow.email_address}: ${e.message}`); return 0; }
+
+  const messages = data.value || [];
+  let detected = 0, newest = since;
+  for (const msg of messages) {
+    if (msg.receivedDateTime && msg.receivedDateTime > newest) newest = msg.receivedDateTime;
+    if (isNdrMessage(msg)) continue; // bounces are the bounce sweep's job
+    const from = (msg.from?.emailAddress?.address || '').toLowerCase();
+    if (!from || ownAddresses.has(from)) continue; // ignore internal / our own mail
+    const { data: matches } = await supabase.from('contacts')
+      .select('id,job_id,replied_at,email').ilike('email', from).limit(10);
+    for (const c of (matches || [])) {
+      if (c.replied_at) continue; // already recorded
+      const snippet = (msg.bodyPreview || '').slice(0, 280);
+      try { await supabase.from('contacts').update({ replied_at: new Date(), reply_snippet: snippet }).eq('id', c.id); } catch (_) {}
+      // Stop the sequence: move the lead off "Assigned" and cancel active follow-ups.
+      try { await supabase.from('jobs').update({ stage: 'Connected' }).eq('id', c.job_id).eq('stage', 'Assigned'); } catch (_) {}
+      await skipActiveFollowUpsForContact(c.id);
+      await logActivity(c.job_id, c.id, null, 'reply_received', `Reply received from ${from} — follow-ups stopped`, null, { source: 'inbox', mailbox: tokenRow.email_address });
+      emit(EVENTS.CONTACT_REPLIED, { contactId: c.id, jobId: c.job_id, from, mailbox: tokenRow.email_address });
+      if (isOptOutReply(snippet) || isOptOutReply(msg.body?.content || '')) {
+        await addToSuppression(from, 'unsubscribe', 'reply', null);
+        emit(EVENTS.CONTACT_UNSUBSCRIBED, { contactId: c.id, jobId: c.job_id, email: from });
+      }
+      detected++;
+    }
+  }
+  await supabase.from('app_settings').upsert({ key: sinceKey, value: newest, updated_at: new Date() }, { onConflict: 'key' });
+  return detected;
+}
+
+async function runReplySweep() {
+  try {
+    const { data: tokens } = await supabase.from('microsoft_tokens').select('user_email_id,email_address');
+    if (!tokens || !tokens.length) return 0;
+    const { data: ue } = await supabase.from('user_emails').select('email_address');
+    const ownAddresses = new Set((ue || []).map(u => (u.email_address || '').toLowerCase()).filter(Boolean));
+    tokens.forEach(t => { if (t.email_address) ownAddresses.add(t.email_address.toLowerCase()); });
+    let total = 0;
+    for (const t of tokens) {
+      try { total += await sweepMailboxReplies(t, ownAddresses); }
+      catch (e) { console.error(`[ReplySweep] ${t.email_address}: ${e.message}`); }
+    }
+    if (total) console.log(`[ReplySweep] detected ${total} repl(ies) — sequences stopped`);
+    return total;
+  } catch (e) { console.error('[ReplySweep] error:', e.message); return 0; }
+}
+
 // Manual trigger (admin) — useful for verifying the loop without waiting for cron.
 app.post('/admin/bounce-sweep', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin', 'bd_lead')) return res.status(403).json({ error: 'Admin only' });
     const marked = await runBounceSweep();
     res.json({ success: true, marked });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Manual reply-sweep trigger (admin).
+app.post('/admin/reply-sweep', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'bd_lead')) return res.status(403).json({ error: 'Admin only' });
+    const detected = await runReplySweep();
+    res.json({ success: true, detected });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Suppression list (opt-outs / never-mail) ────────────────────────────────
+app.get('/suppression', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Forbidden' });
+    const q = (req.query.q || '').toLowerCase().trim();
+    let query = supabase.from('suppression_list').select('id,email,reason,source,note,created_at').order('created_at', { ascending: false }).limit(500);
+    if (q) query = query.ilike('email', `%${q}%`);
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.post('/suppression', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Forbidden' });
+    const { email, note } = req.body || {};
+    if (!email || !emailSyntaxValid(email)) return res.status(400).json({ error: 'Valid email required' });
+    await addToSuppression(email, 'manual', 'admin', req.user.id, note || null);
+    res.status(201).json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.delete('/suppression/:id', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Forbidden' });
+    await supabase.from('suppression_list').delete().eq('id', req.params.id);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Spam-content pre-check (non-blocking) ───────────────────────────────────
+app.post('/emails/spam-check', auth, (req, res) => {
+  const { subject, body } = req.body || {};
+  res.json(scoreEmailContent(subject || '', body || ''));
+});
+
+// ── Reply rate per template variant (closes the A/B loop) ───────────────────
+app.get('/analytics/templates', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Forbidden' });
+    const { data: sent } = await supabase.from('emails').select('template_variant,contact_id,status').eq('status', 'sent');
+    const byVar = {};
+    const contactIds = new Set();
+    (sent || []).forEach(e => {
+      const v = e.template_variant || 'default';
+      byVar[v] = byVar[v] || { variant: v, sent: 0, contacts: new Set() };
+      byVar[v].sent++;
+      if (e.contact_id) { byVar[v].contacts.add(e.contact_id); contactIds.add(e.contact_id); }
+    });
+    let repliedSet = new Set();
+    if (contactIds.size) {
+      try {
+        const { data: replied } = await supabase.from('contacts').select('id').in('id', [...contactIds]).not('replied_at', 'is', null);
+        repliedSet = new Set((replied || []).map(r => r.id));
+      } catch (_) {}
+    }
+    const rows = Object.values(byVar).map(r => {
+      const repliedContacts = [...r.contacts].filter(id => repliedSet.has(id)).length;
+      return { variant: r.variant, sent: r.sent, replied: repliedContacts, reply_rate: r.sent ? Math.round(repliedContacts / r.sent * 1000) / 10 : 0 };
+    }).sort((a, b) => b.reply_rate - a.reply_rate);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Deliverability health overview ──────────────────────────────────────────
+app.get('/admin/deliverability', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Forbidden' });
+    const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+    const { data: emails } = await supabase.from('emails').select('status,created_at').gte('created_at', since);
+    const all = emails || [];
+    const sent = all.filter(e => e.status === 'sent').length;
+    const failed = all.filter(e => e.status === 'failed').length;
+    let bounced = 0, replied = 0, suppression = 0;
+    try { const { count } = await supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('email_status', 'invalid'); bounced = count || 0; } catch (_) {}
+    try { const { count } = await supabase.from('contacts').select('id', { count: 'exact', head: true }).not('replied_at', 'is', null); replied = count || 0; } catch (_) {}
+    try { const { count } = await supabase.from('suppression_list').select('id', { count: 'exact', head: true }); suppression = count || 0; } catch (_) {}
+    const { data: mailboxes } = await supabase.from('user_emails').select('id,email_address,display_name,is_active,daily_send_limit').eq('is_active', true);
+    const delivCols = {};
+    try { const { data } = await supabase.from('user_emails').select('id,warmup_start_date,auto_paused_at'); (data || []).forEach(r => { delivCols[r.id] = r; }); } catch (_) {}
+    const mailboxHealth = (mailboxes || []).map(m => {
+      const dc = delivCols[m.id] || {};
+      return {
+        id: m.id, email: m.email_address, name: m.display_name, daily_limit: m.daily_send_limit,
+        auto_paused: !!dc.auto_paused_at,
+        warmup: dc.warmup_start_date ? { since: dc.warmup_start_date, today_cap: warmupLimit(dc) } : null
+      };
+    });
+    res.json({ window_days: 30, sent, failed, bounced_contacts: bounced, replied_contacts: replied, suppression_count: suppression, mailboxes: mailboxHealth });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Clear a mailbox's auto-pause (admin/lead).
+app.post('/admin/mailbox/:id/resume', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'bd_lead')) return res.status(403).json({ error: 'Forbidden' });
+    await setMailboxAutoPaused(req.params.id, false, 'manual resume');
+    res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2795,6 +3062,11 @@ app.post('/admin/sending/resume', auth, async (req, res) => {
 // Sweep bounces every 30 minutes, with a first pass shortly after boot.
 setInterval(() => { runBounceSweep(); }, 30 * 60 * 1000);
 setTimeout(() => { runBounceSweep(); }, 5 * 60 * 1000);
+
+// Detect prospect replies (and opt-outs) and stop their sequences, on the same
+// cadence as the bounce sweep, offset so the two don't hit Graph together.
+setInterval(() => { runReplySweep(); }, 30 * 60 * 1000);
+setTimeout(() => { runReplySweep(); }, 6 * 60 * 1000);
 
 // Retry pending emails when leads enter their local send window (every 20 minutes)
 setInterval(() => { retryDeferredPendingSends(); }, 20 * 60 * 1000);

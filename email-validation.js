@@ -16,6 +16,7 @@
 //    when DNS authoritatively says the domain cannot receive mail.
 // ═══════════════════════════════════════════════════════════════
 const dns = require('dns').promises;
+const { isDisposableDomain } = require('./deliverability');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MX_TTL_MS = 6 * 60 * 60 * 1000; // 6h cache per domain
@@ -72,6 +73,7 @@ async function hasAddressRecord(domain) {
 async function classifyEmailDeliverability(email) {
   if (!email) return 'valid';
   if (!emailSyntaxValid(email)) return 'invalid';
+  if (isDisposableDomain(emailDomain(email))) return 'invalid';
   const ok = await domainHasMx(emailDomain(email));
   return ok ? 'valid' : 'invalid';
 }
@@ -89,6 +91,7 @@ async function annotateContactEmailStatus(rows) {
   for (const r of rows) {
     if (!r || !r.email) continue;
     if (!emailSyntaxValid(r.email)) { r.email_status = 'invalid'; continue; }
+    if (isDisposableDomain(emailDomain(r.email))) { r.email_status = 'invalid'; continue; }
     const ok = await domainHasMx(emailDomain(r.email));
     if (!ok) r.email_status = 'invalid';
   }
