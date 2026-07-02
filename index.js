@@ -476,6 +476,15 @@ app.use(function(req, res, next) {
   }
   next();
 });
+// Any successful write may change jobs/contacts, so drop the /jobs cache — this
+// is what keeps the cache invisible to users (their own edits show up on the
+// very next poll). Internal mutations (send loop, sweeps) are covered by the TTL.
+app.use(function(req, res, next) {
+  if (['POST','PUT','PATCH','DELETE'].includes(req.method)) {
+    res.on('finish', () => { if (res.statusCode < 400) invalidateJobsCache(); });
+  }
+  next();
+});
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.get('/health', (req, res) => res.json({ ok: true }));
 app.get('/api/version', (req, res) => res.json({
@@ -599,20 +608,39 @@ app.delete('/companies/:id', auth, async (req, res) => {
 // ══════════════════════════════════════════════════════════════
 const JOB_SELECT = `*, research, company:companies(id,name,website,industry,location), contacts(id,job_id,first_name,last_name,designation,email,phone,linkedin,is_primary,email_status,ooo_until,email_sent_at,email_platform), creator:users!created_by(id,name,employee_id), assignee:users!assigned_to(id,name,employee_id), bd_assignee:users!assigned_to_bd(id,name,employee_id), sending_email:user_emails!sending_email_id(id,email_address,display_name)`;
 
+// The jobs list is by far the largest recurring payload (all jobs + nested
+// contacts, polled by every open tab), so it dominated Supabase egress. Cache
+// the full list in memory for a short TTL and serve role-filtered slices from
+// it — Supabase is hit at most once per TTL no matter how many tabs are open.
+// Any successful write invalidates the cache (middleware above), so users
+// always see their own changes immediately.
+let jobsCache = null, jobsCacheAt = 0;
+const JOBS_CACHE_TTL_MS = 60 * 1000;
+function invalidateJobsCache() { jobsCache = null; jobsCacheAt = 0; }
+
+async function loadAllJobs() {
+  if (jobsCache && (Date.now() - jobsCacheAt) < JOBS_CACHE_TTL_MS) return jobsCache;
+  const { data, error } = await supabase.from('jobs').select(JOB_SELECT)
+    .is('deleted_at', null).order('created_at', { ascending: false });
+  if (error) throw error;
+  jobsCache = data || [];
+  jobsCacheAt = Date.now();
+  return jobsCache;
+}
+
 app.get('/jobs', auth, async (req, res) => {
   try {
-    let query = supabase.from('jobs').select(JOB_SELECT).is('deleted_at', null).order('created_at', { ascending: false });
+    const all = await loadAllJobs();
+    let data;
     if (hasRole(req, 'admin', 'ra_lead')) {
-      // see all
+      data = all;
     } else if (hasRole(req, 'bd_lead')) {
-      query = query.not('assigned_to_bd', 'is', null);
+      data = all.filter(j => j.assigned_to_bd != null);
     } else if (hasRole(req, 'bd')) {
-      query = query.eq('assigned_to_bd', req.user.id);
+      data = all.filter(j => j.assigned_to_bd === req.user.id);
     } else {
-      query = query.eq('created_by', req.user.id);
+      data = all.filter(j => j.created_by === req.user.id);
     }
-    const { data, error } = await query;
-    if (error) throw error;
     res.json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1451,12 +1479,17 @@ app.post('/emails/send-selected', auth, async (req, res) => {
 
 app.get('/emails/send-progress', auth, async (req, res) => {
   try {
+    // Served from the in-memory mirror: this is the most frequently polled
+    // endpoint (every 2-10s per BD), so it must not hit the DB on every call.
+    // Fall back to the DB only until the mirror is warm after a restart.
+    const cached = sendProgressCache.get(req.user.id);
+    if (cached !== undefined) return res.json(cached || { active: false });
     const key = `send_progress_${req.user.id}`;
     const { data } = await supabase.from('app_settings').select('value').eq('key', key).single();
-    if (!data) return res.json({ active: false });
-    const progress = JSON.parse(data.value);
-    res.json(progress);
-  } catch { res.json({ active: false }); }
+    const progress = data ? JSON.parse(data.value) : null;
+    sendProgressCache.set(req.user.id, progress);
+    res.json(progress || { active: false });
+  } catch { sendProgressCache.set(req.user.id, null); res.json({ active: false }); }
 });
 
 app.post('/emails/queue-all', auth, async (req, res) => {
@@ -2709,7 +2742,9 @@ setInterval(async () => {
     const now = toIST(new Date());
     const hhmm = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
     const dateStr = now.toISOString().split('T')[0];
-    const { data: settingsRows } = await supabase.from('app_settings').select('key,value');
+    // This runs every minute — fetch only the two keys it needs, not the whole table.
+    const { data: settingsRows } = await supabase.from('app_settings').select('key,value')
+      .in('key', ['last_followup_run', 'followup_send_time']);
     const settings = {};
     (settingsRows || []).forEach(r => { settings[r.key] = r.value; });
     const lastRun = settings['last_followup_run'];
@@ -3180,12 +3215,19 @@ function randomDelay(minSec = 1, maxSec = 120) {
 }
 
 // Send progress tracking — stored in app_settings keyed per user
+// In-memory mirror of send progress, keyed by user id. The DB row stays the
+// source of truth across restarts; the mirror exists so the high-frequency
+// GET /emails/send-progress poll never touches the DB. undefined = not yet
+// loaded (cold after restart), null = known-empty.
+const sendProgressCache = new Map();
 async function setSendProgress(userId, data) {
   const key = `send_progress_${userId}`;
+  sendProgressCache.set(userId, data);
   try { await supabase.from('app_settings').upsert({ key, value: JSON.stringify(data) }, { onConflict: 'key' }); } catch(_) {}
 }
 async function clearSendProgress(userId) {
   const key = `send_progress_${userId}`;
+  sendProgressCache.set(userId, null);
   try { await supabase.from('app_settings').delete().eq('key', key); } catch(_) {}
 }
 
