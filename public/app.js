@@ -2993,6 +2993,10 @@ function startProgressPoll(){
   var _emailRefreshCount=0;
   function pollOnce(){
     if(!STATE.user||!STATE.token||STATE.token==='guest'){STATE._progressPollTimer=null;return;}
+    // Hidden tab with no send in flight: skip the request, check again later.
+    if(document.hidden&&!(STATE.sendProgress&&STATE.sendProgress.active)){
+      STATE._progressPollTimer=setTimeout(pollOnce,30000);return;
+    }
     apiGet('/emails/send-progress').then(function(d){
       var newProgress=(d&&(d.active||d.done))?d:null;
       // A new active run clears any prior dismissal so fresh results show.
@@ -3013,7 +3017,7 @@ function startProgressPoll(){
         // Auto-dismiss only clean runs; keep failures up until the user reviews/dismisses them.
         if(!d.failed){setTimeout(function(){STATE.sendProgress=null;scheduleRender();},30000);}
       }
-      var delay=(d&&d.active)?2000:10000;
+      var delay=(d&&d.active)?2000:30000; // idle polling slowed — sends surface within 2s once active anyway
       STATE._progressPollTimer=setTimeout(pollOnce,delay);
     }).catch(function(){
       STATE._progressPollTimer=setTimeout(pollOnce,30000);
@@ -7416,6 +7420,7 @@ function startBackgroundPoll(){
   if(_bgPollTimer)return;
   _bgPollTimer=setInterval(function(){
     if(!STATE.user||!STATE.token)return;
+    if(document.hidden)return; // no point refreshing a tab nobody is looking at
     var pg=STATE.page;
     // Always refresh jobs (stage changes, new leads, assignments)
     apiGet('/jobs').then(function(raw){
@@ -7434,7 +7439,7 @@ function startBackgroundPoll(){
     if(pg==='reminders'||pg==='dashboard'){
       apiGet('/reminders').then(function(d){STATE.reminders=d||[];scheduleRender();}).catch(function(){});
     }
-  },30000);
+  },180000); // 3 min — this poll ships the full jobs list, so cadence is the main egress lever
 }
 function stopBackgroundPoll(){
   if(_bgPollTimer){clearInterval(_bgPollTimer);_bgPollTimer=null;}
