@@ -2994,7 +2994,7 @@ app.post('/emails/spam-check', auth, (req, res) => {
 
 // Human-readable label for a template_variant id, shown next to the raw id
 // in the reply-rate table so PDs/BDs see a real name instead of "v1".
-const VARIANT_LABELS = { v1: 'Style 1', v2: 'Style 2', v3: 'Style 3', v4: 'Style 4', v5: 'Style 5', default: 'Default template' };
+const VARIANT_LABELS = { v1: 'Two profiles', v2: 'Still open?', v3: 'Hard to fill', v4: 'Ultra short', v5: 'Right person?', v6: 'JD anchored', v7: 'Screen done', v8: 'One candidate', v9: 'No strings', v10: 'Open a while', v11: 'Your process', v12: 'Reply 1-2-3', v13: 'Candid', v14: 'Benchmark', v15: 'Save a week', v16: 'Yes or no', v17: 'Shortlist timing', v18: 'Minimal', v19: 'Off your plate', v20: 'Correct me', default: 'Default template' };
 
 // ── Reply rate per template variant (closes the A/B loop) ───────────────────
 app.get('/analytics/templates', auth, async (req, res) => {

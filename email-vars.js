@@ -3,197 +3,505 @@
  */
 
 const DEFAULT_TEMPLATES = {
-  o1_subject: 'Candidates for your {{pos}} role in {{loc}}',
+  o1_subject: '{{pos}} — 2 profiles',
   o1_body: `Hi {{fn}},
 
-I'm {{sender}} with Fute Global LLC. I came across your {{pos}} opening in {{loc}} and read through the requirements, and we have several people with {{job_resp}} experience on {{company_service}} work who look like a strong fit. They're open to direct hire and haven't been screened for your role yet.
+Saw the {{pos}} posting in {{loc}}. Two screened candidates on my desk have done {{job_resp}} on {{company_service}} work — both open to direct hire, neither submitted to you yet.
 
-Would you like to review their resumes?
-
-Looking forward to your thoughts.`,
-  fu1_subject: 'Re: Candidates for your {{pos}} role in {{loc}}',
+Want the resumes? If the role is already filled, tell me and I'll close this out.`,
+  fu1_subject: 'Re: {{pos}} — 2 profiles',
   fu1_body: `Hi {{fn}},
 
-Circling back on your {{pos}} role in {{loc}}. Those candidates with {{job_resp}} experience on {{company_service}} projects are still available.
-
-Want me to send their resumes over?
-
-Looking forward to your thoughts.`,
-  fu2_subject: 'Re: Candidates for your {{pos}} role in {{loc}}',
+Floating this back up — both candidates are still available for the {{pos}} role. A one-word reply works: 'send' or 'pass'.`,
+  fu2_subject: 'Re: {{pos}} — 2 profiles',
   fu2_body: `Hi {{fn}},
 
-I'll keep this short. Still holding a few screened-ready candidates with {{job_resp}} backgrounds for your {{pos}} opening in {{loc}} whenever the timing suits.
-
-Shall I share their resumes?
-
-Looking forward to your thoughts.`
+Closing this out for now. If {{pos}} reopens or you'd like the profiles later, just reply to this thread anytime.`
 };
 
 /**
- * Five matched outreach styles — each with O1, FU1, and FU2.
- * Keep in sync with OUTREACH_STYLE_PRESETS in public/index.html.
+ * Twenty matched outreach styles — each with O1, FU1, and FU2.
+ * Keep in sync with OUTREACH_STYLE_PRESETS in public/app.js.
  */
 const OUTREACH_VARIANTS = [
   {
     id: 'v1',
-    label: 'Introduction',
+    label: 'Two profiles',
     o1: {
-      subject: 'Candidates for your {{pos}} role in {{loc}}',
+      subject: '{{pos}} — 2 profiles',
       body: `Hi {{fn}},
 
-I'm {{sender}} with Fute Global LLC. I came across your {{pos}} opening in {{loc}} and read through the requirements, and we have several people with {{job_resp}} experience on {{company_service}} work who look like a strong fit. They're open to direct hire and haven't been screened for your role yet.
+Saw the {{pos}} posting in {{loc}}. Two screened candidates on my desk have done {{job_resp}} on {{company_service}} work — both open to direct hire, neither submitted to you yet.
 
-Would you like to review their resumes?
-
-Looking forward to your thoughts.`
+Want the resumes? If the role is already filled, tell me and I'll close this out.`
     },
     fu1: {
-      subject: 'Re: Candidates for your {{pos}} role in {{loc}}',
+      subject: 'Re: {{pos}} — 2 profiles',
       body: `Hi {{fn}},
 
-Circling back on your {{pos}} role in {{loc}}. Those candidates with {{job_resp}} experience on {{company_service}} projects are still available.
-
-Want me to send their resumes over?
-
-Looking forward to your thoughts.`
+Floating this back up — both candidates are still available for the {{pos}} role. A one-word reply works: 'send' or 'pass'.`
     },
     fu2: {
-      subject: 'Re: Candidates for your {{pos}} role in {{loc}}',
+      subject: 'Re: {{pos}} — 2 profiles',
       body: `Hi {{fn}},
 
-I'll keep this short. Still holding a few screened-ready candidates with {{job_resp}} backgrounds for your {{pos}} opening in {{loc}} whenever the timing suits.
-
-Shall I share their resumes?
-
-Looking forward to your thoughts.`
+Closing this out for now. If {{pos}} reopens or you'd like the profiles later, just reply to this thread anytime.`
     }
   },
   {
     id: 'v2',
-    label: 'Candidates first',
+    label: 'Still open?',
     o1: {
-      subject: '{{pos}} in {{loc}}: a few resumes worth a look',
+      subject: '{{pos}} — still open?',
       body: `Hi {{fn}},
 
-A few direct-hire candidates with strong {{job_resp}} experience on {{company_service}} projects just became available, and they line up well with your {{pos}} opening in {{loc}}.
+Is the {{pos}} role in {{loc}} still open? Before I send anything over, I'd rather check — I have a shortlist with {{job_resp}} experience from {{company_service}} work that reads like a match, but only if you're still looking.
 
-Should I send their resumes across?
-
-Happy to share whenever you're ready.`
+Happy to share or stand down, whichever helps.`
     },
     fu1: {
-      subject: 'Re: {{pos}} in {{loc}}: a few resumes worth a look',
+      subject: 'Re: {{pos}} — still open?',
       body: `Hi {{fn}},
 
-Quick nudge on this. The {{job_resp}} candidates I mentioned for your {{pos}} role in {{loc}} are still on the market.
-
-Should I pass along their resumes?
-
-Happy to share whenever you're ready.`
+Checking once more on the {{pos}} role — still hiring? If yes, the shortlist is ready to send.`
     },
     fu2: {
-      subject: 'Re: {{pos}} in {{loc}}: a few resumes worth a look',
+      subject: 'Re: {{pos}} — still open?',
       body: `Hi {{fn}},
 
-Last note from me on the {{pos}} opening in {{loc}}. Happy to forward those {{company_service}} candidates' resumes if it's useful.
-
-Happy to share whenever you're ready.`
+I'll assume the timing is off and step back. If the search picks up again, this thread will reach me.`
     }
   },
   {
     id: 'v3',
-    label: 'Question opener',
+    label: 'Hard to fill',
     o1: {
-      subject: 'A question about your {{pos}} opening in {{loc}}',
+      subject: 'the {{pos}} search',
       body: `Hi {{fn}},
 
-Is your {{pos}} role in {{loc}} still open? I ask because I'm {{sender}} at Fute Global LLC, and after reading the job description I have a shortlist of people with {{job_resp}} experience on {{company_service}} projects who fit it well. They're direct-hire ready and haven't been put in front of you yet.
+Roles like your {{pos}} opening in {{loc}} tend to sit longer than they should — the {{job_resp}} requirement narrows the pool fast. We happen to have a few people from {{company_service}} backgrounds who clear that bar and are open to direct hire.
 
-Open to a quick look at a couple of profiles?
-
-No rush at all. Just let me know.`
+Worth a look at their resumes?`
     },
     fu1: {
-      subject: 'Re: A question about your {{pos}} opening in {{loc}}',
+      subject: 'Re: the {{pos}} search',
       body: `Hi {{fn}},
 
-Following up in case my earlier note slipped by. I still have those {{job_resp}} candidates lined up for your {{pos}} role in {{loc}}.
-
-Worth a quick look at a couple of profiles?
-
-No rush at all. Just let me know.`
+Following up on the {{pos}} search — the candidates I mentioned are still available if the seat is still open.`
     },
     fu2: {
-      subject: 'Re: A question about your {{pos}} opening in {{loc}}',
+      subject: 'Re: the {{pos}} search',
       body: `Hi {{fn}},
 
-One final check-in on the {{pos}} role in {{loc}}. If it's still active, I'd be glad to share a couple of {{company_service}} profiles for your review.
-
-No rush at all. Just let me know.`
+Last note from me. If the {{pos}} role is still proving hard to fill, the resumes are yours for the asking — anytime.`
     }
   },
   {
     id: 'v4',
-    label: 'Concise',
+    label: 'Ultra short',
     o1: {
-      subject: '{{pos}} ({{loc}}): direct-hire candidates available',
+      subject: '{{pos}} ({{loc}})',
       body: `Hi {{fn}},
 
-Saw your {{pos}} opening in {{loc}}. We've got candidates with hands-on {{job_resp}} experience on {{company_service}} work, ready for direct hire and your screening, no obligation to proceed.
+Short version: screened candidates with {{job_resp}} experience, open to direct hire, ready for your {{pos}} role in {{loc}}.
 
-Want me to forward a few resumes?
-
-Appreciate you taking a look.`
+Send the resumes over?`
     },
     fu1: {
-      subject: 'Re: {{pos}} ({{loc}}): direct-hire candidates available',
+      subject: 'Re: {{pos}} ({{loc}})',
       body: `Hi {{fn}},
 
-Following up. The {{job_resp}} candidates for your {{pos}} role in {{loc}} are still available for review.
-
-Want me to forward a few resumes?
-
-Appreciate you taking a look.`
+Still have them if you want them — {{pos}}, {{loc}}. Yes or no works.`
     },
     fu2: {
-      subject: 'Re: {{pos}} ({{loc}}): direct-hire candidates available',
+      subject: 'Re: {{pos}} ({{loc}})',
       body: `Hi {{fn}},
 
-Final follow-up on {{pos}} in {{loc}}. Happy to forward those resumes whenever you'd like to take a look.
-
-Appreciate you taking a look.`
+Closing the loop on this one. Reply anytime if you'd like the resumes down the road.`
     }
   },
   {
     id: 'v5',
-    label: 'Direct value',
+    label: 'Right person?',
     o1: {
-      subject: 'Direct-hire talent for your {{pos}} need in {{loc}}',
+      subject: '{{pos}} — right person to ask?',
       body: `Hi {{fn}},
 
-I'm {{sender}}, and at Fute Global LLC we place direct-hire talent. Your {{pos}} opening in {{loc}} stood out, and we currently have candidates with solid {{job_resp}} experience on {{company_service}} projects who match what the role calls for, available for your screening at no cost or commitment.
+Are you the right person for the {{pos}} hiring in {{loc}}? I have a few screened, direct-hire candidates with {{job_resp}} experience from {{company_service}} work, and I'd rather send them to whoever owns the search.
 
-Is it worth sharing their resumes with you?
-
-I'll keep an eye out for your reply.`
+If that's you, happy to share. If not, could you point me the right way?`
     },
     fu1: {
-      subject: 'Re: Direct-hire talent for your {{pos}} need in {{loc}}',
+      subject: 'Re: {{pos}} — right person to ask?',
       body: `Hi {{fn}},
 
-Wanted to resurface this. The candidates with {{job_resp}} experience on {{company_service}} work are still available for your {{pos}} role in {{loc}}.
-
-Is it worth sharing their resumes?
-
-I'll keep an eye out for your reply.`
+Circling back — should the {{pos}} resumes come to you, or someone else on the team?`
     },
     fu2: {
-      subject: 'Re: Direct-hire talent for your {{pos}} need in {{loc}}',
+      subject: 'Re: {{pos}} — right person to ask?',
       body: `Hi {{fn}},
 
-I'll leave it here for now, but the {{job_resp}} candidates remain ready whenever your {{pos}} search in {{loc}} calls for them.
+I'll stop here. If the {{pos}} search lands on your desk later, just reply to this thread.`
+    }
+  },
+  {
+    id: 'v6',
+    label: 'JD anchored',
+    o1: {
+      subject: 'your {{pos}} requirements',
+      body: `Hi {{fn}},
 
-Glad to share resumes at any point.`
+I read the {{pos}} description closely — the {{job_resp}} piece is the part most applicants miss. The candidates I'd send have actually done that work in {{company_service}} settings, which is why I'm writing instead of just pushing them through a portal.
+
+Open to seeing two or three resumes?`
+    },
+    fu1: {
+      subject: 'Re: your {{pos}} requirements',
+      body: `Hi {{fn}},
+
+Following up — those {{job_resp}} profiles for the {{pos}} role are still with me. Want them?`
+    },
+    fu2: {
+      subject: 'Re: your {{pos}} requirements',
+      body: `Hi {{fn}},
+
+I'll leave this here. If the {{pos}} search is still live and you'd like the resumes, one reply is all it takes.`
+    }
+  },
+  {
+    id: 'v7',
+    label: 'Screen done',
+    o1: {
+      subject: '{{pos}} — first screen done',
+      body: `Hi {{fn}},
+
+The first-round screen is usually the slow part of a {{pos}} search. Ours is done: a few candidates with {{job_resp}} experience on {{company_service}} work, already vetted, open to direct hire in {{loc}}.
+
+Want to skip straight to reviewing resumes?`
+    },
+    fu1: {
+      subject: 'Re: {{pos}} — first screen done',
+      body: `Hi {{fn}},
+
+Quick follow-up — the pre-screened {{pos}} candidates are still available if useful.`
+    },
+    fu2: {
+      subject: 'Re: {{pos}} — first screen done',
+      body: `Hi {{fn}},
+
+Final nudge from me. The screened profiles stay available — reply whenever the {{pos}} search needs them.`
+    }
+  },
+  {
+    id: 'v8',
+    label: 'One candidate',
+    o1: {
+      subject: 'one person for {{pos}}',
+      body: `Hi {{fn}},
+
+One candidate specifically made me write: strong {{job_resp}} background from {{company_service}} work, open to direct hire, and a clean match for your {{pos}} role in {{loc}}. There are a couple of others too, but this one is worth your two minutes.
+
+Shall I send the resume?`
+    },
+    fu1: {
+      subject: 'Re: one person for {{pos}}',
+      body: `Hi {{fn}},
+
+That candidate for the {{pos}} role is still available — want the resume?`
+    },
+    fu2: {
+      subject: 'Re: one person for {{pos}}',
+      body: `Hi {{fn}},
+
+I'll close this out, but if you'd like that {{pos}} resume at any point, it's one reply away.`
+    }
+  },
+  {
+    id: 'v9',
+    label: 'No strings',
+    o1: {
+      subject: 'resumes for {{pos}} — no strings',
+      body: `Hi {{fn}},
+
+Simple offer on the {{pos}} role in {{loc}}: I send a few screened resumes with {{job_resp}} experience, you look them over, and a one-word 'pass' ends it if they don't fit. No pitch attached.
+
+Want them?`
+    },
+    fu1: {
+      subject: 'Re: resumes for {{pos}} — no strings',
+      body: `Hi {{fn}},
+
+Same offer as before on {{pos}} — resumes to review, nothing owed. Interested?`
+    },
+    fu2: {
+      subject: 'Re: resumes for {{pos}} — no strings',
+      body: `Hi {{fn}},
+
+Standing down on this one. The offer holds if the {{pos}} role ever needs it — just reply.`
+    }
+  },
+  {
+    id: 'v10',
+    label: 'Open a while',
+    o1: {
+      subject: 'how long has {{pos}} been open?',
+      body: `Hi {{fn}},
+
+If the {{pos}} role in {{loc}} has been open more than a few weeks, it's usually the {{job_resp}} requirement doing the filtering. That's the exact profile we screen for on {{company_service}} work — and a few of those people are available for direct hire now.
+
+Want the resumes while the search is still warm?`
+    },
+    fu1: {
+      subject: 'Re: how long has {{pos}} been open?',
+      body: `Hi {{fn}},
+
+Still holding those {{pos}} profiles — say the word and they're in your inbox.`
+    },
+    fu2: {
+      subject: 'Re: how long has {{pos}} been open?',
+      body: `Hi {{fn}},
+
+Closing this thread on my end. If {{pos}} is still unfilled next month, reply and I'll send what's current.`
+    }
+  },
+  {
+    id: 'v11',
+    label: 'Your process',
+    o1: {
+      subject: '{{pos}} — quick logistics question',
+      body: `Hi {{fn}},
+
+Before sending anything on the {{pos}} role in {{loc}}: how do you prefer outside resumes — straight to you, or through a portal or process? I have screened, direct-hire candidates with {{job_resp}} experience and I'd rather follow your process than clutter your inbox.
+
+Point me the right way?`
+    },
+    fu1: {
+      subject: 'Re: {{pos}} — quick logistics question',
+      body: `Hi {{fn}},
+
+Following up — happy to route the {{pos}} resumes however works best for you. Direct, or via your process?`
+    },
+    fu2: {
+      subject: 'Re: {{pos}} — quick logistics question',
+      body: `Hi {{fn}},
+
+I'll leave it with you. Whenever you want the {{pos}} profiles, reply here and I'll send them however you prefer.`
+    }
+  },
+  {
+    id: 'v12',
+    label: 'Reply 1-2-3',
+    o1: {
+      subject: '{{pos}} — three ways to reply',
+      body: `Hi {{fn}},
+
+A short stack of screened resumes is ready for your {{pos}} role in {{loc}} — {{job_resp}} experience, {{company_service}} backgrounds, open to direct hire.
+
+Reply '1' and I'll send them, '2' if I should check back later, '3' if the role is filled and I'll close this out.`
+    },
+    fu1: {
+      subject: 'Re: {{pos}} — three ways to reply',
+      body: `Hi {{fn}},
+
+Same three options on the {{pos}} resumes — 1 send now, 2 later, 3 close out. One character does it.`
+    },
+    fu2: {
+      subject: 'Re: {{pos}} — three ways to reply',
+      body: `Hi {{fn}},
+
+No number needed — I'll close this out myself. The resumes stay available if {{pos}} ever calls for them.`
+    }
+  },
+  {
+    id: 'v13',
+    label: 'Candid',
+    o1: {
+      subject: 'honest note on {{pos}}',
+      body: `Hi {{fn}},
+
+Candidly: this is a recruiter email, and you likely get plenty. The only reason this one is worth your ten seconds is that the candidates behind it have real {{job_resp}} experience from {{company_service}} work and are open to direct hire for your {{pos}} role in {{loc}}.
+
+If that's useful, say 'send'. If not, 'pass' and I'm gone.`
+    },
+    fu1: {
+      subject: 'Re: honest note on {{pos}}',
+      body: `Hi {{fn}},
+
+Same honest note, shorter: {{pos}} resumes, ready. Send or pass?`
+    },
+    fu2: {
+      subject: 'Re: honest note on {{pos}}',
+      body: `Hi {{fn}},
+
+Pass it is — closing out. If the {{pos}} search changes, this thread still works.`
+    }
+  },
+  {
+    id: 'v14',
+    label: 'Benchmark',
+    o1: {
+      subject: 'benchmark for your {{pos}} pipeline',
+      body: `Hi {{fn}},
+
+Even if your {{pos}} pipeline in {{loc}} is healthy, a couple of outside resumes make a useful benchmark — you'll know in two minutes whether your internal candidates stack up. Mine have {{job_resp}} experience from {{company_service}} work and are open to direct hire.
+
+Want them as a measuring stick?`
+    },
+    fu1: {
+      subject: 'Re: benchmark for your {{pos}} pipeline',
+      body: `Hi {{fn}},
+
+Offer stands — a couple of {{pos}} resumes as a benchmark, no obligation past a glance.`
+    },
+    fu2: {
+      subject: 'Re: benchmark for your {{pos}} pipeline',
+      body: `Hi {{fn}},
+
+Closing this out. If you ever want an outside read on the {{pos}} pool, reply here.`
+    }
+  },
+  {
+    id: 'v15',
+    label: 'Save a week',
+    o1: {
+      subject: '{{pos}} — save a sourcing week',
+      body: `Hi {{fn}},
+
+Sourcing for {{job_resp}} skills usually eats a week or two before the first decent resume shows up. Skip that part: I have screened candidates from {{company_service}} backgrounds ready for your {{pos}} role in {{loc}}, open to direct hire.
+
+Shall I send them today?`
+    },
+    fu1: {
+      subject: 'Re: {{pos}} — save a sourcing week',
+      body: `Hi {{fn}},
+
+The {{pos}} resumes are still ready to go same-day — want them?`
+    },
+    fu2: {
+      subject: 'Re: {{pos}} — save a sourcing week',
+      body: `Hi {{fn}},
+
+Wrapping this thread. Whenever the {{pos}} search needs a shortcut, one reply brings the resumes.`
+    }
+  },
+  {
+    id: 'v16',
+    label: 'Yes or no',
+    o1: {
+      subject: 'resumes — {{pos}}',
+      body: `Hi {{fn}},
+
+No preamble: {{pos}} role, {{loc}}, candidates with {{job_resp}} experience from {{company_service}} work, screened, open to direct hire.
+
+Do you want the resumes — yes or no?`
+    },
+    fu1: {
+      subject: 'Re: resumes — {{pos}}',
+      body: `Hi {{fn}},
+
+Same question, still standing: {{pos}} resumes — yes or no?`
+    },
+    fu2: {
+      subject: 'Re: resumes — {{pos}}',
+      body: `Hi {{fn}},
+
+Taking that as a no and closing out. A future 'yes' in this thread will still find me.`
+    }
+  },
+  {
+    id: 'v17',
+    label: 'Shortlist timing',
+    o1: {
+      subject: 'before you shortlist for {{pos}}',
+      body: `Hi {{fn}},
+
+If you're mid-shortlist on the {{pos}} role in {{loc}}, this is the useful moment for outside profiles — after offer stage it's too late. The ones I have bring {{job_resp}} experience from {{company_service}} work and are open to direct hire.
+
+Want them in the mix before you narrow down?`
+    },
+    fu1: {
+      subject: 'Re: before you shortlist for {{pos}}',
+      body: `Hi {{fn}},
+
+Still time to add the {{pos}} profiles to your shortlist? They're ready when you are.`
+    },
+    fu2: {
+      subject: 'Re: before you shortlist for {{pos}}',
+      body: `Hi {{fn}},
+
+I'll bow out of this round. If the {{pos}} shortlist reopens, reply and they're yours.`
+    }
+  },
+  {
+    id: 'v18',
+    label: 'Minimal',
+    o1: {
+      subject: '{{pos}}, {{loc}}',
+      body: `Hi {{fn}},
+
+A few screened people worth your time for the {{pos}} role: {{job_resp}} experience, {{company_service}} backgrounds, open to direct hire in {{loc}}.
+
+Resumes on request.`
+    },
+    fu1: {
+      subject: 'Re: {{pos}}, {{loc}}',
+      body: `Hi {{fn}},
+
+They're still available. Resumes on request, as before.`
+    },
+    fu2: {
+      subject: 'Re: {{pos}}, {{loc}}',
+      body: `Hi {{fn}},
+
+Last line from me: the offer stays open in this thread whenever you want it.`
+    }
+  },
+  {
+    id: 'v19',
+    label: 'Off your plate',
+    o1: {
+      subject: 'extra hands on {{pos}}?',
+      body: `Hi {{fn}},
+
+Filling a {{pos}} seat in {{loc}} usually lands on top of someone's actual job. If sourcing help is welcome, I have screened candidates with {{job_resp}} experience from {{company_service}} work, open to direct hire, ready whenever you are.
+
+Want me to take that piece off your plate?`
+    },
+    fu1: {
+      subject: 'Re: extra hands on {{pos}}?',
+      body: `Hi {{fn}},
+
+Offer is still open — happy to carry the sourcing piece on {{pos}} if useful.`
+    },
+    fu2: {
+      subject: 'Re: extra hands on {{pos}}?',
+      body: `Hi {{fn}},
+
+Stepping back for now. If the {{pos}} load gets heavy later, this thread is the shortcut.`
+    }
+  },
+  {
+    id: 'v20',
+    label: 'Correct me',
+    o1: {
+      subject: 'am I off base on {{pos}}?',
+      body: `Hi {{fn}},
+
+Reading your {{pos}} posting in {{loc}}, I matched it to candidates with {{job_resp}} experience from {{company_service}} work — but you know the role better than the JD does. If I'm off base, one line on what actually matters would sharpen who I send.
+
+And if I'm on target: want the resumes?`
+    },
+    fu1: {
+      subject: 'Re: am I off base on {{pos}}?',
+      body: `Hi {{fn}},
+
+Still glad to be corrected — or to send the {{pos}} resumes as matched. Either reply helps.`
+    },
+    fu2: {
+      subject: 'Re: am I off base on {{pos}}?',
+      body: `Hi {{fn}},
+
+I'll close this out without the answer. If the {{pos}} search evolves, tell me what changed and I'll re-match.`
     }
   }
 ];
