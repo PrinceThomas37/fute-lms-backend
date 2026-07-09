@@ -101,6 +101,28 @@ AI summaries (B4) · auto-RA sourcing + enrichment (A) · enterprise access
 
 Bake 1 ≈ Phases 1–2 of §10; Bake 2 ≈ Phases 3–5. The phase estimates stand.
 
+### How to see it work (UI shipped on this branch)
+
+The Workflows UI lives in `public/app.js` (Workflows nav page + job-card
+integration). To realize it end-to-end:
+
+1. Apply `migrations/007_workflow_engine.sql` in Supabase (idempotent; seeds
+   the default org + "Standard Sales Outreach" workflow). Until then the
+   engine is inert and "Run engine now" reports `engine off`.
+2. Deploy the branch. Log in as admin/lead → **Workflows** in the sidebar:
+   workflow cards with step chains + live enrollment stats, the builder
+   ("+ New workflow" / Edit — cadence changes with zero deploys), the
+   enrollments table (filter, pause/resume/exit, per-step History), and
+   "Run engine now" with the tick log.
+3. Open a lead → contact card → **Enroll**. A chip appears
+   (`workflow · step x/y · status`) with pause/exit links.
+4. Run the engine (or wait for the hourly tick): the initial email lands in
+   the Email → Pending queue and sends through the normal engine; the chip
+   advances; the BD-touch step creates the call/LinkedIn reminder.
+5. Reply from the test inbox → within a sweep cycle the enrollment flips to
+   `exited · replied` — visible on the Workflows page, the chip, and the
+   events timeline.
+
 ---
 
 ## 1. What already exists (merged on `main`)
