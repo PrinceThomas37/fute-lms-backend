@@ -70,6 +70,17 @@ system.
 1. Extract the workflow engine (declarative definitions + enrollment state
    machine) from the hard-coded fu1/fu2/day-3 logic — keep today's cadence as
    the default seeded workflow so behaviour doesn't change.
+   **→ v1 SHIPPED on this branch**: `migrations/007_workflow_engine.sql`
+   (organizations + definitions/steps/enrollments/step_runs),
+   `workflow-engine.js` (domain-blind core: channel registry, context
+   loaders, enroll/tick/exit), `routes/wf.js` (`/wf/*` API), wired in
+   `index.js` with four channels (email, bd_touch, reminder, stage_move),
+   reply/unsubscribe/bounce exits, and an hourly tick. Additive and off by
+   default: nothing auto-enrolls; the seeded "Standard Sales Outreach"
+   workflow mirrors today's cadence and runs only for explicit
+   `POST /wf/enroll`. The legacy fu1/fu2 engine is untouched; migrating the
+   distribute pipeline onto engine enrollments is the follow-up step once
+   the engine is validated in production.
 2. Finish the mailbox layer: Gmail send/read (stub today) behind the
    `mailProvider` interface.
 3. Platform correctness at >1 instance: job queue + Redis state + durable
