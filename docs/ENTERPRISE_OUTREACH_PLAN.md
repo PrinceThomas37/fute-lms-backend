@@ -24,6 +24,74 @@ described in §9.
 
 ---
 
+## 0. Target architecture — "pour data in, the workflow runs it"
+
+The operating model to build toward: an org adds **data** (users, mailboxes,
+phone numbers, leads, POCs, candidates) and picks/edits a **workflow design**;
+the platform executes the work. Architecturally that is four layers:
+
+```
+┌─ DATA ────────────────────────────────────────────────────────────────┐
+│ orgs · users · mailboxes · numbers · leads · POCs · candidates ·      │
+│ templates    (you add these; nothing else is configuration-by-code)   │
+└──────────────────────────┬────────────────────────────────────────────┘
+┌─ WORKFLOW ENGINE ────────▼────────────────────────────────────────────┐
+│ workflow_definitions  — declarative steps per org:                    │
+│   step = { channel, delay, template, conditions, exit_rules }         │
+│   e.g. day0 email → day2 follow-up → day3 BD call+LinkedIn task →     │
+│        day5 follow-up 2 → exit on reply/bounce/opt-out               │
+│ workflow_enrollments — one state machine per contact-in-workflow      │
+│ scheduler/queue advances due steps; every transition emits an event   │
+└──────────────────────────┬────────────────────────────────────────────┘
+┌─ CHANNEL ADAPTERS ───────▼────────────────────────────────────────────┐
+│ mailProvider (Graph ✅ / Gmail ⬜) · dialerProvider (Twilio ⬜ / …)    │
+│ linkedin-touch (task+prefill) · reminders ✅ · warm-up pool ⬜        │
+│ enrichment (Apollo-class) ⬜ · job-source feeds ⬜                    │
+└──────────────────────────┬────────────────────────────────────────────┘
+┌─ EVENT SPINE ────────────▼────────────────────────────────────────────┐
+│ every action/transition → domain_events (append-only)                 │
+│ → timelines · my-day · leadership rollups · audit export              │
+└───────────────────────────────────────────────────────────────────────┘
+```
+
+**The one missing keystone:** today the workflow is **hard-coded** — follow-up
+types `fu1`/`fu2`, the day-3 reminder, stage moves are all baked into
+`index.js` logic. Everything else on this plan plugs into the engine, but the
+engine itself must be extracted first: move the cadence into
+`workflow_definitions` rows and per-contact `workflow_enrollments`, so an org
+(or we) can change "3 emails + 1 call" to "2 emails + 2 calls + LinkedIn"
+without a deploy. Once that exists, every Part-2 capability (dialer, warm-up,
+auto-sourcing) is *just another channel adapter or data feeder* — not a new
+system.
+
+### Two-bake plan
+
+**Bake 1 — finish the half we have (make the core fully baked):**
+1. Extract the workflow engine (declarative definitions + enrollment state
+   machine) from the hard-coded fu1/fu2/day-3 logic — keep today's cadence as
+   the default seeded workflow so behaviour doesn't change.
+2. Finish the mailbox layer: Gmail send/read (stub today) behind the
+   `mailProvider` interface.
+3. Platform correctness at >1 instance: job queue + Redis state + durable
+   event consumption (§9 items 1–3).
+4. Multi-tenancy (`org_id` + RLS) — the container everything sits in.
+5. Audit coverage: every mutating route emits an event; my-day + leadership
+   views (Module G).
+6. ATS finishing: dedupe, resume parsing, real search (Module F gaps).
+
+*Definition of done for Bake 1:* onboard a second organization with **zero
+code changes** — create org, add users/mailboxes/leads/candidates, pick a
+workflow, and the machine runs it end-to-end with full audit visibility.
+
+**Bake 2 — new capabilities, each a plug-in to the baked core:**
+warm-up pool (B2) · health/cure (B3) · dialer (E) · conversation sync +
+AI summaries (B4) · auto-RA sourcing + enrichment (A) · enterprise access
+(SSO/SCIM/SOC 2, §9 item 6).
+
+Bake 1 ≈ Phases 1–2 of §10; Bake 2 ≈ Phases 3–5. The phase estimates stand.
+
+---
+
 ## 1. What already exists (merged on `main`)
 
 | Capability | Where | State |
