@@ -37,7 +37,7 @@ const {
   classifyEmailDeliverability,
   annotateContactEmailStatus
 } = require('./email-validation');
-const { EVENTS, emit } = require('./events');
+const { EVENTS, emit, on } = require('./events');
 const registerSubscribers = require('./subscribers');
 const { scoreEmailContent, deliverabilityFlags, isOptOutReply } = require('./deliverability');
 
@@ -3317,6 +3317,137 @@ registerSubscribers({
   setSendProgress,
   clearSendProgress,
 });
+
+// ── WORKFLOW ENGINE (migrations/007) ─────────────────────────────────────────
+// Declarative cadences: definitions + steps are data, the engine advances
+// enrollments, channels below plug the engine into the existing machinery.
+// Additive and off by default — nothing enrolls automatically; until a
+// POST /wf/enroll happens (and migration 007 is applied) this is inert.
+const { createWorkflowEngine } = require('./workflow-engine');
+const wfEngine = createWorkflowEngine({ supabase, emit, EVENTS });
+
+// Context loader: a 'contact' enrollment executes with its contact + job.
+wfEngine.registerContextLoader('contact', async (enrollment) => {
+  const { data: contact } = await supabase.from('contacts').select('*').eq('id', enrollment.entity_id).maybeSingle();
+  if (!contact) return null;
+  let job = null;
+  const jobId = enrollment.job_id || contact.job_id;
+  if (jobId) {
+    const { data } = await supabase.from('jobs')
+      .select('id,position,location,salary_range,research,industry,stage,timezone,assigned_to_bd,company:companies(name,industry,location),sending_email:user_emails!sending_email_id(id,email_address,display_name,is_active,daily_send_limit)')
+      .eq('id', jobId).is('deleted_at', null).maybeSingle();
+    job = data || null;
+  }
+  return { contact, job };
+});
+
+// email channel — queues through the same pending-emails pipeline as the rest
+// of the system, so windows, throttling, threading, and quota charging apply.
+wfEngine.registerChannel('email', async ({ step, enrollment, context }) => {
+  const { contact, job } = context;
+  const cfg = step.config || {};
+  if (!job) return { outcome: 'skipped', detail: { reason: 'no_job_context' } };
+  if (!contact?.email) return { outcome: 'skipped', detail: { reason: 'no_email' } };
+  if (!isFollowupEligibleContact(contact)) return { outcome: 'skipped', detail: { reason: 'contact_status', status: contactEmailStatus(contact) } };
+  if (!cfg.any_stage && job.stage !== 'Assigned') return { outcome: 'skipped', detail: { reason: 'stage', stage: job.stage } };
+  const suppressed = await loadSuppressedSet([contact.email]);
+  if (suppressed.has(String(contact.email).toLowerCase())) return { outcome: 'skipped', detail: { reason: 'suppressed' } };
+
+  const mailbox = job.sending_email;
+  if (!mailbox?.id) return { outcome: 'skipped', detail: { reason: 'no_sending_mailbox' } };
+  if (mailbox.is_active === false) return { outcome: 'defer', detail: { reason: 'mailbox_inactive' } };
+  const delivState = await loadMailboxDelivState([mailbox.id]);
+  if (delivState[mailbox.id]?.auto_paused_at) return { outcome: 'defer', detail: { reason: 'mailbox_autopaused' } };
+  const { data: sendLog } = await supabase.from('email_send_log').select('emails_sent').eq('send_date', today()).eq('user_email_id', mailbox.id).maybeSingle();
+  const base = mailbox.daily_send_limit || 150;
+  const wl = warmupLimit(delivState[mailbox.id]);
+  const cap = wl ? Math.min(base, wl) : base;
+  if ((sendLog?.emails_sent || 0) >= cap) return { outcome: 'defer', detail: { reason: 'quota' } };
+
+  // Same-pair double-send guard as the legacy follow-up engine.
+  const { data: liveRows } = await supabase.from('emails')
+    .select('job_id,contact_id,status,sent_at,followup_type').eq('job_id', job.id).eq('contact_id', contact.id)
+    .in('followup_type', FOLLOWUP_EMAIL_TYPES);
+  if ((liveRows || []).some(r => isLiveOutreachRow(r))) return { outcome: 'defer', detail: { reason: 'duplicate_guard' } };
+
+  const bdId = job.assigned_to_bd || enrollment.enrolled_by;
+  const senderName = mailbox.display_name || 'Fute Global';
+  const vars = buildEmailVars({ job, contact, senderDisplayName: senderName });
+  const key = cfg.template_key || 'initial';
+  let subjTmpl = cfg.subject, bodyTmpl = cfg.body;
+  if (!subjTmpl || !bodyTmpl) {
+    const { data: settingsRows } = await supabase.from('app_settings').select('key,value')
+      .in('key', [`u_${bdId}_tmpl_${key}_subject`, `u_${bdId}_tmpl_${key}_body`, `template_${key}_subject`, `template_${key}_body`]);
+    const s = {}; (settingsRows || []).forEach(r => { s[r.key] = r.value; });
+    subjTmpl = subjTmpl || resolveTemplate(s[`u_${bdId}_tmpl_${key}_subject`] || s[`template_${key}_subject`] || '', `${key}_subject`) || DEFAULT_TEMPLATES[`${key}_subject`];
+    bodyTmpl = bodyTmpl || resolveTemplate(s[`u_${bdId}_tmpl_${key}_body`] || s[`template_${key}_body`] || '', `${key}_body`) || DEFAULT_TEMPLATES[`${key}_body`];
+  }
+  if (!subjTmpl || !bodyTmpl) return { outcome: 'failed', detail: { error: `No template for key "${key}"` } };
+
+  // fu1/fu2 thread as replies in the send path; anything else goes out fresh.
+  const followupType = cfg.thread && (key === 'fu1' || key === 'fu2') ? key : (key === 'initial' ? null : 'reminder');
+  const { data: emailRow, error } = await supabase.from('emails').insert({
+    contact_id: contact.id, job_id: job.id, to_email: contact.email,
+    from_email: mailbox.email_address || null,
+    subject: fillTemplate(subjTmpl, vars), body: fillTemplate(bodyTmpl, vars),
+    platform: 'Outlook', sent_by: bdId, status: 'pending', followup_type: followupType
+  }).select('id').single();
+  if (error) return { outcome: 'failed', detail: { error: error.message } };
+  if (bdId) emit(EVENTS.FOLLOWUP_QUEUED, { bdIds: [bdId] });
+  return { outcome: 'done', detail: { email_id: emailRow.id, followup_type: followupType || 'initial' } };
+});
+
+// bd_touch / reminder channels — create a dated task for the BD (call +
+// LinkedIn touch with the profile link and a prefilled message) or a generic
+// reminder; the human sends the LinkedIn message, the system prepares it.
+async function wfReminderExecutor({ step, enrollment, context }) {
+  const { contact, job } = context;
+  const cfg = step.config || {};
+  const assignee = cfg.assignee_user_id || job?.assigned_to_bd || enrollment.enrolled_by;
+  if (!assignee) return { outcome: 'skipped', detail: { reason: 'no_assignee' } };
+  const contactName = [contact?.first_name, contact?.last_name].filter(Boolean).join(' ') || 'POC';
+  const vars = job ? buildEmailVars({ job, contact, senderDisplayName: '' }) : {};
+  const parts = [cfg.note || step.name];
+  if (contact?.linkedin) parts.push(`LinkedIn: ${contact.linkedin}`);
+  if (cfg.message) parts.push(`Suggested message: ${fillTemplate(cfg.message, vars)}`);
+  const { error } = await supabase.from('reminders').insert({
+    job_id: job?.id || enrollment.job_id || null, user_id: assignee,
+    contact_name: contactName, company_name: job?.company?.name || '',
+    email: contact?.email || null, return_date: today(), reminder_time: cfg.time || '09:00',
+    note: parts.join('\n'), status: 'pending', reminder_type: step.channel, contact_id: contact?.id || null
+  });
+  if (error) return { outcome: 'failed', detail: { error: error.message } };
+  if (job?.id) await logActivity(job.id, contact?.id || null, assignee, 'workflow_task_created', `${step.name} (workflow)`, null, null);
+  return { outcome: 'done', detail: { assignee } };
+}
+wfEngine.registerChannel('bd_touch', wfReminderExecutor);
+wfEngine.registerChannel('reminder', wfReminderExecutor);
+
+// stage_move channel — a workflow step can advance the pipeline itself.
+wfEngine.registerChannel('stage_move', async ({ step, enrollment, context }) => {
+  const toStage = (step.config || {}).to_stage;
+  const job = context.job;
+  if (!toStage) return { outcome: 'failed', detail: { error: 'config.to_stage required' } };
+  if (!job) return { outcome: 'skipped', detail: { reason: 'no_job_context' } };
+  if (job.stage === toStage) return { outcome: 'skipped', detail: { reason: 'already_in_stage' } };
+  const { error } = await supabase.from('jobs').update({ stage: toStage, updated_at: new Date().toISOString() }).eq('id', job.id);
+  if (error) return { outcome: 'failed', detail: { error: error.message } };
+  await logActivity(job.id, null, enrollment.enrolled_by, 'workflow_stage_move', `Stage → ${toStage} (workflow)`, job.stage, toStage);
+  return { outcome: 'done', detail: { from: job.stage, to: toStage } };
+});
+
+// Replies, unsubscribes, and bounces end the sequence — same exits the legacy
+// follow-up path honours, expressed once against the engine.
+on(EVENTS.CONTACT_REPLIED, (e) => wfEngine.exitEntity({ entity_type: 'contact', entity_id: e.payload.contactId, reason: 'replied' }));
+on(EVENTS.CONTACT_UNSUBSCRIBED, (e) => wfEngine.exitEntity({ entity_type: 'contact', entity_id: e.payload.contactId, reason: 'unsubscribed' }));
+on(EVENTS.CONTACT_INVALIDATED, (e) => wfEngine.exitEntity({ entity_type: 'contact', entity_id: e.payload.contactId, reason: 'invalidated' }));
+
+app.use(require('./routes/wf')({ supabase, auth, hasRole, engine: wfEngine, logActivity }));
+
+// Advance due enrollments hourly, with a first pass shortly after boot
+// (offset from the bounce/reply sweeps so they don't stack).
+setInterval(() => { wfEngine.tick().catch(err => console.error('[wf] tick failed:', err.message)); }, 60 * 60 * 1000);
+setTimeout(() => { wfEngine.tick().catch(err => console.error('[wf] tick failed:', err.message)); }, 4 * 60 * 1000);
 
 // ── START ──────────────────────────────────────────────────────
 app.listen(PORT, () => console.log(`Fute Global LMS API v3.0.0 running on port ${PORT}`));

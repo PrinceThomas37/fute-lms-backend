@@ -783,6 +783,8 @@ function renderApp(){
   if(userHasRole(u,'admin'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
   // Admin + leads: Deliverability dashboard
   if(userHasAnyRole(u,'admin','bd_lead','ra_lead'))navItems.splice(navItems.length-1,0,{id:"deliverability",lbl:"Deliverability",ic:"dashboard"});
+  // Admin + leads + BDs: Workflows (BDs read-only — design actions gated in-view)
+  if(userHasAnyRole(u,'admin','bd_lead','ra_lead','bd'))navItems.splice(navItems.length-1,0,{id:"workflows",lbl:"Workflows",ic:"dashboard"});
   // RA Lead + Admin: Assign Leads + Insights (RA team view)
   if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
   if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(navItems.length-1,0,{id:"insights",lbl:"Insights",ic:"dashboard"});
@@ -802,7 +804,7 @@ function renderApp(){
 
   var switchers=""; // removed — use team list to switch views
 
-  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",deliverability:"Deliverability & Replies",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",bdinsights:"My Insights",bdleadinsights:"Team Insights",profile:"My Profile",reminders:"Reminders"};
+  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",deliverability:"Deliverability & Replies",workflows:"Workflows",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",bdinsights:"My Insights",bdleadinsights:"Team Insights",profile:"My Profile",reminders:"Reminders"};
   var viewingName=STATE.viewingUser&&STATE.viewingUser.id!==u.id?" · Viewing: "+STATE.viewingUser.name:"";
 
   return '<div id="sidebar">'+
@@ -859,6 +861,7 @@ function renderPage(){
   if(STATE.page==="reminders")return renderReminders();
   if(STATE.page==="admin")return renderAdmin();
   if(STATE.page==="deliverability")return renderDeliverability();
+  if(STATE.page==="workflows")return renderWorkflows();
   if(STATE.page==="profile")return renderProfile();
   return "<div class='page'>Page not found</div>";
 }
@@ -1287,7 +1290,7 @@ function bindJobsControls(){
   if(st)st.onchange=function(){STATE.jobsFilter.stage=this.value;render();};
 }
 
-function openJob(id){ STATE.detailJob=id; STATE.modal={type:"jobDetail",id:id}; render(); }
+function openJob(id){ STATE.detailJob=id; STATE.modal={type:"jobDetail",id:id}; render(); if(typeof loadJobEnrollments==='function')loadJobEnrollments(id); }
 // From the send-results panel: open the failed lead's detail.
 function closeAndOpenLead(jobId){ if(jobId){ openJob(jobId); } }
 // Manually dismiss the send-results panel (stays put until dismissed when there are failures).
@@ -1331,9 +1334,11 @@ function renderJobDetailModal(){
           (canChangeEmailStatus?'<div style="margin-top:5px">'+emailStatusSel+(c.ooo_until&&es==='out_of_office'?'<span style="font-size:11px;color:var(--amber);margin-left:8px">until '+escHtml(c.ooo_until)+'</span>':'')+'</div>':'')+
           (c.phone?'<div style="font-size:12px;color:var(--text2);margin-top:4px">\ud83d\udcde '+escHtml(c.phone)+'</div>':'')+
           (c.linkedin?'<div style="font-size:12px;color:var(--text2);margin-top:2px">\ud83d\udd17 '+escHtml(c.linkedin)+'</div>':'')+
+          wfContactChip(j.id,c)+
         '</div>'+
         '<div style="display:flex;flex-direction:column;gap:4px">'+
           (c.email?'<button onclick="sendEmailToContact(\''+c.id+'\')" style="background:var(--accent);color:#fff;border:0;padding:5px 10px;border-radius:6px;font-size:11px;cursor:pointer">Email</button>':'')+
+          (c.email&&!wfContactEnrollment(j.id,c.id)?'<button onclick="wfEnrollContact(\''+c.id+'\',\''+j.id+'\')" style="background:transparent;color:var(--accent);border:1px solid var(--accent);padding:5px 10px;border-radius:6px;font-size:11px;cursor:pointer">Enroll</button>':'')+
           (canEdit?'<button onclick="deleteContact(\''+c.id+'\')" style="background:transparent;color:#ef4444;border:1px solid #ef4444;padding:5px 10px;border-radius:6px;font-size:11px;cursor:pointer">Delete</button>':'')+
         '</div>'+
       '</div>'+
@@ -2186,6 +2191,220 @@ function renderDeliverability(){
   '</div>';
 }
 
+// ── WORKFLOWS (engine UI: definitions, builder, enrollments) ─────────────────
+var WF_CHANNEL_LABELS={email:'Email',bd_touch:'BD touch',reminder:'Reminder',stage_move:'Stage move'};
+var WF_STATUS_COLORS={active:'var(--green)',paused:'var(--amber)',completed:'var(--accent)',exited:'var(--text3)',failed:'var(--red)',draft:'var(--amber)',archived:'var(--text3)'};
+function wfStatusBadge(s,extra){ var c=WF_STATUS_COLORS[s]||'var(--text3)'; return '<span style="font-size:10px;padding:2px 8px;border-radius:6px;font-weight:700;background:'+c+'22;color:'+c+'">'+htmlEsc(s+(extra?' · '+extra:''))+'</span>'; }
+function wfStepLabel(s){ var lbl=WF_CHANNEL_LABELS[s.channel]||s.channel; if(s.channel==='email'&&s.config&&s.config.template_key)lbl+=' ('+s.config.template_key+')'; if(s.channel==='stage_move'&&s.config&&s.config.to_stage)lbl+=' → '+s.config.to_stage; return lbl; }
+function wfChain(steps){ return (steps||[]).map(function(s,i){ return (i>0?'<span style="color:var(--text3)"> → +'+s.delay_days+'d </span>':'')+'<span style="font-weight:600">'+htmlEsc(wfStepLabel(s))+'</span>'; }).join(''); }
+
+function loadWorkflows(){
+  STATE._wfLoading=true;
+  Promise.all([
+    apiGet('/wf/definitions').catch(function(){return [];}),
+    apiGet('/wf/enrollments').catch(function(){return [];}),
+    apiGet('/wf/stats').catch(function(){return {by_workflow:{},total:0};}),
+    apiGet('/wf/channels').catch(function(){return {channels:['email','bd_touch','reminder','stage_move']};})
+  ]).then(function(r){
+    STATE.wf={defs:r[0]||[],enrollments:r[1]||[],stats:r[2]||{by_workflow:{}},channels:(r[3]&&r[3].channels)||[]};
+    STATE.wfDefs=r[0]||[];
+    STATE._wfLoading=false; scheduleRender();
+  });
+}
+window.wfSetStatus=function(id,status){ apiPost('/wf/definitions/'+id+'/status',{status:status}).then(function(){ showToast('Workflow '+status,'success'); loadWorkflows(); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
+window.wfRunTick=function(){ STATE.wfTickLog='running'; scheduleRender(); apiPost('/wf/tick',{}).then(function(r){ STATE.wfTickLog=r; loadWorkflows(); }).catch(function(e){ STATE.wfTickLog=null; showToast('Tick failed: '+(e&&e.message||e),'error'); scheduleRender(); }); };
+window.wfEnrollmentAction=function(id,action){ apiPost('/wf/enrollments/'+id+'/'+action,{}).then(function(){ showToast('Enrollment '+action+(action==='exit'?'ed':'d'),'success'); loadWorkflows(); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
+window.wfToggleRuns=function(id){
+  STATE.wfRuns=STATE.wfRuns||{};
+  if(STATE.wfRuns[id]){ delete STATE.wfRuns[id]; scheduleRender(); return; }
+  STATE.wfRuns[id]='loading'; scheduleRender();
+  apiGet('/wf/enrollments/'+id+'/runs').then(function(r){ STATE.wfRuns[id]=r||[]; scheduleRender(); }).catch(function(){ STATE.wfRuns[id]=[]; scheduleRender(); });
+};
+window.wfSetFilter=function(k,v){ STATE.wfFilter=STATE.wfFilter||{}; STATE.wfFilter[k]=v; scheduleRender(); };
+
+// ── builder modal ──
+function wfBlankStep(){ return {name:'',channel:'email',delay_days:2,config:{template_key:'fu1',thread:true}}; }
+window.wfOpenBuilder=function(id){
+  var b;
+  if(id){ var d=(STATE.wf&&STATE.wf.defs||[]).find(function(x){return x.id===id;}); if(!d)return;
+    b={id:d.id,name:d.name,description:d.description||'',domain:d.domain||'sales',steps:(d.steps||[]).map(function(s){return {name:s.name,channel:s.channel,delay_days:s.delay_days,config:Object.assign({},s.config||{})};})};
+  } else b={id:null,name:'',description:'',domain:'sales',steps:[{name:'Initial outreach email',channel:'email',delay_days:0,config:{template_key:'initial',thread:false}}]};
+  STATE.wfBuilder=b; refreshWfBuilder();
+};
+window.wfBuilderField=function(k,v){ if(STATE.wfBuilder)STATE.wfBuilder[k]=v; };
+window.wfStepField=function(i,k,v){ var s=STATE.wfBuilder&&STATE.wfBuilder.steps[i]; if(!s)return; if(k==='delay_days')v=parseInt(v,10)||0; s[k]=v; if(k==='channel'){ s.config=v==='email'?{template_key:'fu1',thread:true}:(v==='stage_move'?{to_stage:'Connected'}:{note:'',message:''}); refreshWfBuilder(); } };
+window.wfStepCfg=function(i,k,v){ var s=STATE.wfBuilder&&STATE.wfBuilder.steps[i]; if(!s)return; if(k==='thread')v=!!v; s.config=s.config||{}; s.config[k]=v; };
+window.wfAddStep=function(){ STATE.wfBuilder.steps.push(wfBlankStep()); refreshWfBuilder(); };
+window.wfRemoveStep=function(i){ STATE.wfBuilder.steps.splice(i,1); refreshWfBuilder(); };
+window.wfMoveStep=function(i,dir){ var st=STATE.wfBuilder.steps, j=i+dir; if(j<0||j>=st.length)return; var t=st[i]; st[i]=st[j]; st[j]=t; refreshWfBuilder(); };
+window.wfSaveDefinition=function(){
+  var b=STATE.wfBuilder; if(!b)return;
+  if(!b.name){ showToast('Name is required','warning'); return; }
+  if(!b.steps.length){ showToast('Add at least one step','warning'); return; }
+  var payload={name:b.name,description:b.description,domain:b.domain,steps:b.steps};
+  var req=b.id?apiPut('/wf/definitions/'+b.id,payload):apiPost('/wf/definitions',payload);
+  req.then(function(){ showToast(b.id?'Workflow updated':'Workflow created (draft — activate it to enroll)','success'); STATE.wfBuilder=null; closeModal(); loadWorkflows(); })
+     .catch(function(e){ showToast('Save failed: '+(e&&e.message||e),'error'); });
+};
+function refreshWfBuilder(){
+  var b=STATE.wfBuilder; if(!b)return;
+  var channels=(STATE.wf&&STATE.wf.channels)||['email','bd_touch','reminder','stage_move'];
+  var stages=['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'];
+  var stepRows=b.steps.map(function(s,i){
+    var chanOpts=channels.map(function(c){return '<option value="'+c+'"'+(s.channel===c?' selected':'')+'>'+(WF_CHANNEL_LABELS[c]||c)+'</option>';}).join('');
+    var cfg='';
+    if(s.channel==='email'){
+      cfg='<select onchange="wfStepCfg('+i+',\'template_key\',this.value)" style="font-size:12px;padding:5px;border:1px solid var(--border);border-radius:6px;background:var(--bg)">'+['initial','fu1','fu2'].map(function(k){return '<option value="'+k+'"'+((s.config&&s.config.template_key)===k?' selected':'')+'>'+k+'</option>';}).join('')+'</select>'+
+        '<label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:4px"><input type="checkbox" '+(s.config&&s.config.thread?'checked':'')+' onchange="wfStepCfg('+i+',\'thread\',this.checked)">thread</label>';
+    } else if(s.channel==='stage_move'){
+      cfg='<select onchange="wfStepCfg('+i+',\'to_stage\',this.value)" style="font-size:12px;padding:5px;border:1px solid var(--border);border-radius:6px;background:var(--bg)">'+stages.map(function(st){return '<option value="'+st+'"'+((s.config&&s.config.to_stage)===st?' selected':'')+'>'+st+'</option>';}).join('')+'</select>';
+    } else {
+      cfg='<input placeholder="Task note" value="'+htmlEsc(s.config&&s.config.note||'')+'" oninput="wfStepCfg('+i+',\'note\',this.value)" style="font-size:12px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg);flex:1;min-width:120px">'+
+        '<input placeholder="Suggested message (vars ok)" value="'+htmlEsc(s.config&&s.config.message||'')+'" oninput="wfStepCfg('+i+',\'message\',this.value)" style="font-size:12px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg);flex:1;min-width:120px">';
+    }
+    return '<div style="border:1px solid var(--border2);border-radius:8px;padding:9px 10px;margin-bottom:7px;background:var(--bg3)">'+
+      '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">'+
+        '<span style="font-size:11px;font-weight:700;color:var(--text3);min-width:16px">'+(i+1)+'.</span>'+
+        '<input placeholder="Step name" value="'+htmlEsc(s.name||'')+'" oninput="wfStepField('+i+',\'name\',this.value)" style="flex:1;font-size:12.5px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg)">'+
+        '<button onclick="wfMoveStep('+i+',-1)" style="border:1px solid var(--border);background:transparent;border-radius:6px;cursor:pointer;color:var(--text2)">↑</button>'+
+        '<button onclick="wfMoveStep('+i+',1)" style="border:1px solid var(--border);background:transparent;border-radius:6px;cursor:pointer;color:var(--text2)">↓</button>'+
+        '<button onclick="wfRemoveStep('+i+')" style="border:1px solid #ef4444;color:#ef4444;background:transparent;border-radius:6px;cursor:pointer">×</button>'+
+      '</div>'+
+      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'+
+        '<select onchange="wfStepField('+i+',\'channel\',this.value)" style="font-size:12px;padding:5px;border:1px solid var(--border);border-radius:6px;background:var(--bg)">'+chanOpts+'</select>'+
+        '<label style="font-size:12px;color:var(--text2)">after <input type="number" min="0" max="90" value="'+(s.delay_days||0)+'" onchange="wfStepField('+i+',\'delay_days\',this.value)" style="width:48px;font-size:12px;padding:4px;border:1px solid var(--border);border-radius:6px;background:var(--bg)"> day(s)</label>'+
+        cfg+
+      '</div>'+
+    '</div>';
+  }).join('');
+  STATE.modal='<div class="modal modal-w480" style="max-height:88vh;overflow-y:auto">'+
+    '<div class="mh"><div class="mt">'+(b.id?'Edit workflow':'New workflow')+'</div></div>'+
+    '<div class="mb_">'+
+      '<input placeholder="Workflow name" value="'+htmlEsc(b.name)+'" oninput="wfBuilderField(\'name\',this.value)" class="inp" style="margin-bottom:8px">'+
+      '<input placeholder="Description" value="'+htmlEsc(b.description)+'" oninput="wfBuilderField(\'description\',this.value)" class="inp" style="margin-bottom:8px">'+
+      '<select onchange="wfBuilderField(\'domain\',this.value)" class="inp" style="margin-bottom:12px">'+['sales','delivery','ops'].map(function(d){return '<option value="'+d+'"'+(b.domain===d?' selected':'')+'>'+d+'</option>';}).join('')+'</select>'+
+      '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Steps (delay counts from the previous step)</div>'+
+      stepRows+
+      '<button onclick="wfAddStep()" style="border:1px dashed var(--border2);background:transparent;color:var(--text2);border-radius:8px;padding:7px;width:100%;cursor:pointer;font-size:12px">+ Add step</button>'+
+      (b.id?'<div style="font-size:11.5px;color:var(--text3);margin-top:8px">Editing steps is blocked while this workflow has active enrollments.</div>':'')+
+    '</div>'+
+    '<div class="mf"><button class="btn btn-outline" onclick="STATE.wfBuilder=null;closeModal()">Cancel</button><button class="btn" onclick="wfSaveDefinition()">Save</button></div>'+
+  '</div>';
+  render();
+}
+
+// ── per-job enrollment helpers (job detail modal) ──
+function loadJobEnrollments(jobId){
+  apiGet('/wf/enrollments?job_id='+jobId).then(function(r){ STATE.wfByJob=STATE.wfByJob||{}; STATE.wfByJob[jobId]=r||[]; scheduleRender(); }).catch(function(){});
+  if(!STATE.wfDefs)apiGet('/wf/definitions').then(function(r){ STATE.wfDefs=r||[]; scheduleRender(); }).catch(function(){ STATE.wfDefs=[]; });
+}
+function wfContactEnrollment(jobId,contactId){
+  var list=(STATE.wfByJob&&STATE.wfByJob[jobId])||[];
+  return list.find(function(e){return e.contact_id===contactId&&(e.status==='active'||e.status==='paused');})||null;
+}
+function wfContactChip(jobId,c){
+  var e=wfContactEnrollment(jobId,c.id); if(!e)return '';
+  var def=(STATE.wfDefs||[]).find(function(d){return d.id===e.workflow_id;});
+  var total=def&&def.steps?def.steps.length:'?';
+  var links=e.status==='active'
+    ?'<a onclick="wfJobEnrollmentAction(\''+e.id+'\',\'pause\',\''+jobId+'\')" style="cursor:pointer;color:var(--amber)">pause</a> · <a onclick="wfJobEnrollmentAction(\''+e.id+'\',\'exit\',\''+jobId+'\')" style="cursor:pointer;color:var(--red)">exit</a>'
+    :'<a onclick="wfJobEnrollmentAction(\''+e.id+'\',\'resume\',\''+jobId+'\')" style="cursor:pointer;color:var(--green)">resume</a> · <a onclick="wfJobEnrollmentAction(\''+e.id+'\',\'exit\',\''+jobId+'\')" style="cursor:pointer;color:var(--red)">exit</a>';
+  return '<div style="font-size:11.5px;margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">⚙ <span style="font-weight:600">'+htmlEsc((e.workflow&&e.workflow.name)||'Workflow')+'</span> · step '+e.current_step_order+'/'+total+' '+wfStatusBadge(e.status)+' <span style="color:var(--text3)">'+links+'</span></div>';
+}
+window.wfJobEnrollmentAction=function(id,action,jobId){ apiPost('/wf/enrollments/'+id+'/'+action,{}).then(function(){ showToast('Enrollment '+action+(action==='exit'?'ed':'d'),'success'); loadJobEnrollments(jobId); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
+window.wfEnrollContact=function(contactId,jobId){
+  var defs=(STATE.wfDefs||[]).filter(function(d){return d.status==='active'&&d.entity_type==='contact';});
+  if(!defs.length){ showToast('No active workflows — create and activate one in the Workflows page first','warning'); return; }
+  if(defs.length===1){ wfDoEnroll(defs[0].id,contactId,jobId); return; }
+  STATE.modal='<div class="modal modal-w480"><div class="mh"><div class="mt">Enroll in workflow</div></div><div class="mb_">'+
+    defs.map(function(d){ return '<button onclick="wfDoEnroll(\''+d.id+'\',\''+contactId+'\',\''+jobId+'\')" style="display:block;width:100%;text-align:left;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;margin-bottom:7px;cursor:pointer"><div style="font-weight:600;font-size:13px;color:var(--text)">'+htmlEsc(d.name)+'</div><div style="font-size:11.5px;color:var(--text3);margin-top:3px">'+wfChain(d.steps)+'</div></button>'; }).join('')+
+    '</div><div class="mf"><button class="btn btn-outline" onclick="openJob(\''+jobId+'\')">Cancel</button></div></div>';
+  render();
+};
+window.wfDoEnroll=function(workflowId,contactId,jobId){
+  apiPost('/wf/enroll',{workflow_id:workflowId,contact_id:contactId,job_id:jobId})
+    .then(function(){ showToast('Enrolled — the engine takes it from here','success'); openJob(jobId); loadJobEnrollments(jobId); })
+    .catch(function(e){ showToast('Enroll failed: '+(e&&e.message||e),'error'); openJob(jobId); });
+};
+
+function renderWorkflows(){
+  var u=STATE.user;
+  if(!userHasAnyRole(u,'admin','bd_lead','ra_lead','bd'))return '<div class="page">Forbidden</div>';
+  if(STATE.wf===undefined&&!STATE._wfLoading){loadWorkflows();}
+  var canDesign=userHasAnyRole(u,'admin','ra_lead','bd_lead');
+  var canTick=userHasAnyRole(u,'admin','bd_lead');
+  var wf=STATE.wf;
+  if(!wf)return '<div class="page"><div class="ph"><div class="ptitle">Workflows</div></div><div style="color:var(--text3)">Loading…</div></div>';
+  var tick=STATE.wfTickLog;
+  var tickHtml=tick?(tick==='running'?'<span style="font-size:12px;color:var(--text3)">Running…</span>':'<span style="font-size:12px;color:var(--text2)">Last run: checked '+(tick.checked||0)+' · done '+(tick.done||0)+' · deferred '+(tick.deferred||0)+' · completed '+(tick.completed||0)+' · exited '+(tick.exited||0)+(tick.off?' · <b style="color:var(--red)">engine off — migration 007 not applied</b>':'')+'</span>'):'';
+  var defCards=(wf.defs||[]).map(function(d){
+    var st=(wf.stats.by_workflow||{})[d.id]||{};
+    var stats='<span style="font-size:11.5px;color:var(--text3)">'+(st.active||0)+' active · '+(st.completed||0)+' completed · '+(st.exited||0)+' exited</span>';
+    var btns=canDesign?('<button onclick="wfOpenBuilder(\''+d.id+'\')" style="font-size:11px;border:1px solid var(--border2);background:transparent;color:var(--accent);padding:4px 10px;border-radius:6px;cursor:pointer">Edit</button>'+
+      (d.status==='draft'?'<button onclick="wfSetStatus(\''+d.id+'\',\'active\')" style="font-size:11px;border:0;background:var(--green);color:#fff;padding:4px 10px;border-radius:6px;cursor:pointer">Activate</button>':'')+
+      (d.status==='active'?'<button onclick="wfSetStatus(\''+d.id+'\',\'archived\')" style="font-size:11px;border:1px solid var(--border2);background:transparent;color:var(--text2);padding:4px 10px;border-radius:6px;cursor:pointer">Archive</button>':'')+
+      (d.status==='archived'?'<button onclick="wfSetStatus(\''+d.id+'\',\'active\')" style="font-size:11px;border:1px solid var(--border2);background:transparent;color:var(--green);padding:4px 10px;border-radius:6px;cursor:pointer">Reactivate</button>':'')):'';
+    return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px 16px;margin-bottom:10px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">'+
+        '<div style="display:flex;align-items:center;gap:8px"><span style="font-weight:700;font-size:14px">'+htmlEsc(d.name)+'</span><span style="font-size:10px;padding:2px 7px;border-radius:6px;background:var(--bg3);color:var(--text2);font-weight:600">'+htmlEsc(d.domain||'sales')+'</span>'+wfStatusBadge(d.status)+'</div>'+
+        '<div style="display:flex;gap:6px;align-items:center">'+stats+btns+'</div>'+
+      '</div>'+
+      (d.description?'<div style="font-size:12px;color:var(--text3);margin-top:5px">'+htmlEsc(d.description)+'</div>':'')+
+      '<div style="font-size:12.5px;margin-top:8px">'+wfChain(d.steps)+'</div>'+
+    '</div>';
+  }).join('')||'<div style="color:var(--text3);font-size:13px;padding:10px">No workflows yet'+(canDesign?' — create one.':'.')+'</div>';
+
+  var f=STATE.wfFilter||{};
+  var enr=(wf.enrollments||[]).filter(function(e){ return (!f.status||e.status===f.status)&&(!f.workflow||e.workflow_id===f.workflow); });
+  var wfOpts='<option value="">All workflows</option>'+(wf.defs||[]).map(function(d){return '<option value="'+d.id+'"'+(f.workflow===d.id?' selected':'')+'>'+htmlEsc(d.name)+'</option>';}).join('');
+  var stOpts='<option value="">All statuses</option>'+['active','paused','completed','exited','failed'].map(function(s){return '<option value="'+s+'"'+(f.status===s?' selected':'')+'>'+s+'</option>';}).join('');
+  var enrRows=enr.map(function(e){
+    var def=(wf.defs||[]).find(function(d){return d.id===e.workflow_id;});
+    var total=def&&def.steps?def.steps.length:'?';
+    var name=e.contact?((e.contact.first_name||'')+' '+(e.contact.last_name||'')).trim()||e.contact.email:e.entity_id.slice(0,8);
+    var jobLbl=e.job?htmlEsc((e.job.position||'')+((e.job.company&&e.job.company.name)?' · '+e.job.company.name:'')):'—';
+    var acts='';
+    if(e.status==='active')acts='<a onclick="wfEnrollmentAction(\''+e.id+'\',\'pause\')" style="cursor:pointer;color:var(--amber);font-size:11px">Pause</a> <a onclick="wfEnrollmentAction(\''+e.id+'\',\'exit\')" style="cursor:pointer;color:var(--red);font-size:11px">Exit</a>';
+    else if(e.status==='paused')acts='<a onclick="wfEnrollmentAction(\''+e.id+'\',\'resume\')" style="cursor:pointer;color:var(--green);font-size:11px">Resume</a> <a onclick="wfEnrollmentAction(\''+e.id+'\',\'exit\')" style="cursor:pointer;color:var(--red);font-size:11px">Exit</a>';
+    var runs=STATE.wfRuns&&STATE.wfRuns[e.id];
+    var runsHtml='';
+    if(runs==='loading')runsHtml='<div style="padding:8px 14px;font-size:12px;color:var(--text3)">Loading history…</div>';
+    else if(runs)runsHtml='<div style="padding:6px 14px 10px;background:var(--bg3)">'+(runs.length?runs.map(function(r){
+      var oc=r.outcome==='done'?'var(--green)':r.outcome==='failed'?'var(--red)':'var(--text3)';
+      var why=r.detail&&(r.detail.reason||r.detail.error)?' — '+htmlEsc(r.detail.reason||r.detail.error):'';
+      return '<div style="font-size:12px;padding:3px 0;color:var(--text2)">step '+r.step_order+' · '+(WF_CHANNEL_LABELS[r.channel]||r.channel)+' · <b style="color:'+oc+'">'+r.outcome+'</b>'+why+' <span style="color:var(--text3)">· '+String(r.run_at||'').slice(0,16).replace('T',' ')+'</span></div>';
+    }).join(''):'<div style="font-size:12px;color:var(--text3)">No steps executed yet.</div>')+'</div>';
+    return '<div style="border-bottom:1px solid var(--border)">'+
+      '<div style="display:flex;align-items:center;gap:10px;padding:9px 14px">'+
+        '<div style="flex:1.2;min-width:0"><div style="font-size:13px;font-weight:600">'+htmlEsc(name)+'</div><div style="font-size:11px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+jobLbl+'</div></div>'+
+        '<div style="flex:1;font-size:12px;color:var(--text2)">'+htmlEsc((e.workflow&&e.workflow.name)||'—')+'</div>'+
+        '<div style="font-size:12px;color:var(--text2);min-width:56px">step '+e.current_step_order+'/'+total+'</div>'+
+        '<div style="font-size:12px;color:var(--text3);min-width:78px">'+(e.next_step_due_date||'—')+'</div>'+
+        '<div style="min-width:90px">'+wfStatusBadge(e.status,e.exit_reason)+'</div>'+
+        '<div style="min-width:86px;display:flex;gap:8px">'+acts+'</div>'+
+        '<a onclick="wfToggleRuns(\''+e.id+'\')" style="cursor:pointer;font-size:11px;color:var(--accent)">'+(runs?'Hide':'History')+'</a>'+
+      '</div>'+runsHtml+
+    '</div>';
+  }).join('')||'<div style="padding:14px;color:var(--text3);font-size:13px">No enrollments'+((f.status||f.workflow)?' match the filter.':' yet — open a lead and enroll a contact.')+'</div>';
+
+  return '<div class="page">'+
+    '<div class="ph"><div class="flex jb aic">'+
+      '<div><div class="ptitle">Workflows</div><div class="psub">Cadences as data — design the play, enroll contacts, the engine runs it</div></div>'+
+      '<div style="display:flex;gap:8px;align-items:center">'+tickHtml+
+        (canTick?'<button onclick="wfRunTick()" style="background:transparent;border:1px solid var(--border2);color:var(--text2);padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer">▶ Run engine now</button>':'')+
+        (canDesign?'<button onclick="wfOpenBuilder()" style="background:var(--accent);color:#fff;border:0;padding:7px 16px;border-radius:8px;font-size:13px;cursor:pointer">+ New workflow</button>':'')+
+      '</div>'+
+    '</div></div>'+
+    '<div style="font-weight:600;font-size:13px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Definitions</div>'+
+    defCards+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 8px"><div style="font-weight:600;font-size:13px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Enrollments ('+enr.length+')</div>'+
+      '<div style="display:flex;gap:6px"><select onchange="wfSetFilter(\'status\',this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)">'+stOpts+'</select>'+
+      '<select onchange="wfSetFilter(\'workflow\',this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)">'+wfOpts+'</select></div>'+
+    '</div>'+
+    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+enrRows+'</div>'+
+  '</div>';
+}
+
 function renderAdmin(){
   var u=STATE.user;
   if(STATE.sendingPaused===undefined){loadSendingStatus();}
@@ -2815,7 +3034,7 @@ window.doLogin=function(){
   else{var e=document.getElementById("login-err");if(e){e.textContent="No account found. Use a @futeglobal.com email.";e.style.display="block";}}
 }
 window.signOut=function(){stopBackgroundPoll();stopProgressPoll();STATE.user=null;STATE.token=null;sessionStorage.removeItem('fg_token');sessionStorage.removeItem('fg_user');STATE.page='login';STATE.modal=null;render();}
-window.goPage=function(p){if(p==='email'){STATE.composeContext=null;STATE.composeReminderId=null;}STATE.page=p;STATE.detailLead=null;STATE.modal=null;if(p!=="dashboard")STATE.viewingUser=null;if(p!=='bdleadinsights')STATE.bdLeadSelectedBD=null;if(p!=='bdinsights')STATE.bdInsightsData=null;if(p==='email')loadEmailsForCurrentUser();render();}
+window.goPage=function(p){if(p==='email'){STATE.composeContext=null;STATE.composeReminderId=null;}if(p==='workflows'){STATE.wf=undefined;STATE.wfRuns={};}STATE.page=p;STATE.detailLead=null;STATE.modal=null;if(p!=="dashboard")STATE.viewingUser=null;if(p!=='bdleadinsights')STATE.bdLeadSelectedBD=null;if(p!=='bdinsights')STATE.bdInsightsData=null;if(p==='email')loadEmailsForCurrentUser();render();}
 window.setPeriod=function(p){STATE.period=p;render();}
 window.setSearch=function(v){STATE.leadsFilter.search=v;STATE.leadsPage=0;render();}
 window.setFilt=function(k,v){STATE.leadsFilter[k]=v;STATE.leadsPage=0;render();}

@@ -31,6 +31,10 @@ const EVENTS = {
   CONTACT_REPLIED:     'contact.replied',
   CONTACT_UNSUBSCRIBED:'contact.unsubscribed',
   MAILBOX_AUTOPAUSED:  'mailbox.autopaused',
+  WORKFLOW_ENROLLED:      'workflow.enrolled',
+  WORKFLOW_STEP_EXECUTED: 'workflow.step_executed',
+  WORKFLOW_COMPLETED:     'workflow.completed',
+  WORKFLOW_EXITED:        'workflow.exited',
 };
 const KNOWN_EVENTS = new Set(Object.values(EVENTS));
 
