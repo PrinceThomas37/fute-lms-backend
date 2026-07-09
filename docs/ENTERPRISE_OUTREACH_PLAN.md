@@ -8,11 +8,19 @@ deliverability "cure" recommendations, full conversation tracking with AI
 notes/summaries, and (c) gives org admins minute, structured visibility into
 what every user is doing.
 
+Scope also includes: an in-app dialer (Twilio/Dialpad/RingCentral-class) with
+auto-record → transcribe → AI summary into notes, a full who/what/when audit
+trail across every action, the recruiter ATS (shared candidate pool linked
+many-to-many with jobs), and operating at **1000–2000+ seats**.
+
 Verdict up front: **feasible, and roughly 40% already exists.** The sending +
-deliverability core (the hard part SalesHandy sells) is built and merged. The
-genuinely new work is: lead-source ingestion + contact enrichment (external
-data providers, not scraping), the inter-mailbox warm-up pool, Gmail sending,
-multi-tenancy, and a richer conversation/visibility layer.
+deliverability core (the hard part SalesHandy sells) is built and merged, and
+the candidate-pool ↔ job-pool ATS workflow is already live in
+`bd_recruiter_routes.js`. The genuinely new work is: lead-source ingestion +
+contact enrichment (external data providers, not scraping), the inter-mailbox
+warm-up pool, Gmail sending, the dialer, multi-tenancy, and — for the
+1000–2000-seat target — a platform hardening pass (queue/Redis/SSO/SOC 2)
+described in §9.
 
 ---
 
@@ -180,7 +188,92 @@ Foundations exist (`activity_log`, `domain_events`, `/insights/ra|bd`,
   feed (missed day-3 touches, unanswered replies > 24h, mailboxes degrading).
 - **Complexity: Medium.** ~2–3 weeks on top of existing event bus.
 
-## 5. Module D — Multi-tenancy (the structural prerequisite)
+## 5. Module E — Built-in dialer (call → record → transcribe → summarize → note)
+
+Target: click a lead's number anywhere in the UI (or work through an
+auto-advancing call queue), the call happens inside our interface, is recorded,
+transcribed, AI-summarized, and the summary lands on the job/POC timeline
+automatically.
+
+### E1. Provider abstraction
+- One `dialerProvider` interface (mirror of the `mailProvider` pattern):
+  `startCall`, `endCall`, `getRecording`, webhook handlers. Adapters:
+  - **Twilio (build first)** — usage-based pricing, global carrier coverage
+    (US + India + intl numbers), Voice JS SDK gives a WebRTC softphone in the
+    browser, recording + transcription APIs built in. No per-seat licence.
+  - **Dialpad / RingCentral (adapters later)** — for orgs that already own
+    seats there; their CTI/embed APIs surface click-to-dial and pull call
+    events + recordings into our timeline. They carry carrier compliance for us.
+- Per-org dialer config: provider, caller-ID numbers, recording on/off,
+  recording-consent message.
+
+### E2. In-app softphone + call queue ("power dialer")
+- Browser softphone (Twilio Voice SDK) docked in the app; click-to-dial from
+  lead/contact/candidate cards; after-call wrap-up form (disposition + note).
+- **Daily call queue**: the system lines up the numbers (new leads, day-3
+  touches, callbacks due) and auto-advances to the next call when the user
+  finishes wrap-up.
+- **Compliance constraint (hard, same class as the LinkedIn one):** fully
+  automatic machine-initiated dialing is an "autodialer" under TCPA (US) and
+  triggers TRAI/DLT rules in India. We ship **progressive dialing** — the
+  queue is automatic, but each call fires on the agent being ready/one click —
+  not unattended robo-dialing. Recording consent: play a disclosure and honor
+  two-party-consent states via a per-state/per-country rule table.
+
+### E3. Recording → summary pipeline
+- Call ends → provider webhook → fetch recording → transcribe (Twilio Voice
+  Intelligence, or Deepgram/Whisper behind a flag) → `/ai/generate-summary`
+  variant produces the note (outcome, objections, next step) → auto-append to
+  the job/contact timeline + `calls` table (duration, disposition, recording
+  URL, transcript, summary) → emit `call.completed` on the event bus.
+- **Complexity: High overall.** ~4–6 weeks for Twilio softphone + queue +
+  recording/summary pipeline; Dialpad/RingCentral adapters ~1–2 weeks each
+  after. Number procurement + telecom compliance runs in parallel.
+
+## 6. Module F — Recruiter ATS: candidate pool ↔ job pool
+
+**Largely already built** in `bd_recruiter_routes.js` — this was the
+BD-manager/recruiter workflow module:
+- Shared org-wide **candidate pool** (`candidates` table, `CN-` codes, search,
+  skills/experience/resume_url fields) — the "cloud" pool described.
+- **Many-to-many linkage exists**: `submissions` joins candidates ↔ job orders;
+  one candidate → many jobs, one job → many candidates; a unique constraint
+  already blocks duplicate candidate-in-same-job.
+- Stage pipeline (Sourced → Screening → Submitted to BDM → Submitted to Client
+  → Interview → Offer → Placed) with the BDM approval gate, plus
+  `submission_activity` audit per move and recruiter assignment scoping.
+
+Remaining gaps to make it enterprise-grade:
+- **Resume parsing + bulk import** (upload → extract name/email/phone/skills —
+  reuse `jd-parser`'s skill dictionaries for the skills side).
+- **Candidate dedupe** on email/phone at insert, with merge flow.
+- **Real search**: Postgres full-text + skill/tag filters (ILIKE-only today).
+- Candidate-side timeline (every job they've been submitted to, calls, notes) —
+  falls out of the audit layer below.
+- **Complexity: Medium — ~2–3 weeks**, because the hard schema/workflow part is done.
+
+## 7. Module G — Full audit trail ("every change recorded, shown to user and leadership")
+
+The requirement: every action — note added, call made, email sent/received,
+stage moved, reminder set/done, login — recorded with who/what/when and
+visible at the right level.
+
+- Foundations exist: `activity_log`, `domain_events` + event bus,
+  `submission_activity`. The gap is **coverage and uniformity**, not plumbing.
+- One rule: **every mutating endpoint emits a domain event** (`actor / verb /
+  object / job / org / timestamp`). Enforce with a thin wrapper so new routes
+  can't forget. Events are append-only (no update/delete) = audit-grade.
+- Three read surfaces from the same stream:
+  1. **Entity timeline** — everything on this job / POC / candidate, in order;
+  2. **My day** — the user's own activity (drives the daily-workflow home
+     screen: leads to review, emails to send, calls queued, reminders due);
+  3. **Leadership** — org → team → user drill-down, exception feeds (missed
+     day-3 touches, replies unanswered > 24 h, idle users), nightly
+     `user_daily_stats` rollups so dashboards never scan raw events.
+- **Complexity: Medium — ~2–3 weeks**, mostly sweeping existing routes onto the
+  bus + the rollup job + UI.
+
+## 8. Module D — Multi-tenancy (the structural prerequisite)
 
 Today the system is single-org. Selling either mode to other organizations requires:
 
@@ -197,20 +290,59 @@ Today the system is single-org. Selling either mode to other organizations requi
 
 ---
 
-## 6. Suggested sequencing
+## 9. Scaling to 1000–2000+ users per org (the honest architecture answer)
+
+Feature-wise nothing above changes at 2000 seats. Architecturally, several
+things that are fine today become the bottleneck, and enterprise buyers add
+non-feature requirements:
+
+1. **Stateless, horizontally scaled API.** Today: one Node process holding
+   in-memory state (send-progress mirror, pause flags, caches). Multi-instance
+   deployment needs that state in **Redis**, and sticky assumptions removed.
+2. **Real job queue.** The cron loops (send loop, sweeps, warm-up pool,
+   dialer webhooks, transcription, rollups) run in-process today — two
+   instances would double-send. Move background work to a queue with worker
+   processes (**BullMQ/Redis** or `pg-boss`), idempotent jobs, retries,
+   dead-letter visibility.
+3. **Durable event bus.** The in-process `events.js` bus doesn't cross
+   instances. Domain events already persist to Postgres — subscribers should
+   consume from the durable stream (listen/notify or the queue), not memory.
+4. **Database at volume.** 2000 users × events/emails/calls = tens of millions
+   of rows/yr: partition `domain_events`/`emails`/`calls` by month, rollup
+   tables for every dashboard (never aggregate raw at read time), read
+   replicas for analytics, connection pooling (pgBouncer — Supabase provides).
+5. **Real-time layer.** Softphone events, queue counters, live timelines →
+   WebSocket/SSE service backed by Redis pub/sub, not the current polling
+   (which was already causing egress cost pain at ~10 users).
+6. **Enterprise access requirements** — at 1000+ seats these are *sales
+   blockers, not nice-to-haves*: **SSO (SAML/OIDC), SCIM user provisioning,
+   granular RBAC** (org → BU → team → user), IP allowlisting, audit-log
+   export, data-retention policies, and a **SOC 2 Type II** program
+   (recordings + candidate PII + mailbox access make this unavoidable; GDPR/
+   Indian DPDP compliance for global orgs).
+7. **Observability + limits**: per-org rate limiting, tracing, error budgets,
+   status page — buyers this size ask for uptime SLAs.
+
+None of this is exotic — it's the standard mid-size SaaS hardening pass — but
+it is **~2–3 months of dedicated platform work** layered across the phases,
+plus the (calendar-heavy, ongoing) SOC 2 effort.
+
+## 10. Suggested sequencing (revised with dialer, ATS hardening, scale)
 
 | Phase | Scope | Est. |
 |---|---|---|
-| 1 | D Multi-tenancy + B1 Gmail/Graph mailbox connect (start Google review immediately) | 5–6 wks |
-| 2 | B2 warm-up pool + B3 health/cure engine | 5–6 wks |
-| 3 | B4 conversation sync + AI notes/summaries; C visibility rollups/dashboards | 4–5 wks |
-| 4 | A1–A4 automatic RA engine (provider contracts in parallel from Phase 1) | 4–5 wks |
+| 1 | D Multi-tenancy + B1 Gmail/Graph mailbox connect (file Google review day 1) + platform groundwork (Redis, job queue, stateless API) | 6–8 wks |
+| 2 | B2 warm-up pool + B3 health/cure engine + G audit-trail coverage & rollups | 6–7 wks |
+| 3 | E dialer (Twilio softphone, queue, record→summarize pipeline) + B4 conversation sync/summaries | 6–8 wks |
+| 4 | A1–A4 automatic RA engine + F ATS hardening (resume parsing, dedupe, search) | 5–6 wks |
+| 5 | Scale/enterprise hardening completion: SSO/SCIM, partitioning, real-time layer, SOC 2 runway | 6–8 wks (overlaps 2–4) |
 
-Roughly **4.5–5.5 months of focused build** to the full vision, with sellable
-milestones at the end of every phase (Phase 1+2 alone = a SalesHandy
-alternative; Phase 4 completes the auto-RA differentiator).
+Roughly **7–9 months with a small team (3–4 engineers)** to the full
+2000-seat-ready vision; **4–5 months to a sellable SalesHandy-replacement +
+outreach product** for smaller orgs (end of Phase 2/3). Every phase ends
+sellable — don't wait for Phase 5 to start pilots with mid-size customers.
 
-## 7. Risks / hard constraints (flagging honestly)
+## 11. Risks / hard constraints (flagging honestly)
 
 1. **Indeed scraping is not viable for a commercial product** — licensed feeds
    or ATS sources instead (A1). Budget for data cost.
@@ -221,3 +353,9 @@ alternative; Phase 4 completes the auto-RA differentiator).
 5. **Enrichment cost per lead** is real COGS — meter it, cache it, price it in.
 6. **Provider sending caps** (Graph/Gmail per-day, per-minute) — the existing
    throttle/window machinery already handles this; keep it per-provider.
+7. **Unattended auto-dialing is regulated** (TCPA in the US, TRAI/DLT in
+   India): ship progressive dialing (agent-ready, one-click) with a per-region
+   recording-consent rule table — not machine-initiated robo-calls.
+8. **Call recordings + candidate PII raise the compliance bar** — retention
+   policies, encryption at rest, and SOC 2 stop being optional at enterprise
+   seat counts; start the program early because it's calendar-bound.
