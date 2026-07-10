@@ -1273,13 +1273,48 @@ app.post('/emails/reminder-send', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-function buildPendingEmailsFromJobs(jobs, callerUserId, bdMap, bdPrimaryEmailMap, tmplSettings) {
+// Returns a Set of "jobId:contactId" keys that already have a live initial
+// outreach email (sent, or pending/sending). Used to make initial-outreach
+// generation idempotent: a POC must never receive a second cold intro for the
+// same job just because that job was re-assigned / re-distributed / re-generated.
+async function fetchInitialOutreachedPairs(jobIds) {
+  const pairs = new Set();
+  const ids = [...new Set((jobIds || []).filter(Boolean))];
+  if (!ids.length) return pairs;
+  const CHUNK = 100;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const { data, error } = await supabase.from('emails')
+      .select('job_id,contact_id,status,followup_type')
+      .in('job_id', chunk)
+      .or('followup_type.is.null,followup_type.eq.initial');
+    if (error) { console.error('[GenerateEmails] outreach-dedup lookup failed:', error.message); continue; }
+    (data || []).forEach(r => {
+      // A failed/cancelled prior attempt may legitimately be re-sent; anything
+      // that went out or is queued blocks a duplicate.
+      if (r.contact_id && r.status !== 'failed' && r.status !== 'cancelled') {
+        pairs.add(`${r.job_id}:${r.contact_id}`);
+      }
+    });
+  }
+  return pairs;
+}
+
+function buildPendingEmailsFromJobs(jobs, callerUserId, bdMap, bdPrimaryEmailMap, tmplSettings, alreadyOutreached) {
   const tasksByBd = {};
   let contactsSkipped = 0;
+  let alreadyOutreachedSkipped = 0;
+  const outreachedSet = alreadyOutreached instanceof Set ? alreadyOutreached : new Set();
 
   for (const job of jobs) {
     const bd = bdMap[job.assigned_to_bd] || { id: callerUserId, name: '', email: '' };
-    const contacts = (job.contacts || []).filter(c => emailSyntaxValid(c.email));
+    let contacts = (job.contacts || []).filter(c => emailSyntaxValid(c.email));
+    // Skip contacts already sent (or queued) an initial outreach for this job —
+    // prevents duplicate cold emails to the same POC on re-generation.
+    contacts = contacts.filter(c => {
+      if (outreachedSet.has(`${job.id}:${c.id}`)) { alreadyOutreachedSkipped++; return false; }
+      return true;
+    });
     if (!contacts.length) {
       contactsSkipped++;
       continue;
@@ -1334,7 +1369,7 @@ function buildPendingEmailsFromJobs(jobs, callerUserId, bdMap, bdPrimaryEmailMap
     });
   }
 
-  return { emailsToInsert, contactsSkipped };
+  return { emailsToInsert, contactsSkipped, alreadyOutreachedSkipped };
 }
 
 // Standalone generation function — called directly by autoSendForManager (no HTTP)
@@ -1373,10 +1408,12 @@ async function generateEmailsForJobs(job_ids, callerUserId) {
   const tmplSettings = {};
   (tmplRows || []).forEach(r => { tmplSettings[r.key] = r.value; });
 
-  const { emailsToInsert, contactsSkipped } = buildPendingEmailsFromJobs(
-    jobs, callerUserId, bdMap, bdPrimaryEmailMap, tmplSettings
+  const alreadyOutreached = await fetchInitialOutreachedPairs(jobs.map(j => j.id));
+  const { emailsToInsert, contactsSkipped, alreadyOutreachedSkipped } = buildPendingEmailsFromJobs(
+    jobs, callerUserId, bdMap, bdPrimaryEmailMap, tmplSettings, alreadyOutreached
   );
   if (contactsSkipped) console.log(`[GenerateEmails] ${contactsSkipped} jobs had no valid contacts — skipped`);
+  if (alreadyOutreachedSkipped) console.log(`[GenerateEmails] ${alreadyOutreachedSkipped} contacts already had an initial outreach for their job — skipped to avoid duplicate cold emails`);
   // Insert emails in batches of 500 to avoid Supabase payload limits
   const INSERT_BATCH = 500;
   let totalInserted = 0;
@@ -1422,8 +1459,9 @@ app.post('/emails/generate', auth, async (req, res) => {
     const tmplSettings = {};
     (tmplRows || []).forEach(r => { tmplSettings[r.key] = r.value; });
 
-    const { emailsToInsert } = buildPendingEmailsFromJobs(
-      jobs, req.user.id, bdMap, bdPrimaryEmailMap, tmplSettings
+    const alreadyOutreached = await fetchInitialOutreachedPairs(jobs.map(j => j.id));
+    const { emailsToInsert, alreadyOutreachedSkipped } = buildPendingEmailsFromJobs(
+      jobs, req.user.id, bdMap, bdPrimaryEmailMap, tmplSettings, alreadyOutreached
     );
     if (emailsToInsert.length) {
       const { error: insErr } = await supabase.from('emails').insert(emailsToInsert);
@@ -1431,6 +1469,7 @@ app.post('/emails/generate', auth, async (req, res) => {
     }
     res.json({
       generated: emailsToInsert.length,
+      skipped_already_outreached: alreadyOutreachedSkipped || 0,
       failed: 0,
       failDetails: []
     });
@@ -2228,6 +2267,43 @@ async function autoSendForManager(managerId) {
 }
 
 
+// Per-BD-manager RA automation mode: 'auto' (default — leads auto-enroll and the
+// outreach sequence sends itself) or 'manual' (leads are assigned but the BD
+// generates and sends outreach themselves). Read at assignment time.
+async function getManagerRaMode(bdId) {
+  if (!bdId) return 'auto';
+  const { data } = await supabase.from('app_settings').select('value').eq('key', `u_${bdId}_ra_mode`).limit(1);
+  return (data && data[0] && data[0].value === 'manual') ? 'manual' : 'auto';
+}
+
+// Admin/leads read the RA mode for one or all BD managers.
+app.get('/admin/manager-ra-modes', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Forbidden' });
+    const { data } = await supabase.from('app_settings').select('key,value').like('key', 'u_%_ra_mode');
+    const modes = {};
+    (data || []).forEach(r => {
+      const m = /^u_(.+)_ra_mode$/.exec(r.key);
+      if (m) modes[m[1]] = r.value === 'manual' ? 'manual' : 'auto';
+    });
+    res.json({ modes });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Admin/leads set one BD manager to 'auto' or 'manual' RA mode.
+app.post('/admin/manager-ra-mode', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Forbidden' });
+    const bdId = req.body && req.body.bd_id;
+    const mode = req.body && req.body.mode;
+    if (!bdId || (mode !== 'auto' && mode !== 'manual')) return res.status(400).json({ error: 'bd_id and mode (auto|manual) required' });
+    const { error } = await supabase.from('app_settings').upsert({ key: `u_${bdId}_ra_mode`, value: mode, updated_at: new Date() }, { onConflict: 'key' });
+    if (error) throw error;
+    console.log(`[RaMode] Manager ${bdId} set to ${mode.toUpperCase()} by user ${req.user.id}`);
+    res.json({ success: true, bd_id: bdId, mode });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/distribute/execute', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'RA Lead only' });
@@ -2318,6 +2394,11 @@ app.post('/distribute/execute', auth, async (req, res) => {
     // assignment time. Pre-charging here made the auto-sender read a phantom "full" quota and
     // defer every queued email, so nothing actually left the mailbox.
 
+    // Respect the manager's RA mode: 'manual' assigns the leads but leaves
+    // outreach to the BD (no auto follow-up schedule, no auto generate+send).
+    const raMode = await getManagerRaMode(manager_id);
+    const autoSend = raMode !== 'manual';
+
     // Create follow-up rows
     const jobIds = selected.map(j => j.id);
     const outreachDateStr = now.toISOString().split('T')[0];
@@ -2338,13 +2419,16 @@ app.post('/distribute/execute', auth, async (req, res) => {
         followUpRows.push({ job_id: aj.id, contact_id: c.id, user_email_id: aj.sending_email_id, outreach_sent_at: outreachDateStr, followup1_due_date: fu1Str, followup2_due_date: fu2Str, status: 'active' });
       }
     }
-    if (followUpRows.length) await supabase.from('follow_ups').insert(followUpRows);
+    // In manual mode, skip the automatic follow-up schedule — the BD drives
+    // outreach (and its follow-ups) by hand.
+    if (autoSend && followUpRows.length) await supabase.from('follow_ups').insert(followUpRows);
 
-    // Announce the assignment — the lead.assigned subscriber generates the
-    // emails and triggers the send (distribute pipeline, now event-driven).
-    emit(EVENTS.LEAD_ASSIGNED, { jobIds, managerId: manager_id, actorUserId: req.user.id });
+    // Announce the assignment. In auto mode the lead.assigned subscriber
+    // generates the emails and triggers the send; in manual mode it records the
+    // assignment for audit but does not auto-send (autoSend:false).
+    emit(EVENTS.LEAD_ASSIGNED, { jobIds, managerId: manager_id, actorUserId: req.user.id, autoSend });
 
-    res.json({ success: true, total_assigned: selected.length, manager_id, by_freshness: used.freshness, by_industry: used.industry, by_timezone: used.timezone, email_accounts_used: new Set(assignedLeads.map(l => l.user_email_id)).size, ratio_summary: ratio.summary || '', assigned_at: now.toISOString(), auto_send: true });
+    res.json({ success: true, total_assigned: selected.length, manager_id, by_freshness: used.freshness, by_industry: used.industry, by_timezone: used.timezone, email_accounts_used: new Set(assignedLeads.map(l => l.user_email_id)).size, ratio_summary: ratio.summary || '', assigned_at: now.toISOString(), auto_send: autoSend, ra_mode: raMode });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
