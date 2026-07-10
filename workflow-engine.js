@@ -31,9 +31,13 @@ function createWorkflowEngine({ supabase, emit, EVENTS }) {
   const contextLoaders = new Map();
   let ticking = false;
 
-  function registerChannel(name, executor) { channels.set(name, executor); }
+  function registerChannel(name, executor, meta) { channels.set(name, { executor, meta: meta || {} }); }
   function registerContextLoader(entityType, loader) { contextLoaders.set(entityType, loader); }
   function listChannels() { return [...channels.keys()]; }
+  // Rich channel catalogue for the builder: which entity_type(s) each channel
+  // applies to, plus a human label. Lets the UI show only the channels that fit
+  // the sequence's entity type (contact vs submission …).
+  function describeChannels() { return [...channels.entries()].map(([name, v]) => ({ name, ...(v.meta || {}) })); }
 
   const todayStr = () => new Date().toISOString().split('T')[0];
   function addDays(dateStr, days) {
@@ -130,7 +134,8 @@ function createWorkflowEngine({ supabase, emit, EVENTS }) {
       return { outcome: 'exited' };
     }
 
-    const executor = channels.get(step.channel);
+    const ch = channels.get(step.channel);
+    const executor = ch && ch.executor;
     let result;
     if (!executor) {
       result = { outcome: 'failed', detail: { error: `No executor registered for channel "${step.channel}"` } };
@@ -208,7 +213,7 @@ function createWorkflowEngine({ supabase, emit, EVENTS }) {
     }
   }
 
-  return { registerChannel, registerContextLoader, listChannels, enroll, exitEntity, tick };
+  return { registerChannel, registerContextLoader, listChannels, describeChannels, enroll, exitEntity, tick };
 }
 
 module.exports = { createWorkflowEngine };

@@ -10,7 +10,7 @@ module.exports = (ctx) => {
   const router = express.Router();
   const { supabase, auth, hasRole, engine, logActivity } = ctx;
 
-  const canDesign = (req) => hasRole(req, 'admin', 'ra_lead', 'bd_lead');
+  const canDesign = (req) => hasRole(req, 'admin', 'ra_lead', 'bd_lead', 'recruiter');
 
   const DEF_SELECT = '*, steps:workflow_steps(*), creator:users!created_by(id,name)';
 
@@ -25,7 +25,10 @@ module.exports = (ctx) => {
     });
   }
 
-  router.get('/wf/channels', auth, (req, res) => res.json({ channels: engine.listChannels() }));
+  router.get('/wf/channels', auth, (req, res) => res.json({
+    channels: engine.listChannels(),
+    catalogue: engine.describeChannels ? engine.describeChannels() : engine.listChannels().map(name => ({ name }))
+  }));
 
   router.get('/wf/definitions', auth, async (req, res) => {
     try {
@@ -122,6 +125,41 @@ module.exports = (ctx) => {
       const msg = err.message || 'enroll failed';
       res.status(/not found|not active|already|expects|no steps/i.test(msg) ? 400 : 500).json({ error: msg });
     }
+  });
+
+  // ── Bulk enroll a SELECTION into a workflow ("Start sequence") ─────────────
+  // Body: { workflow_id, entity_type, items:[{entity_id, job_id?, contact_id?}] }
+  // or { workflow_id, entity_type, entity_ids:[...] , job_id? }. Enrolls each;
+  // "already enrolled" is counted as skipped, not an error.
+  router.post('/wf/enroll-bulk', auth, async (req, res) => {
+    try {
+      const b = req.body || {};
+      if (!b.workflow_id) return res.status(400).json({ error: 'workflow_id required' });
+      const entityType = b.entity_type || 'contact';
+      const items = Array.isArray(b.items) && b.items.length
+        ? b.items
+        : (Array.isArray(b.entity_ids) ? b.entity_ids.map(id => ({ entity_id: id })) : []);
+      if (!items.length) return res.status(400).json({ error: 'items or entity_ids required' });
+      const out = { enrolled: 0, skipped: 0, errors: [] };
+      for (const it of items) {
+        const entityId = it.entity_id || it.contact_id;
+        if (!entityId) { out.errors.push({ entity_id: null, error: 'missing entity_id' }); continue; }
+        const jobId = it.job_id || b.job_id || null;
+        try {
+          await engine.enroll({
+            workflow_id: b.workflow_id, entity_type: entityType, entity_id: entityId,
+            job_id: jobId, contact_id: it.contact_id || (entityType === 'contact' ? entityId : null),
+            enrolled_by: req.user.id, metadata: it.metadata || b.metadata || {}
+          });
+          out.enrolled++;
+          if (jobId) await logActivity(jobId, it.contact_id || null, req.user.id, 'workflow_enrolled', 'Enrolled in sequence', null, null);
+        } catch (e) {
+          if (/already/i.test(e.message || '')) out.skipped++;
+          else out.errors.push({ entity_id: entityId, error: e.message });
+        }
+      }
+      res.json(out);
+    } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   router.get('/wf/enrollments', auth, async (req, res) => {
