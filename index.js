@@ -1273,13 +1273,48 @@ app.post('/emails/reminder-send', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-function buildPendingEmailsFromJobs(jobs, callerUserId, bdMap, bdPrimaryEmailMap, tmplSettings) {
+// Returns a Set of "jobId:contactId" keys that already have a live initial
+// outreach email (sent, or pending/sending). Used to make initial-outreach
+// generation idempotent: a POC must never receive a second cold intro for the
+// same job just because that job was re-assigned / re-distributed / re-generated.
+async function fetchInitialOutreachedPairs(jobIds) {
+  const pairs = new Set();
+  const ids = [...new Set((jobIds || []).filter(Boolean))];
+  if (!ids.length) return pairs;
+  const CHUNK = 100;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const { data, error } = await supabase.from('emails')
+      .select('job_id,contact_id,status,followup_type')
+      .in('job_id', chunk)
+      .or('followup_type.is.null,followup_type.eq.initial');
+    if (error) { console.error('[GenerateEmails] outreach-dedup lookup failed:', error.message); continue; }
+    (data || []).forEach(r => {
+      // A failed/cancelled prior attempt may legitimately be re-sent; anything
+      // that went out or is queued blocks a duplicate.
+      if (r.contact_id && r.status !== 'failed' && r.status !== 'cancelled') {
+        pairs.add(`${r.job_id}:${r.contact_id}`);
+      }
+    });
+  }
+  return pairs;
+}
+
+function buildPendingEmailsFromJobs(jobs, callerUserId, bdMap, bdPrimaryEmailMap, tmplSettings, alreadyOutreached) {
   const tasksByBd = {};
   let contactsSkipped = 0;
+  let alreadyOutreachedSkipped = 0;
+  const outreachedSet = alreadyOutreached instanceof Set ? alreadyOutreached : new Set();
 
   for (const job of jobs) {
     const bd = bdMap[job.assigned_to_bd] || { id: callerUserId, name: '', email: '' };
-    const contacts = (job.contacts || []).filter(c => emailSyntaxValid(c.email));
+    let contacts = (job.contacts || []).filter(c => emailSyntaxValid(c.email));
+    // Skip contacts already sent (or queued) an initial outreach for this job —
+    // prevents duplicate cold emails to the same POC on re-generation.
+    contacts = contacts.filter(c => {
+      if (outreachedSet.has(`${job.id}:${c.id}`)) { alreadyOutreachedSkipped++; return false; }
+      return true;
+    });
     if (!contacts.length) {
       contactsSkipped++;
       continue;
@@ -1334,7 +1369,7 @@ function buildPendingEmailsFromJobs(jobs, callerUserId, bdMap, bdPrimaryEmailMap
     });
   }
 
-  return { emailsToInsert, contactsSkipped };
+  return { emailsToInsert, contactsSkipped, alreadyOutreachedSkipped };
 }
 
 // Standalone generation function — called directly by autoSendForManager (no HTTP)
@@ -1373,10 +1408,12 @@ async function generateEmailsForJobs(job_ids, callerUserId) {
   const tmplSettings = {};
   (tmplRows || []).forEach(r => { tmplSettings[r.key] = r.value; });
 
-  const { emailsToInsert, contactsSkipped } = buildPendingEmailsFromJobs(
-    jobs, callerUserId, bdMap, bdPrimaryEmailMap, tmplSettings
+  const alreadyOutreached = await fetchInitialOutreachedPairs(jobs.map(j => j.id));
+  const { emailsToInsert, contactsSkipped, alreadyOutreachedSkipped } = buildPendingEmailsFromJobs(
+    jobs, callerUserId, bdMap, bdPrimaryEmailMap, tmplSettings, alreadyOutreached
   );
   if (contactsSkipped) console.log(`[GenerateEmails] ${contactsSkipped} jobs had no valid contacts — skipped`);
+  if (alreadyOutreachedSkipped) console.log(`[GenerateEmails] ${alreadyOutreachedSkipped} contacts already had an initial outreach for their job — skipped to avoid duplicate cold emails`);
   // Insert emails in batches of 500 to avoid Supabase payload limits
   const INSERT_BATCH = 500;
   let totalInserted = 0;
@@ -1422,8 +1459,9 @@ app.post('/emails/generate', auth, async (req, res) => {
     const tmplSettings = {};
     (tmplRows || []).forEach(r => { tmplSettings[r.key] = r.value; });
 
-    const { emailsToInsert } = buildPendingEmailsFromJobs(
-      jobs, req.user.id, bdMap, bdPrimaryEmailMap, tmplSettings
+    const alreadyOutreached = await fetchInitialOutreachedPairs(jobs.map(j => j.id));
+    const { emailsToInsert, alreadyOutreachedSkipped } = buildPendingEmailsFromJobs(
+      jobs, req.user.id, bdMap, bdPrimaryEmailMap, tmplSettings, alreadyOutreached
     );
     if (emailsToInsert.length) {
       const { error: insErr } = await supabase.from('emails').insert(emailsToInsert);
@@ -1431,6 +1469,7 @@ app.post('/emails/generate', auth, async (req, res) => {
     }
     res.json({
       generated: emailsToInsert.length,
+      skipped_already_outreached: alreadyOutreachedSkipped || 0,
       failed: 0,
       failDetails: []
     });
