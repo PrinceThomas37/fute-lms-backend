@@ -2218,10 +2218,12 @@ function renderDeliverability(){
 }
 
 // ── WORKFLOWS (engine UI: definitions, builder, enrollments) ─────────────────
-var WF_CHANNEL_LABELS={email:'Email',bd_touch:'BD touch',reminder:'Reminder',stage_move:'Stage move'};
+var WF_CHANNEL_LABELS={email:'Email',bd_touch:'BD touch',reminder:'Reminder',stage_move:'Stage move',candidate_email:'Email candidate',recruiter_task:'Recruiter task',submission_stage_move:'Move stage'};
+// Entity types a sequence can target, with their pipeline stages for stage-move steps.
+var WF_ENTITY_TYPES={contact:{label:'Leads (contacts)',domain:'sales',stages:['Unassigned','Assigned','Connected','Rejected','Future','In Discussion']},submission:{label:'Candidates (recruiting)',domain:'recruiting',stages:['Sourced','Screening','Submitted to BDM','Submitted to Client','Interview','Offer','Placed','Rejected']}};
 var WF_STATUS_COLORS={active:'var(--green)',paused:'var(--amber)',completed:'var(--accent)',exited:'var(--text3)',failed:'var(--red)',draft:'var(--amber)',archived:'var(--text3)'};
 function wfStatusBadge(s,extra){ var c=WF_STATUS_COLORS[s]||'var(--text3)'; return '<span style="font-size:10px;padding:2px 8px;border-radius:6px;font-weight:700;background:'+c+'22;color:'+c+'">'+htmlEsc(s+(extra?' · '+extra:''))+'</span>'; }
-function wfStepLabel(s){ var lbl=WF_CHANNEL_LABELS[s.channel]||s.channel; if(s.channel==='email'&&s.config&&s.config.template_key)lbl+=' ('+s.config.template_key+')'; if(s.channel==='stage_move'&&s.config&&s.config.to_stage)lbl+=' → '+s.config.to_stage; return lbl; }
+function wfStepLabel(s){ var lbl=WF_CHANNEL_LABELS[s.channel]||s.channel; if(s.channel==='email'&&s.config&&s.config.template_key)lbl+=' ('+s.config.template_key+')'; if((s.channel==='stage_move'||s.channel==='submission_stage_move')&&s.config&&s.config.to_stage)lbl+=' → '+s.config.to_stage; return lbl; }
 function wfChain(steps){ return (steps||[]).map(function(s,i){ return (i>0?'<span style="color:var(--text3)"> → +'+s.delay_days+'d </span>':'')+'<span style="font-weight:600">'+htmlEsc(wfStepLabel(s))+'</span>'; }).join(''); }
 
 function loadWorkflows(){
@@ -2230,9 +2232,9 @@ function loadWorkflows(){
     apiGet('/wf/definitions').catch(function(){return [];}),
     apiGet('/wf/enrollments').catch(function(){return [];}),
     apiGet('/wf/stats').catch(function(){return {by_workflow:{},total:0};}),
-    apiGet('/wf/channels').catch(function(){return {channels:['email','bd_touch','reminder','stage_move']};})
+    apiGet('/wf/channels').catch(function(){return {channels:['email','bd_touch','reminder','stage_move'],catalogue:[]};})
   ]).then(function(r){
-    STATE.wf={defs:r[0]||[],enrollments:r[1]||[],stats:r[2]||{by_workflow:{}},channels:(r[3]&&r[3].channels)||[]};
+    STATE.wf={defs:r[0]||[],enrollments:r[1]||[],stats:r[2]||{by_workflow:{}},channels:(r[3]&&r[3].channels)||[],catalogue:(r[3]&&r[3].catalogue)||[]};
     STATE.wfDefs=r[0]||[];
     STATE._wfLoading=false; scheduleRender();
   });
@@ -2249,16 +2251,32 @@ window.wfToggleRuns=function(id){
 window.wfSetFilter=function(k,v){ STATE.wfFilter=STATE.wfFilter||{}; STATE.wfFilter[k]=v; scheduleRender(); };
 
 // ── builder modal ──
-function wfBlankStep(){ return {name:'',channel:'email',delay_days:2,config:{template_key:'fu1',thread:true}}; }
-window.wfOpenBuilder=function(id){
+function wfChannelsForEntity(et){
+  var cat=(STATE.wf&&STATE.wf.catalogue)||[];
+  var list=cat.filter(function(c){return !c.entity_types||c.entity_types.indexOf(et)>-1;}).map(function(c){return c.name;});
+  if(!list.length)list=et==='submission'?['candidate_email','recruiter_task','submission_stage_move']:['email','bd_touch','reminder','stage_move'];
+  return list;
+}
+function wfDefaultConfig(channel){
+  if(channel==='email')return {template_key:'fu1',thread:true};
+  if(channel==='candidate_email')return {subject:'',body:''};
+  if(channel==='stage_move')return {to_stage:'Connected'};
+  if(channel==='submission_stage_move')return {to_stage:'Screening'};
+  return {note:'',message:''};
+}
+function wfDefaultStep(et){ return et==='submission'?{name:'Email the candidate',channel:'candidate_email',delay_days:0,config:{subject:'',body:''}}:{name:'Initial outreach email',channel:'email',delay_days:0,config:{template_key:'initial',thread:false}}; }
+function wfBlankStep(){ var et=(STATE.wfBuilder&&STATE.wfBuilder.entity_type)||'contact'; var ch=wfChannelsForEntity(et)[0]||'email'; return {name:'',channel:ch,delay_days:2,config:wfDefaultConfig(ch)}; }
+window.wfOpenBuilder=function(id,entityType,enrollAfter){
   var b;
   if(id){ var d=(STATE.wf&&STATE.wf.defs||[]).find(function(x){return x.id===id;}); if(!d)return;
-    b={id:d.id,name:d.name,description:d.description||'',domain:d.domain||'sales',steps:(d.steps||[]).map(function(s){return {name:s.name,channel:s.channel,delay_days:s.delay_days,config:Object.assign({},s.config||{})};})};
-  } else b={id:null,name:'',description:'',domain:'sales',steps:[{name:'Initial outreach email',channel:'email',delay_days:0,config:{template_key:'initial',thread:false}}]};
-  STATE.wfBuilder=b; refreshWfBuilder();
+    b={id:d.id,name:d.name,description:d.description||'',domain:d.domain||'sales',entity_type:d.entity_type||'contact',steps:(d.steps||[]).map(function(s){return {name:s.name,channel:s.channel,delay_days:s.delay_days,config:Object.assign({},s.config||{})};})};
+  } else { var et=entityType||'contact'; b={id:null,name:'',description:'',domain:(WF_ENTITY_TYPES[et]&&WF_ENTITY_TYPES[et].domain)||'sales',entity_type:et,steps:[wfDefaultStep(et)]}; }
+  if(enrollAfter)b._enrollAfter=enrollAfter;
+  STATE.wfStart=null; STATE.wfBuilder=b; refreshWfBuilder();
 };
 window.wfBuilderField=function(k,v){ if(STATE.wfBuilder)STATE.wfBuilder[k]=v; };
-window.wfStepField=function(i,k,v){ var s=STATE.wfBuilder&&STATE.wfBuilder.steps[i]; if(!s)return; if(k==='delay_days')v=parseInt(v,10)||0; s[k]=v; if(k==='channel'){ s.config=v==='email'?{template_key:'fu1',thread:true}:(v==='stage_move'?{to_stage:'Connected'}:{note:'',message:''}); refreshWfBuilder(); } };
+window.wfSetEntityType=function(et){ var b=STATE.wfBuilder; if(!b)return; b.entity_type=et; b.domain=(WF_ENTITY_TYPES[et]&&WF_ENTITY_TYPES[et].domain)||'sales'; b.steps=[wfDefaultStep(et)]; refreshWfBuilder(); };
+window.wfStepField=function(i,k,v){ var s=STATE.wfBuilder&&STATE.wfBuilder.steps[i]; if(!s)return; if(k==='delay_days')v=parseInt(v,10)||0; s[k]=v; if(k==='channel'){ s.config=wfDefaultConfig(v); refreshWfBuilder(); } };
 window.wfStepCfg=function(i,k,v){ var s=STATE.wfBuilder&&STATE.wfBuilder.steps[i]; if(!s)return; if(k==='thread')v=!!v; s.config=s.config||{}; s.config[k]=v; };
 window.wfAddStep=function(){ STATE.wfBuilder.steps.push(wfBlankStep()); refreshWfBuilder(); };
 window.wfRemoveStep=function(i){ STATE.wfBuilder.steps.splice(i,1); refreshWfBuilder(); };
@@ -2267,23 +2285,80 @@ window.wfSaveDefinition=function(){
   var b=STATE.wfBuilder; if(!b)return;
   if(!b.name){ showToast('Name is required','warning'); return; }
   if(!b.steps.length){ showToast('Add at least one step','warning'); return; }
-  var payload={name:b.name,description:b.description,domain:b.domain,steps:b.steps};
+  var payload={name:b.name,description:b.description,domain:b.domain,entity_type:b.entity_type||'contact',steps:b.steps};
+  var isNew=!b.id, enrollAfter=b._enrollAfter;
   var req=b.id?apiPut('/wf/definitions/'+b.id,payload):apiPost('/wf/definitions',payload);
-  req.then(function(){ showToast(b.id?'Workflow updated':'Workflow created (draft — activate it to enroll)','success'); STATE.wfBuilder=null; closeModal(); loadWorkflows(); })
-     .catch(function(e){ showToast('Save failed: '+(e&&e.message||e),'error'); });
+  req.then(function(res){
+    STATE.wfBuilder=null; closeModal();
+    if(isNew&&enrollAfter&&res&&res.id){
+      // Created from "Start sequence": activate it, then enroll the selection.
+      apiPost('/wf/definitions/'+res.id+'/status',{status:'active'})
+        .then(function(){ wfEnrollSelectionInto(res.id,enrollAfter.entity_type,enrollAfter.items); })
+        .catch(function(e){ showToast('Created, but activate failed: '+(e&&e.message||e),'error'); loadWorkflows(); });
+    } else {
+      showToast(b.id?'Sequence updated':'Sequence created (draft — activate it to enroll)','success'); loadWorkflows();
+    }
+  }).catch(function(e){ showToast('Save failed: '+(e&&e.message||e),'error'); });
 };
+// ── "Start sequence" on a selection (bulk enroll) ──
+window.wfStartSequence=function(entityType,items){
+  if(!items||!items.length){ showToast('Select at least one '+(entityType==='submission'?'candidate':'lead'),'warning'); return; }
+  STATE.wfStart={entity_type:entityType,items:items};
+  if(STATE.wf===undefined&&!STATE._wfLoading)loadWorkflows();
+  renderWfStartModal();
+};
+window.wfStartBuildNew=function(){ var st=STATE.wfStart; if(!st)return; wfOpenBuilder(null,st.entity_type,{entity_type:st.entity_type,items:st.items}); };
+window.wfEnrollSelectionInto=function(workflowId,entityType,items){
+  var et=entityType||(STATE.wfStart&&STATE.wfStart.entity_type)||'contact';
+  var its=items||(STATE.wfStart&&STATE.wfStart.items)||[];
+  if(!its.length)return;
+  apiPost('/wf/enroll-bulk',{workflow_id:workflowId,entity_type:et,items:its.map(function(x){return {entity_id:x.entity_id,job_id:x.job_id||null,contact_id:x.contact_id||null};})})
+    .then(function(r){
+      var msg='Enrolled '+(r.enrolled||0)+(r.skipped?', '+r.skipped+' already in it':'')+(r.errors&&r.errors.length?', '+r.errors.length+' failed':'');
+      showToast(msg,(r.enrolled?'success':'warning'));
+      STATE.wfStart=null; if(STATE.bd)STATE.bd.seqSel=[]; closeModal(); loadWorkflows();
+    })
+    .catch(function(e){ showToast('Enroll failed: '+(e&&e.message||e),'error'); });
+};
+function renderWfStartModal(){
+  var st=STATE.wfStart; if(!st)return;
+  var defs=((STATE.wf&&STATE.wf.defs)||[]).filter(function(d){return (d.entity_type||'contact')===st.entity_type&&d.status==='active';});
+  var rows=defs.map(function(d){
+    return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:7px">'+
+      '<div style="min-width:0"><div style="font-weight:600;font-size:13px">'+htmlEsc(d.name)+'</div><div style="font-size:11.5px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+wfChain(d.steps)+'</div></div>'+
+      '<button class="btn btn-sm btn-primary" onclick="wfEnrollSelectionInto(\''+d.id+'\')">Start</button>'+
+    '</div>';
+  }).join('')||'<div style="font-size:12.5px;color:var(--text3);padding:6px 2px 12px">No active '+(st.entity_type==='submission'?'recruiting':'sales')+' sequences yet — build one below.</div>';
+  STATE.modal='<div class="modal modal-w480" style="max-height:88vh;overflow-y:auto">'+
+    '<div class="mh"><div class="mt">Start sequence · '+st.items.length+' '+(st.entity_type==='submission'?'candidate(s)':'lead(s)')+'</div></div>'+
+    '<div class="mb_">'+
+      '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Pick an existing sequence to enroll the selection, or build and name a new one.</div>'+
+      rows+
+      '<button onclick="wfStartBuildNew()" class="btn btn-outline btn-sm" style="width:100%;margin-top:4px">+ Build a new sequence</button>'+
+    '</div>'+
+    '<div class="mf"><button class="btn btn-outline" onclick="STATE.wfStart=null;closeModal()">Cancel</button></div>'+
+  '</div>';
+  render();
+}
 function refreshWfBuilder(){
   var b=STATE.wfBuilder; if(!b)return;
-  var channels=(STATE.wf&&STATE.wf.channels)||['email','bd_touch','reminder','stage_move'];
-  var stages=['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'];
+  if(!b.entity_type)b.entity_type='contact';
+  var channels=wfChannelsForEntity(b.entity_type);
+  var stages=(WF_ENTITY_TYPES[b.entity_type]&&WF_ENTITY_TYPES[b.entity_type].stages)||['Unassigned','Assigned','Connected','Rejected','Future','In Discussion'];
   var stepRows=b.steps.map(function(s,i){
     var chanOpts=channels.map(function(c){return '<option value="'+c+'"'+(s.channel===c?' selected':'')+'>'+(WF_CHANNEL_LABELS[c]||c)+'</option>';}).join('');
     var cfg='';
     if(s.channel==='email'){
       cfg='<select onchange="wfStepCfg('+i+',\'template_key\',this.value)" style="font-size:12px;padding:5px;border:1px solid var(--border);border-radius:6px;background:var(--bg)">'+['initial','fu1','fu2'].map(function(k){return '<option value="'+k+'"'+((s.config&&s.config.template_key)===k?' selected':'')+'>'+k+'</option>';}).join('')+'</select>'+
         '<label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:4px"><input type="checkbox" '+(s.config&&s.config.thread?'checked':'')+' onchange="wfStepCfg('+i+',\'thread\',this.checked)">thread</label>';
-    } else if(s.channel==='stage_move'){
+    } else if(s.channel==='candidate_email'){
+      cfg='<div style="display:flex;flex-direction:column;gap:5px;width:100%">'+
+        '<input placeholder="Subject (leave blank for default; vars: {{first_name}} {{position}} {{client}})" value="'+htmlEsc(s.config&&s.config.subject||'')+'" oninput="wfStepCfg('+i+',\'subject\',this.value)" style="font-size:12px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg)">'+
+        '<textarea placeholder="Email body (blank = default; vars ok, HTML)" oninput="wfStepCfg('+i+',\'body\',this.value)" style="font-size:12px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg);min-height:56px;font-family:inherit">'+htmlEsc(s.config&&s.config.body||'')+'</textarea></div>';
+    } else if(s.channel==='stage_move'||s.channel==='submission_stage_move'){
       cfg='<select onchange="wfStepCfg('+i+',\'to_stage\',this.value)" style="font-size:12px;padding:5px;border:1px solid var(--border);border-radius:6px;background:var(--bg)">'+stages.map(function(st){return '<option value="'+st+'"'+((s.config&&s.config.to_stage)===st?' selected':'')+'>'+st+'</option>';}).join('')+'</select>';
+    } else if(s.channel==='recruiter_task'){
+      cfg='<input placeholder="Task note (e.g. Call the candidate, collect docs)" value="'+htmlEsc(s.config&&s.config.note||'')+'" oninput="wfStepCfg('+i+',\'note\',this.value)" style="font-size:12px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg);flex:1;min-width:160px">';
     } else {
       cfg='<input placeholder="Task note" value="'+htmlEsc(s.config&&s.config.note||'')+'" oninput="wfStepCfg('+i+',\'note\',this.value)" style="font-size:12px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg);flex:1;min-width:120px">'+
         '<input placeholder="Suggested message (vars ok)" value="'+htmlEsc(s.config&&s.config.message||'')+'" oninput="wfStepCfg('+i+',\'message\',this.value)" style="font-size:12px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg);flex:1;min-width:120px">';
@@ -2303,12 +2378,15 @@ function refreshWfBuilder(){
       '</div>'+
     '</div>';
   }).join('');
+  var entityPicker=b.id
+    ? '<div style="font-size:12px;color:var(--text3);margin-bottom:12px">Applies to: <b style="color:var(--text2)">'+((WF_ENTITY_TYPES[b.entity_type]||{}).label||b.entity_type)+'</b></div>'
+    : '<select onchange="wfSetEntityType(this.value)" class="inp" style="margin-bottom:12px">'+Object.keys(WF_ENTITY_TYPES).map(function(et){return '<option value="'+et+'"'+(b.entity_type===et?' selected':'')+'>'+WF_ENTITY_TYPES[et].label+'</option>';}).join('')+'</select>';
   STATE.modal='<div class="modal modal-w480" style="max-height:88vh;overflow-y:auto">'+
-    '<div class="mh"><div class="mt">'+(b.id?'Edit workflow':'New workflow')+'</div></div>'+
+    '<div class="mh"><div class="mt">'+(b.id?'Edit sequence':'New sequence')+'</div></div>'+
     '<div class="mb_">'+
-      '<input placeholder="Workflow name" value="'+htmlEsc(b.name)+'" oninput="wfBuilderField(\'name\',this.value)" class="inp" style="margin-bottom:8px">'+
+      '<input placeholder="Sequence name (e.g. Java Dev – Client X pipeline)" value="'+htmlEsc(b.name)+'" oninput="wfBuilderField(\'name\',this.value)" class="inp" style="margin-bottom:8px">'+
       '<input placeholder="Description" value="'+htmlEsc(b.description)+'" oninput="wfBuilderField(\'description\',this.value)" class="inp" style="margin-bottom:8px">'+
-      '<select onchange="wfBuilderField(\'domain\',this.value)" class="inp" style="margin-bottom:12px">'+['sales','delivery','ops'].map(function(d){return '<option value="'+d+'"'+(b.domain===d?' selected':'')+'>'+d+'</option>';}).join('')+'</select>'+
+      entityPicker+
       '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Steps (delay counts from the previous step)</div>'+
       stepRows+
       '<button onclick="wfAddStep()" style="border:1px dashed var(--border2);background:transparent;color:var(--text2);border-radius:8px;padding:7px;width:100%;cursor:pointer;font-size:12px">+ Add step</button>'+
@@ -8393,8 +8471,37 @@ window.deleteContact=function(cid){
         '</div>'+
         '<div style="display:flex;flex-wrap:wrap;gap:8px">'+(recChips||'<span style="font-size:12.5px;color:var(--text3)">No recruiters assigned.</span>')+'</div>'+
       '</div>'+
+      seqCandidatesCard(j.id)+
       bdFunnelCard(j.id)+
     '</div>';
+  };
+
+  // Candidates on this job with multi-select → "Start sequence" (bulk enroll).
+  function seqCandidatesCard(jid){
+    var subs=(STATE.bd.submissions||[]).filter(function(s){return s.job_order_id===jid;});
+    var sel=STATE.bd.seqSel||[];
+    var rows=subs.map(function(s){
+      var c=s.candidate||{}; var on=sel.indexOf(s.id)>-1;
+      return '<div style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--border)">'+
+        '<input type="checkbox" '+(on?'checked':'')+' onclick="bdToggleSeqSel(\''+s.id+'\')" style="cursor:pointer">'+
+        '<div style="flex:1;min-width:0"><span style="font-weight:600;font-size:13px">'+esc(c.full_name||'Candidate')+'</span> '+code(c.candidate_code||'')+'</div>'+
+        '<span style="font-size:11px;color:var(--text3)">'+esc(s.stage||'')+'</span>'+
+      '</div>';
+    }).join('')||'<div style="font-size:12.5px;color:var(--text3);padding:6px 2px">No candidates on this job yet.</div>';
+    return '<div class="card" style="padding:16px;margin-bottom:16px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
+        '<div style="font-weight:600;font-size:14px">Candidates ('+subs.length+')</div>'+
+        '<button class="btn btn-sm btn-primary" '+(sel.length?'':'disabled style="opacity:.45;cursor:default"')+' onclick="bdStartSequence()">▶ Start sequence'+(sel.length?' ('+sel.length+')':'')+'</button>'+
+      '</div>'+rows+
+      (sel.length?'':'<div style="font-size:11.5px;color:var(--text3);margin-top:8px">Tick candidates, then Start sequence to set up automated outreach for them.</div>')+
+    '</div>';
+  }
+  window.bdToggleSeqSel=function(sid){ STATE.bd.seqSel=STATE.bd.seqSel||[]; var i=STATE.bd.seqSel.indexOf(sid); if(i>-1)STATE.bd.seqSel.splice(i,1); else STATE.bd.seqSel.push(sid); render(); };
+  window.bdStartSequence=function(){
+    var sel=STATE.bd.seqSel||[]; if(!sel.length)return;
+    var subs=(STATE.bd.submissions||[]);
+    var items=sel.map(function(sid){ var s=subs.find(function(x){return x.id===sid;})||{}; var c=s.candidate||{}; return {entity_id:sid,label:c.full_name||'Candidate'}; });
+    wfStartSequence('submission',items);
   };
 
   function bdFunnelCard(jid){
