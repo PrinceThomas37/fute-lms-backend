@@ -2267,6 +2267,43 @@ async function autoSendForManager(managerId) {
 }
 
 
+// Per-BD-manager RA automation mode: 'auto' (default — leads auto-enroll and the
+// outreach sequence sends itself) or 'manual' (leads are assigned but the BD
+// generates and sends outreach themselves). Read at assignment time.
+async function getManagerRaMode(bdId) {
+  if (!bdId) return 'auto';
+  const { data } = await supabase.from('app_settings').select('value').eq('key', `u_${bdId}_ra_mode`).limit(1);
+  return (data && data[0] && data[0].value === 'manual') ? 'manual' : 'auto';
+}
+
+// Admin/leads read the RA mode for one or all BD managers.
+app.get('/admin/manager-ra-modes', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Forbidden' });
+    const { data } = await supabase.from('app_settings').select('key,value').like('key', 'u_%_ra_mode');
+    const modes = {};
+    (data || []).forEach(r => {
+      const m = /^u_(.+)_ra_mode$/.exec(r.key);
+      if (m) modes[m[1]] = r.value === 'manual' ? 'manual' : 'auto';
+    });
+    res.json({ modes });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Admin/leads set one BD manager to 'auto' or 'manual' RA mode.
+app.post('/admin/manager-ra-mode', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Forbidden' });
+    const bdId = req.body && req.body.bd_id;
+    const mode = req.body && req.body.mode;
+    if (!bdId || (mode !== 'auto' && mode !== 'manual')) return res.status(400).json({ error: 'bd_id and mode (auto|manual) required' });
+    const { error } = await supabase.from('app_settings').upsert({ key: `u_${bdId}_ra_mode`, value: mode, updated_at: new Date() }, { onConflict: 'key' });
+    if (error) throw error;
+    console.log(`[RaMode] Manager ${bdId} set to ${mode.toUpperCase()} by user ${req.user.id}`);
+    res.json({ success: true, bd_id: bdId, mode });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/distribute/execute', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'RA Lead only' });
@@ -2357,6 +2394,11 @@ app.post('/distribute/execute', auth, async (req, res) => {
     // assignment time. Pre-charging here made the auto-sender read a phantom "full" quota and
     // defer every queued email, so nothing actually left the mailbox.
 
+    // Respect the manager's RA mode: 'manual' assigns the leads but leaves
+    // outreach to the BD (no auto follow-up schedule, no auto generate+send).
+    const raMode = await getManagerRaMode(manager_id);
+    const autoSend = raMode !== 'manual';
+
     // Create follow-up rows
     const jobIds = selected.map(j => j.id);
     const outreachDateStr = now.toISOString().split('T')[0];
@@ -2377,13 +2419,16 @@ app.post('/distribute/execute', auth, async (req, res) => {
         followUpRows.push({ job_id: aj.id, contact_id: c.id, user_email_id: aj.sending_email_id, outreach_sent_at: outreachDateStr, followup1_due_date: fu1Str, followup2_due_date: fu2Str, status: 'active' });
       }
     }
-    if (followUpRows.length) await supabase.from('follow_ups').insert(followUpRows);
+    // In manual mode, skip the automatic follow-up schedule — the BD drives
+    // outreach (and its follow-ups) by hand.
+    if (autoSend && followUpRows.length) await supabase.from('follow_ups').insert(followUpRows);
 
-    // Announce the assignment — the lead.assigned subscriber generates the
-    // emails and triggers the send (distribute pipeline, now event-driven).
-    emit(EVENTS.LEAD_ASSIGNED, { jobIds, managerId: manager_id, actorUserId: req.user.id });
+    // Announce the assignment. In auto mode the lead.assigned subscriber
+    // generates the emails and triggers the send; in manual mode it records the
+    // assignment for audit but does not auto-send (autoSend:false).
+    emit(EVENTS.LEAD_ASSIGNED, { jobIds, managerId: manager_id, actorUserId: req.user.id, autoSend });
 
-    res.json({ success: true, total_assigned: selected.length, manager_id, by_freshness: used.freshness, by_industry: used.industry, by_timezone: used.timezone, email_accounts_used: new Set(assignedLeads.map(l => l.user_email_id)).size, ratio_summary: ratio.summary || '', assigned_at: now.toISOString(), auto_send: true });
+    res.json({ success: true, total_assigned: selected.length, manager_id, by_freshness: used.freshness, by_industry: used.industry, by_timezone: used.timezone, email_accounts_used: new Set(assignedLeads.map(l => l.user_email_id)).size, ratio_summary: ratio.summary || '', assigned_at: now.toISOString(), auto_send: autoSend, ra_mode: raMode });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

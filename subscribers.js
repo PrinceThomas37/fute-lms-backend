@@ -61,7 +61,13 @@ function registerSubscribers(deps) {
   // event-driven. Replicates the prior background generate+send block exactly,
   // including its progress reporting.
   on(EVENTS.LEAD_ASSIGNED, async (e) => {
-    const { jobIds, managerId } = e.payload;
+    const { jobIds, managerId, autoSend } = e.payload;
+    // Manual-RA managers: the assignment is recorded (this event) for audit, but
+    // no emails are generated or sent — the BD drives outreach by hand.
+    if (autoSend === false) {
+      console.log(`[AutoSend] Manager ${managerId} is in MANUAL mode — ${(jobIds || []).length} leads assigned, skipping auto generate+send`);
+      return;
+    }
     try {
       console.log(`[AutoSend] Starting background generate+send for manager ${managerId}, ${(jobIds || []).length} jobs`);
       await setSendProgress(managerId, { active: true, total: 0, sent: 0, failed: 0, current: 'Generating emails...', failDetails: [], startedAt: new Date().toISOString(), autoSend: true });
