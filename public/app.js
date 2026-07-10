@@ -1290,7 +1290,13 @@ function bindJobsControls(){
   if(st)st.onchange=function(){STATE.jobsFilter.stage=this.value;render();};
 }
 
-function openJob(id){ STATE.detailJob=id; STATE.modal={type:"jobDetail",id:id}; render(); if(typeof loadJobEnrollments==='function')loadJobEnrollments(id); }
+function openJob(id){ STATE.detailJob=id; STATE.jobSeqSel=[]; STATE.modal={type:"jobDetail",id:id}; render(); if(typeof loadJobEnrollments==='function')loadJobEnrollments(id); }
+window.jobToggleSeqSel=function(cid){ STATE.jobSeqSel=STATE.jobSeqSel||[]; var i=STATE.jobSeqSel.indexOf(cid); if(i>-1)STATE.jobSeqSel.splice(i,1); else STATE.jobSeqSel.push(cid); render(); };
+window.jobStartSequence=function(jobId){
+  var sel=STATE.jobSeqSel||[]; if(!sel.length)return;
+  var items=sel.map(function(cid){ var c=STATE.contacts.find(function(x){return x.id===cid;})||{}; return {entity_id:cid,job_id:jobId,contact_id:cid,label:((c.first_name||'')+' '+(c.last_name||'')).trim()||'Contact'}; });
+  wfStartSequence('contact',items);
+};
 // From the send-results panel: open the failed lead's detail.
 function closeAndOpenLead(jobId){ if(jobId){ openJob(jobId); } }
 // Manually dismiss the send-results panel (stays put until dismissed when there are failures).
@@ -1312,6 +1318,7 @@ function renderJobDetailModal(){
   var emailStatusLabels={valid:'Valid',invalid:'Invalid',deactivated:'Deactivated',out_of_office:'Out of Office'};
   var canChangeEmailStatus=userHasAnyRole(u,'admin','bd','bd_lead');
 
+  var seqSel=STATE.jobSeqSel||[];
   var contactRows=cs.map(function(c){
     var es=c.email_status||'valid';
     var esColor=emailStatusColors[es]||'var(--text3)';
@@ -1323,8 +1330,10 @@ function renderJobDetailModal(){
           return '<option value="'+s+'"'+(es===s?' selected':'')+'>'+emailStatusLabels[s]+'</option>';
         }).join('')+
       '</select>':'';
+    var selectable=c.email&&!wfContactEnrollment(j.id,c.id);
     return '<div style="background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:12px;margin-bottom:8px">'+
       '<div style="display:flex;justify-content:space-between;align-items:start;gap:8px">'+
+        (selectable?'<input type="checkbox" '+(seqSel.indexOf(c.id)>-1?'checked':'')+' onclick="jobToggleSeqSel(\''+c.id+'\')" style="margin-top:3px;cursor:pointer" title="Select for Start sequence">':'')+
         '<div style="flex:1">'+
           '<div style="font-weight:600;color:var(--text)">'+escHtml((c.first_name||"")+" "+(c.last_name||""))+(c.is_primary?' <span style="background:rgba(16,185,129,.15);color:#10b981;padding:2px 7px;border-radius:8px;font-size:10px;margin-left:4px">PRIMARY</span>':'')+'</div>'+
           '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+escHtml(c.designation||"—")+'</div>'+
@@ -1362,7 +1371,10 @@ function renderJobDetailModal(){
         (canEdit?'<textarea id="job-notes" onblur="saveJobNotes(\''+j.id+'\',this.value)" style="width:100%;margin-top:5px;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:13px;min-height:64px;resize:vertical;font-family:inherit">'+escHtml(j.notes||"")+'</textarea>':'<div style="margin-top:5px;font-size:13px;color:var(--text)">'+escHtml(j.notes||"—")+'</div>')+
       '</div>'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-size:13px;font-weight:600;color:var(--text)">Contacts ('+cs.length+')</div>'+
-        (canEdit?'<button onclick="openAddContact(\''+j.id+'\')" style="background:var(--accent);color:#fff;border:0;padding:6px 12px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer">+ Add Contact</button>':'')+
+        '<div style="display:flex;gap:6px">'+
+          (seqSel.length?'<button onclick="jobStartSequence(\''+j.id+'\')" style="background:var(--accent);color:#fff;border:0;padding:6px 12px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer">▶ Start sequence ('+seqSel.length+')</button>':'')+
+          (canEdit?'<button onclick="openAddContact(\''+j.id+'\')" style="background:var(--accent);color:#fff;border:0;padding:6px 12px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer">+ Add Contact</button>':'')+
+        '</div>'+
       '</div>'+
       contactRows+
       renderResearchSection(j, canEditResearch(u,j))+
