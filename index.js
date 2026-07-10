@@ -3479,7 +3479,7 @@ wfEngine.registerChannel('email', async ({ step, enrollment, context }) => {
   if (error) return { outcome: 'failed', detail: { error: error.message } };
   if (bdId) emit(EVENTS.FOLLOWUP_QUEUED, { bdIds: [bdId] });
   return { outcome: 'done', detail: { email_id: emailRow.id, followup_type: followupType || 'initial' } };
-});
+}, { entity_types: ['contact'], label: 'Email the POC', domains: ['sales'] });
 
 // bd_touch / reminder channels — create a dated task for the BD (call +
 // LinkedIn touch with the profile link and a prefilled message) or a generic
@@ -3504,8 +3504,8 @@ async function wfReminderExecutor({ step, enrollment, context }) {
   if (job?.id) await logActivity(job.id, contact?.id || null, assignee, 'workflow_task_created', `${step.name} (workflow)`, null, null);
   return { outcome: 'done', detail: { assignee } };
 }
-wfEngine.registerChannel('bd_touch', wfReminderExecutor);
-wfEngine.registerChannel('reminder', wfReminderExecutor);
+wfEngine.registerChannel('bd_touch', wfReminderExecutor, { entity_types: ['contact'], label: 'BD call + LinkedIn touch', domains: ['sales'] });
+wfEngine.registerChannel('reminder', wfReminderExecutor, { entity_types: ['contact'], label: 'Reminder / task', domains: ['sales'] });
 
 // stage_move channel — a workflow step can advance the pipeline itself.
 wfEngine.registerChannel('stage_move', async ({ step, enrollment, context }) => {
@@ -3518,7 +3518,118 @@ wfEngine.registerChannel('stage_move', async ({ step, enrollment, context }) => 
   if (error) return { outcome: 'failed', detail: { error: error.message } };
   await logActivity(job.id, null, enrollment.enrolled_by, 'workflow_stage_move', `Stage → ${toStage} (workflow)`, job.stage, toStage);
   return { outcome: 'done', detail: { from: job.stage, to: toStage } };
+}, { entity_types: ['contact'], label: 'Move job stage', domains: ['sales'] });
+
+// ── Recruiting domain: sequences that act on a SUBMISSION (a candidate for a
+// specific job order). Reuses the same engine — new context loader + channels,
+// zero engine edits. entity_type 'submission'; entity_id = submissions.id.
+wfEngine.registerContextLoader('submission', async (enrollment) => {
+  const { data: sub } = await supabase.from('submissions')
+    .select('*, candidate:candidates(*), job_order:job_orders(*, company:companies(name))')
+    .eq('id', enrollment.entity_id).is('deleted_at', null).maybeSingle();
+  if (!sub) return null;
+  return { submission: sub, candidate: sub.candidate || null, job_order: sub.job_order || null };
 });
+
+// The recruiter's connected sending mailbox (primary first), or null if none.
+async function recruiterSendingMailbox(recruiterId) {
+  if (!recruiterId) return null;
+  const { data: mailboxes } = await supabase.from('user_emails')
+    .select('id,email_address,display_name,is_primary,is_active,daily_send_limit')
+    .eq('user_id', recruiterId).order('is_primary', { ascending: false });
+  if (!mailboxes?.length) return null;
+  const { data: tokens } = await supabase.from('microsoft_tokens')
+    .select('user_email_id').in('user_email_id', mailboxes.map(m => m.id));
+  const connected = new Set((tokens || []).map(t => t.user_email_id));
+  return mailboxes.find(m => connected.has(m.id) && m.is_active !== false) || null;
+}
+
+function buildCandidateVars({ candidate, job_order }) {
+  const first = (candidate?.full_name || '').trim().split(/\s+/)[0] || 'there';
+  return {
+    first_name: first, full_name: candidate?.full_name || '', title: candidate?.current_title || '',
+    location: candidate?.current_location || '', position: job_order?.job_title || '',
+    client: job_order?.client || job_order?.company?.name || '', company: job_order?.company?.name || job_order?.client || '',
+    job_code: job_order?.job_code || ''
+  };
+}
+
+const DEFAULT_CANDIDATE_EMAIL = {
+  subject: 'Opportunity: {{position}}',
+  body: 'Hi {{first_name}},<br><br>I came across your profile and thought of a {{position}} role we\'re working on with {{client}}. Would you be open to a quick chat about it?<br><br>Best regards'
+};
+
+// candidate_email — sends to the candidate through the recruiter's connected
+// mailbox (same Graph path as sales outreach), respecting pause + a daily cap.
+wfEngine.registerChannel('candidate_email', async ({ step, enrollment, context }) => {
+  const { candidate, job_order, submission } = context;
+  const cfg = step.config || {};
+  if (!candidate?.email || !emailSyntaxValid(candidate.email)) return { outcome: 'skipped', detail: { reason: 'no_candidate_email' } };
+  const suppressed = await loadSuppressedSet([candidate.email]);
+  if (suppressed.has(String(candidate.email).toLowerCase())) return { outcome: 'skipped', detail: { reason: 'suppressed' } };
+  const recruiterId = submission?.recruiter_id || enrollment.enrolled_by;
+  if (isSendingPaused() || isManagerPaused(recruiterId)) return { outcome: 'defer', detail: { reason: 'paused' } };
+  const mailbox = await recruiterSendingMailbox(recruiterId);
+  if (!mailbox) return { outcome: 'defer', detail: { reason: 'no_connected_mailbox' } };
+  const { data: sendLog } = await supabase.from('email_send_log').select('id,emails_sent').eq('send_date', today()).eq('user_email_id', mailbox.id).maybeSingle();
+  const cap = mailbox.daily_send_limit || 150;
+  if ((sendLog?.emails_sent || 0) >= cap) return { outcome: 'defer', detail: { reason: 'quota' } };
+
+  const vars = buildCandidateVars({ candidate, job_order });
+  const subject = fillTemplate(cfg.subject || DEFAULT_CANDIDATE_EMAIL.subject, vars);
+  const htmlBody = fillTemplate(cfg.body || DEFAULT_CANDIDATE_EMAIL.body, vars);
+  try {
+    const r = await sendMicrosoftNewMessage(mailbox.id, { to: candidate.email, subject, htmlBody });
+    await supabase.from('email_send_log').upsert(
+      { user_email_id: mailbox.id, send_date: today(), emails_sent: (sendLog?.emails_sent || 0) + 1 },
+      { onConflict: 'user_email_id,send_date' }
+    );
+    if (submission?.id) await supabase.from('submission_activity').insert({
+      submission_id: submission.id, job_order_id: job_order?.id || null, recruiter_id: recruiterId,
+      action: 'sequence_email_sent', note: `${step.name}: emailed ${candidate.email}`
+    });
+    return { outcome: 'done', detail: { to: candidate.email, graph_message_id: r.graphMessageId } };
+  } catch (e) { return { outcome: 'failed', detail: { error: e.message } }; }
+}, { entity_types: ['submission'], label: 'Email the candidate', domains: ['recruiting'] });
+
+// recruiter_task — a dated task for the recruiter (call the candidate, collect
+// docs, schedule an interview …), recorded as a reminder + submission activity.
+wfEngine.registerChannel('recruiter_task', async ({ step, enrollment, context }) => {
+  const { candidate, job_order, submission } = context;
+  const cfg = step.config || {};
+  const assignee = cfg.assignee_user_id || submission?.recruiter_id || enrollment.enrolled_by;
+  if (!assignee) return { outcome: 'skipped', detail: { reason: 'no_assignee' } };
+  const note = [cfg.note || step.name];
+  if (candidate?.phone) note.push(`Phone: ${candidate.phone}`);
+  const { error } = await supabase.from('reminders').insert({
+    job_id: null, user_id: assignee, contact_name: candidate?.full_name || 'Candidate',
+    company_name: job_order?.client || job_order?.company?.name || '', email: candidate?.email || null,
+    return_date: today(), reminder_time: cfg.time || '09:00', note: note.join('\n'),
+    status: 'pending', reminder_type: 'recruiter_task', contact_id: null
+  });
+  if (error) return { outcome: 'failed', detail: { error: error.message } };
+  if (submission?.id) await supabase.from('submission_activity').insert({
+    submission_id: submission.id, job_order_id: job_order?.id || null, recruiter_id: assignee,
+    action: 'sequence_task_created', note: `${step.name} (sequence)`
+  });
+  return { outcome: 'done', detail: { assignee } };
+}, { entity_types: ['submission'], label: 'Recruiter task', domains: ['recruiting'] });
+
+// submission_stage_move — advance the candidate's submission through its stages.
+wfEngine.registerChannel('submission_stage_move', async ({ step, enrollment, context }) => {
+  const toStage = (step.config || {}).to_stage;
+  const sub = context.submission;
+  if (!toStage) return { outcome: 'failed', detail: { error: 'config.to_stage required' } };
+  if (!sub) return { outcome: 'skipped', detail: { reason: 'no_submission' } };
+  if (sub.stage === toStage) return { outcome: 'skipped', detail: { reason: 'already_in_stage' } };
+  const { error } = await supabase.from('submissions').update({ stage: toStage, stage_updated_at: new Date().toISOString() }).eq('id', sub.id);
+  if (error) return { outcome: 'failed', detail: { error: error.message } };
+  await supabase.from('submission_activity').insert({
+    submission_id: sub.id, job_order_id: sub.job_order_id || null, recruiter_id: sub.recruiter_id || enrollment.enrolled_by,
+    action: 'sequence_stage_move', old_stage: sub.stage, new_stage: toStage, note: `Stage → ${toStage} (sequence)`
+  });
+  return { outcome: 'done', detail: { from: sub.stage, to: toStage } };
+}, { entity_types: ['submission'], label: 'Move submission stage', domains: ['recruiting'] });
 
 // Replies, unsubscribes, and bounces end the sequence — same exits the legacy
 // follow-up path honours, expressed once against the engine.
