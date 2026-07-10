@@ -783,8 +783,8 @@ function renderApp(){
   if(userHasRole(u,'admin'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
   // Admin + leads: Deliverability dashboard
   if(userHasAnyRole(u,'admin','bd_lead','ra_lead'))navItems.splice(navItems.length-1,0,{id:"deliverability",lbl:"Deliverability",ic:"dashboard"});
-  // Admin + leads + BDs: Workflows (BDs read-only — design actions gated in-view)
-  if(userHasAnyRole(u,'admin','bd_lead','ra_lead','bd'))navItems.splice(navItems.length-1,0,{id:"workflows",lbl:"Workflows",ic:"dashboard"});
+  // Sequence now lives inside the Email page as a tab (see renderEmail) — no
+  // standalone nav item, so it reads as part of outreach, not a separate module.
   // RA Lead + Admin: Assign Leads + Insights (RA team view)
   if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
   if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(navItems.length-1,0,{id:"insights",lbl:"Insights",ic:"dashboard"});
@@ -804,7 +804,7 @@ function renderApp(){
 
   var switchers=""; // removed — use team list to switch views
 
-  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",deliverability:"Deliverability & Replies",workflows:"Workflows",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",bdinsights:"My Insights",bdleadinsights:"Team Insights",profile:"My Profile",reminders:"Reminders"};
+  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",deliverability:"Deliverability & Replies",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",bdinsights:"My Insights",bdleadinsights:"Team Insights",profile:"My Profile",reminders:"Reminders"};
   var viewingName=STATE.viewingUser&&STATE.viewingUser.id!==u.id?" · Viewing: "+STATE.viewingUser.name:"";
 
   return '<div id="sidebar">'+
@@ -861,7 +861,7 @@ function renderPage(){
   if(STATE.page==="reminders")return renderReminders();
   if(STATE.page==="admin")return renderAdmin();
   if(STATE.page==="deliverability")return renderDeliverability();
-  if(STATE.page==="workflows")return renderWorkflows();
+  if(STATE.page==="workflows"){STATE.page="email";STATE.emailTab="sequence";return renderEmail();}
   if(STATE.page==="profile")return renderProfile();
   return "<div class='page'>Page not found</div>";
 }
@@ -1518,7 +1518,7 @@ function renderEmail(){
   var isBD=userHasAnyRole(u,'bd','bd_lead','admin','ra_lead');
   var pending=STATE.pendingEmails||[];
   var sentEmails=STATE.sentEmails||[];
-  var tabs=isBD?['pending','compose','sent','outreachplan']:['compose','sent','outreachplan'];
+  var tabs=isBD?['pending','compose','sent','outreachplan','sequence']:['compose','sent','outreachplan'];
   if(!STATE.emailTab)STATE.emailTab=isBD?'pending':'compose';
 
   // ── Sending paused banner — shown BEFORE the user tries to send, not just
@@ -2071,6 +2071,7 @@ function renderEmail(){
     (STATE.emailTab==='compose'?composeHtml:'')+
     (STATE.emailTab==='sent'?sentHtml:'')+
     (STATE.emailTab==='outreachplan'?tmplHtml:'')+
+    (STATE.emailTab==='sequence'?renderSequenceBody():'')+
   '</div>';
 }
 
@@ -2085,6 +2086,31 @@ function loadSendingStatus(){
     if(STATE.pausedManagers===undefined)STATE.pausedManagers=[];
   });
 }
+function loadManagerRaModes(){
+  if(STATE._raModesLoading)return;
+  STATE._raModesLoading=true;
+  apiGet('/admin/manager-ra-modes').then(function(r){
+    STATE.raModes=(r&&r.modes)||{};
+    STATE._raModesLoading=false;
+    scheduleRender();
+  }).catch(function(){ STATE._raModesLoading=false; if(STATE.raModes===undefined)STATE.raModes={}; });
+}
+window.toggleManagerRaMode=function(ev,bdId){
+  if(ev&&ev.stopPropagation)ev.stopPropagation();
+  var cur=(STATE.raModes&&STATE.raModes[bdId])||'auto';
+  var next=cur==='auto'?'manual':'auto';
+  var m=(STATE.users||[]).find(function(x){return x.id===bdId;})||{name:'this manager'};
+  if(next==='manual'&&!confirm('Switch '+m.name+' to MANUAL outreach?\n\nNew leads assigned to them will NOT auto-send. They generate and send outreach themselves. (Auto follow-ups are also skipped for new assignments.)'))return;
+  STATE.raModes=STATE.raModes||{};
+  STATE.raModes[bdId]=next; // optimistic
+  render();
+  apiPost('/admin/manager-ra-mode',{bd_id:bdId,mode:next}).then(function(){
+    showToast(m.name+' set to '+(next==='auto'?'Automatic':'Manual')+' RA','success');
+  }).catch(function(e){
+    STATE.raModes[bdId]=cur; render();
+    showToast('Failed: '+(e&&e.message||e),'error');
+  });
+};
 window.toggleSending=function(pause){
   if(pause&&!confirm('EMERGENCY STOP\n\nPause ALL outbound email sending right now?\n\nAny run in progress stops before the next email (already-sent mail cannot be recalled). Queued emails stay pending until you resume.'))return;
   apiPost(pause?'/admin/sending/pause':'/admin/sending/resume',{}).then(function(r){
@@ -2314,7 +2340,7 @@ function wfContactChip(jobId,c){
 window.wfJobEnrollmentAction=function(id,action,jobId){ apiPost('/wf/enrollments/'+id+'/'+action,{}).then(function(){ showToast('Enrollment '+action+(action==='exit'?'ed':'d'),'success'); loadJobEnrollments(jobId); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
 window.wfEnrollContact=function(contactId,jobId){
   var defs=(STATE.wfDefs||[]).filter(function(d){return d.status==='active'&&d.entity_type==='contact';});
-  if(!defs.length){ showToast('No active workflows — create and activate one in the Workflows page first','warning'); return; }
+  if(!defs.length){ showToast('No active sequence — create and activate one in Email → Sequence first','warning'); return; }
   if(defs.length===1){ wfDoEnroll(defs[0].id,contactId,jobId); return; }
   STATE.modal='<div class="modal modal-w480"><div class="mh"><div class="mt">Enroll in workflow</div></div><div class="mb_">'+
     defs.map(function(d){ return '<button onclick="wfDoEnroll(\''+d.id+'\',\''+contactId+'\',\''+jobId+'\')" style="display:block;width:100%;text-align:left;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;margin-bottom:7px;cursor:pointer"><div style="font-weight:600;font-size:13px;color:var(--text)">'+htmlEsc(d.name)+'</div><div style="font-size:11.5px;color:var(--text3);margin-top:3px">'+wfChain(d.steps)+'</div></button>'; }).join('')+
@@ -2327,14 +2353,14 @@ window.wfDoEnroll=function(workflowId,contactId,jobId){
     .catch(function(e){ showToast('Enroll failed: '+(e&&e.message||e),'error'); openJob(jobId); });
 };
 
-function renderWorkflows(){
+function renderSequenceBody(){
   var u=STATE.user;
-  if(!userHasAnyRole(u,'admin','bd_lead','ra_lead','bd'))return '<div class="page">Forbidden</div>';
+  if(!userHasAnyRole(u,'admin','bd_lead','ra_lead','bd'))return '<div style="padding:14px;color:var(--text3)">Forbidden</div>';
   if(STATE.wf===undefined&&!STATE._wfLoading){loadWorkflows();}
   var canDesign=userHasAnyRole(u,'admin','ra_lead','bd_lead');
   var canTick=userHasAnyRole(u,'admin','bd_lead');
   var wf=STATE.wf;
-  if(!wf)return '<div class="page"><div class="ph"><div class="ptitle">Workflows</div></div><div style="color:var(--text3)">Loading…</div></div>';
+  if(!wf)return '<div style="padding:14px;color:var(--text3)">Loading sequence…</div>';
   var tick=STATE.wfTickLog;
   var tickHtml=tick?(tick==='running'?'<span style="font-size:12px;color:var(--text3)">Running…</span>':'<span style="font-size:12px;color:var(--text2)">Last run: checked '+(tick.checked||0)+' · done '+(tick.done||0)+' · deferred '+(tick.deferred||0)+' · completed '+(tick.completed||0)+' · exited '+(tick.exited||0)+(tick.off?' · <b style="color:var(--red)">engine off — migration 007 not applied</b>':'')+'</span>'):'';
   var defCards=(wf.defs||[]).map(function(d){
@@ -2352,7 +2378,7 @@ function renderWorkflows(){
       (d.description?'<div style="font-size:12px;color:var(--text3);margin-top:5px">'+htmlEsc(d.description)+'</div>':'')+
       '<div style="font-size:12.5px;margin-top:8px">'+wfChain(d.steps)+'</div>'+
     '</div>';
-  }).join('')||'<div style="color:var(--text3);font-size:13px;padding:10px">No workflows yet'+(canDesign?' — create one.':'.')+'</div>';
+  }).join('')||'<div style="color:var(--text3);font-size:13px;padding:10px">No sequences yet'+(canDesign?' — create one.':'.')+'</div>';
 
   var f=STATE.wfFilter||{};
   var enr=(wf.enrollments||[]).filter(function(e){ return (!f.status||e.status===f.status)&&(!f.workflow||e.workflow_id===f.workflow); });
@@ -2387,17 +2413,17 @@ function renderWorkflows(){
     '</div>';
   }).join('')||'<div style="padding:14px;color:var(--text3);font-size:13px">No enrollments'+((f.status||f.workflow)?' match the filter.':' yet — open a lead and enroll a contact.')+'</div>';
 
-  return '<div class="page">'+
-    '<div class="ph"><div class="flex jb aic">'+
-      '<div><div class="ptitle">Workflows</div><div class="psub">Cadences as data — design the play, enroll contacts, the engine runs it</div></div>'+
+  return '<div>'+
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
+      '<div style="font-size:12.5px;color:var(--text3);max-width:600px;line-height:1.5">This is your outreach sequence — the steps every enrolled lead moves through (initial email → follow-ups → LinkedIn touch). Edit the steps, timing and templates here; no code changes. Enroll a contact from a lead\'s detail view.</div>'+
       '<div style="display:flex;gap:8px;align-items:center">'+tickHtml+
-        (canTick?'<button onclick="wfRunTick()" style="background:transparent;border:1px solid var(--border2);color:var(--text2);padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer">▶ Run engine now</button>':'')+
-        (canDesign?'<button onclick="wfOpenBuilder()" style="background:var(--accent);color:#fff;border:0;padding:7px 16px;border-radius:8px;font-size:13px;cursor:pointer">+ New workflow</button>':'')+
+        (canTick?'<button onclick="wfRunTick()" style="background:transparent;border:1px solid var(--border2);color:var(--text2);padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer">▶ Run sequence now</button>':'')+
+        (canDesign?'<button onclick="wfOpenBuilder()" style="background:var(--accent);color:#fff;border:0;padding:7px 16px;border-radius:8px;font-size:13px;cursor:pointer">+ New sequence</button>':'')+
       '</div>'+
-    '</div></div>'+
-    '<div style="font-weight:600;font-size:13px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Definitions</div>'+
+    '</div>'+
+    '<div style="font-weight:600;font-size:13px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Sequences</div>'+
     defCards+
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 8px"><div style="font-weight:600;font-size:13px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Enrollments ('+enr.length+')</div>'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 8px"><div style="font-weight:600;font-size:13px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Enrolled leads ('+enr.length+')</div>'+
       '<div style="display:flex;gap:6px"><select onchange="wfSetFilter(\'status\',this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)">'+stOpts+'</select>'+
       '<select onchange="wfSetFilter(\'workflow\',this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)">'+wfOpts+'</select></div>'+
     '</div>'+
@@ -2408,6 +2434,7 @@ function renderWorkflows(){
 function renderAdmin(){
   var u=STATE.user;
   if(STATE.sendingPaused===undefined){loadSendingStatus();}
+  if(STATE.raModes===undefined){loadManagerRaModes();}
   var selectedUserId=STATE.adminSelectedUser||null;
   if(selectedUserId){return renderAdminUserDetail(selectedUserId);}
 
@@ -2452,12 +2479,20 @@ function renderAdmin(){
     var emailCount=(STATE.userEmailsCache&&STATE.userEmailsCache[usr.id]||[]).length||
                    (STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===usr.id;}).length;
     var teamCount=assignments.filter(function(a){return a.manager_id===usr.id;}).length;
+    // Per-BD RA mode toggle (BD tab only) — auto = leads auto-send, manual = BD sends by hand.
+    var raChip='';
+    if(tab==='bd'){
+      var mode=(STATE.raModes&&STATE.raModes[usr.id])||'auto';
+      var isAuto=mode!=='manual';
+      raChip='<span onclick="toggleManagerRaMode(event,\''+usr.id+'\')" title="Click to switch between Automatic and Manual outreach for this BD" style="font-size:11px;padding:3px 9px;border-radius:8px;font-weight:600;cursor:pointer;background:'+(isAuto?'var(--accent-l)':'var(--amber-l,#fef3c7)')+';color:'+(isAuto?'var(--accent)':'var(--amber,#b45309)')+'">'+(isAuto?'⚙ Auto RA':'✋ Manual RA')+'</span>';
+    }
     return '<div onclick="STATE.adminSelectedUser=\''+usr.id+'\';loadUserEmails(\''+usr.id+'\');render()" style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer">'+
       av(usr,'36')+
       '<div style="flex:1;min-width:0">'+
         '<div style="font-weight:600;font-size:13.5px">'+htmlEsc(usr.name)+'</div>'+
         '<div style="font-size:11.5px;color:var(--text3)">'+htmlEsc(usr.email)+(usr.empId?' · '+htmlEsc(usr.empId):'')+'</div>'+
       '</div>'+
+      raChip+
       (roleLabel(usr.role)?'<span style="font-size:11px;padding:2px 8px;background:var(--bg);border:1px solid var(--border);color:var(--text2);border-radius:8px">'+htmlEsc(roleLabel(usr.role))+'</span>':'')+
       (emailCount?'<span style="font-size:11px;padding:2px 8px;background:var(--accent-l);color:var(--accent);border-radius:8px">'+emailCount+' email'+(emailCount>1?'s':'')+'</span>':'')+
       (teamCount?'<span style="font-size:11px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:8px">'+teamCount+' member'+(teamCount>1?'s':'')+'</span>':'')+
