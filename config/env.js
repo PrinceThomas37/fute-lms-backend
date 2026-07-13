@@ -1,0 +1,69 @@
+// ============================================================================
+// ENVIRONMENT CONFIGURATION
+// ----------------------------------------------------------------------------
+// Single place that reads process.env, validates it at startup, and hands the
+// rest of the app a plain config object. Secrets and deployment settings live
+// in environment variables (not the database, not source).
+//
+// Behaviour is intentionally preserved for existing deployments:
+//   - Only the three variables the app genuinely cannot run without are
+//     required (fail-fast). A running deployment already has them, so this only
+//     turns a late, confusing runtime failure into a clear startup error.
+//   - Optional integrations (Microsoft Graph, Anthropic) only warn.
+//   - MICROSOFT_REDIRECT_URI is now read from the environment (guide item #2)
+//     but falls back to the value that was previously hardcoded, so nothing
+//     changes until an env var is set.
+// ============================================================================
+
+// Previously hardcoded in index.js; kept as the fallback so current behaviour
+// is identical until MICROSOFT_REDIRECT_URI is set in the environment.
+const DEFAULT_MICROSOFT_REDIRECT_URI = 'https://fute-lms-backend.onrender.com/auth/microsoft/callback';
+// Protocol constant, not a per-deployment secret — safe to keep in code.
+const MICROSOFT_SCOPES = 'Mail.Send Mail.ReadWrite offline_access User.Read';
+
+function required(name) {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing required environment variable: ${name}`);
+  return value;
+}
+
+function loadConfig() {
+  const config = {
+    port: Number(process.env.PORT || 3000),
+    nodeEnv: process.env.NODE_ENV || 'development',
+
+    // Required — the server cannot function without these.
+    supabaseUrl: required('SUPABASE_URL'),
+    supabaseServiceKey: required('SUPABASE_SERVICE_KEY'),
+    jwtSecret: required('JWT_SECRET'),
+
+    // Optional integrations. Values are passed through unchanged (may be
+    // undefined) so downstream behaviour is identical to reading process.env.
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+    microsoft: {
+      tenantId: process.env.MICROSOFT_TENANT_ID,
+      clientId: process.env.MICROSOFT_CLIENT_ID,
+      clientSecret: process.env.MICROSOFT_CLIENT_SECRET,
+      redirectUri: process.env.MICROSOFT_REDIRECT_URI || DEFAULT_MICROSOFT_REDIRECT_URI,
+      scopes: MICROSOFT_SCOPES,
+    },
+  };
+
+  // Surface (but do not fail on) missing optional configuration so operators
+  // can see it in the logs instead of discovering it via a failing request.
+  const warnings = [];
+  if (!config.microsoft.tenantId || !config.microsoft.clientId || !config.microsoft.clientSecret) {
+    warnings.push('Microsoft Graph not fully configured (MICROSOFT_TENANT_ID / MICROSOFT_CLIENT_ID / MICROSOFT_CLIENT_SECRET) — email send and OAuth will be unavailable.');
+  }
+  if (!process.env.MICROSOFT_REDIRECT_URI) {
+    warnings.push(`MICROSOFT_REDIRECT_URI not set — defaulting to ${DEFAULT_MICROSOFT_REDIRECT_URI}`);
+  }
+  if (!config.anthropicApiKey) {
+    warnings.push('ANTHROPIC_API_KEY not set — AI generation endpoints will be unavailable.');
+  }
+  warnings.forEach((w) => console.warn('[config] ' + w));
+
+  return config;
+}
+
+module.exports = { loadConfig, DEFAULT_MICROSOFT_REDIRECT_URI, MICROSOFT_SCOPES };

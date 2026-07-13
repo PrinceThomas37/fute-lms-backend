@@ -40,11 +40,16 @@ const {
 const { EVENTS, emit, on } = require('./events');
 const registerSubscribers = require('./subscribers');
 const { scoreEmailContent, deliverabilityFlags, isOptOutReply } = require('./deliverability');
+const { loadConfig } = require('./config/env');
+
+// Validate environment and centralize config at startup (fails fast with a
+// clear message if a required secret is missing).
+const config = loadConfig();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = config.port;
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+const supabase = createClient(config.supabaseUrl, config.supabaseServiceKey);
 
 // ── MIDDLEWARE ─────────────────────────────────────────────────
 app.use(cors({ origin: '*', methods: ['GET','POST','PUT','PATCH','DELETE'], allowedHeaders: ['Content-Type','Authorization'] }));
@@ -3055,11 +3060,14 @@ loadPausedManagers();
 // ══════════════════════════════════════════════════════════════
 // MICROSOFT OAUTH
 // ══════════════════════════════════════════════════════════════
-const MS_TENANT   = process.env.MICROSOFT_TENANT_ID;
-const MS_CLIENT   = process.env.MICROSOFT_CLIENT_ID;
-const MS_SECRET   = process.env.MICROSOFT_CLIENT_SECRET;
-const MS_REDIRECT = 'https://fute-lms-backend.onrender.com/auth/microsoft/callback';
-const MS_SCOPES   = 'Mail.Send Mail.ReadWrite offline_access User.Read';
+// Sourced from config/env.js. MS_REDIRECT now reads MICROSOFT_REDIRECT_URI from
+// the environment, falling back to the previously hardcoded value so behaviour
+// is unchanged until that env var is set.
+const MS_TENANT   = config.microsoft.tenantId;
+const MS_CLIENT   = config.microsoft.clientId;
+const MS_SECRET   = config.microsoft.clientSecret;
+const MS_REDIRECT = config.microsoft.redirectUri;
+const MS_SCOPES   = config.microsoft.scopes;
 
 
 
