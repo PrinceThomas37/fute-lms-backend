@@ -13,10 +13,15 @@ import { spawn } from 'node:child_process';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const jwt = require('jsonwebtoken'); // already a project dependency
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const PORT = 20000 + Math.floor(Math.random() * 20000);
+const JWT_SECRET = 'test-secret';
 
 const child = spawn('node', ['index.js'], {
   cwd: ROOT,
@@ -44,6 +49,19 @@ function req(method, p) {
     r.on('timeout', () => { r.destroy(new Error('timeout')); });
     r.on('error', reject);
     r.end();
+  });
+}
+
+// POST JSON with an Authorization token; resolves { status, body }.
+function postJson(p, token, bodyObj) {
+  const payload = JSON.stringify(bodyObj || {});
+  return new Promise((resolve, reject) => {
+    const r = http.request({ host: '127.0.0.1', port: PORT, path: p, method: 'POST', timeout: 6000,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), Authorization: `Bearer ${token}` } },
+      (res) => { let b = ''; res.on('data', (d) => { b += d; }); res.on('end', () => resolve({ status: res.statusCode, body: b })); });
+    r.on('timeout', () => { r.destroy(new Error('timeout')); });
+    r.on('error', reject);
+    r.end(payload);
   });
 }
 
@@ -82,11 +100,40 @@ try {
   check('GET /admin/deliverability → 401 (extracted)', await req('GET', '/admin/deliverability'), 401);
   check('POST /ai/generate-email → 401 (extracted)', await req('POST', '/ai/generate-email'), 401);
   check('GET /events/recent → 401 (extracted)', await req('GET', '/events/recent'), 401);
+  check('GET /jobs → 401 (extracted)', await req('GET', '/jobs'), 401);
+  check('GET /jobs/today-summary → 401 (extracted)', await req('GET', '/jobs/today-summary'), 401);
+  check('POST /jobs/bulk → 401 (extracted)', await req('POST', '/jobs/bulk'), 401);
+  check('POST /parse-jd → 401 (extracted)', await req('POST', '/parse-jd'), 401);
+  check('GET /jobs/x/contacts → 401 (extracted)', await req('GET', '/jobs/x/contacts'), 401);
+  check('GET /jobs/x/activity → 401 (still inline)', await req('GET', '/jobs/x/activity'), 401);
+
+  // Dependency check: run the POST /jobs handler with a valid admin token and a
+  // minimal body. As an admin it skips the RA cooldown and reaches
+  // getTimezoneFromLocation + buildResearchFromLeadData BEFORE the first Supabase
+  // call, so a dependency that wasn't wired through ctx/require would surface as a
+  // ReferenceError ("X is not defined"). We expect a Supabase/network 500 instead.
+  {
+    const token = jwt.sign({ id: 'test-admin', roles: ['admin'], role: 'admin', name: 'T' }, JWT_SECRET);
+    // A missing pre-DB dependency (e.g. getTimezoneFromLocation / buildResearchFromLeadData)
+    // throws a ReferenceError BEFORE any Supabase call → a fast 500 whose body says
+    // "is not defined". If deps resolve, the handler reaches Supabase and hangs on the
+    // dead dummy host → our request times out. So: fast ReferenceError = FAIL;
+    // anything else (incl. timeout = reached the DB layer) = PASS.
+    let detail, ok;
+    try {
+      const { status, body } = await postJson('/jobs', token, { company_id: 'c1', position: 'Engineer' });
+      const isRefErr = /is not defined|is not a function/i.test(body);
+      ok = !isRefErr;
+      detail = `status=${status} body=${body.slice(0, 180)}`;
+    } catch (e) {
+      ok = true; // timeout = handler got past dep resolution into the Supabase call
+      detail = `reached DB layer (${e.message})`;
+    }
+    results.push({ name: 'POST /jobs handler resolves all deps (no ReferenceError)', ok, detail });
+  }
 
   // Still-inline routes unaffected.
-  check('GET /jobs → 401 (still inline)', await req('GET', '/jobs'), 401);
   check('GET /industries → 401 (still inline)', await req('GET', '/industries'), 401);
-  check('GET /jobs/x/contacts → 401 (still inline)', await req('GET', '/jobs/x/contacts'), 401);
 
   // Unknown path still 404s → proves the 401s above mean "route exists + gated".
   check('GET /definitely-not-a-route → 404', await req('GET', '/definitely-not-a-route'), 404);
