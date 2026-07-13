@@ -390,6 +390,7 @@ function renderAdmin(){
       '<div style="display:flex;gap:8px;align-items:center">'+
         (canSeeEngine?engineBtn:'')+
         (isAdmin?sysSettingsBtn:'')+
+        (isAdmin?'<button class="btn btn-sm" onclick="openPurgePending(\'all\')" style="background:transparent;color:var(--red);border:1px solid #fca5a5">Delete pending (all managers)…</button>':'')+
         '<button class="btn btn-primary btn-sm" onclick="openAddUser()">'+ico('plus',13)+'Add user</button>'+
       '</div>'+
     '</div></div>'+

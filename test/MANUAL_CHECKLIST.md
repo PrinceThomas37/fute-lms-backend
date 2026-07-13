@@ -36,6 +36,11 @@ reorganization, so anything that differs is a regression.
 - [ ] Guest mode still works and remains read-only (writes blocked by backend).
 
 ## Admin: delete pending emails (one manager / all managers)
+Reachable via: sidebar **Admin** → click a BD/BD-Lead user → **Control Center**
+card → "Delete pending…" (one manager), or sidebar **Admin** → header →
+"Delete pending (all managers)…" (all at once). (Earlier revisions of this
+feature put it on a "Manager Users" page with no nav link to it — fixed; both
+buttons now live on the Admin page, which the sidebar always links to.)
 - [ ] Preview count matches what's actually in the manager's pending queue.
 - [ ] Deleting only selected types/time removes exactly those and nothing else.
 - [ ] Sent emails and reminders are never affected.
