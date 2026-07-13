@@ -483,46 +483,8 @@ app.get('/api/version', (req, res) => res.json({
   branch: process.env.RENDER_GIT_BRANCH || null,
   deployedAt: process.env.RENDER || 'local'
 }));
-app.get('/industries', auth, (req, res) => res.json(INDUSTRIES));
-
-// ══════════════════════════════════════════════════════════════
-// AUTH
-// ══════════════════════════════════════════════════════════════
-
-// ══════════════════════════════════════════════════════════════
-// COMPANIES → extracted to routes/companies.js (mounted below)
-// ══════════════════════════════════════════════════════════════
-app.get('/lookup/zipcode', auth, async (req, res) => {
-  try {
-    const { zip } = req.query;
-    if (!zip || zip.length < 3) return res.json([]);
-    const resp = await fetch(`https://api.zippopotam.us/us/${zip.trim()}`);
-    if (!resp.ok) return res.json([]);
-    const data = await resp.json();
-    const places = (data.places || []).map(p => ({
-      zip: data['post code'], city: p['place name'], state: p['state'],
-      state_abbr: p['state abbreviation'],
-      display: `${p['place name']}, ${p['state abbreviation']} ${data['post code']}`
-    }));
-    res.json(places);
-  } catch (err) { res.json([]); }
-});
-
-app.post('/contacts/check-email', auth, async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) return res.json({ duplicate: false });
-    const twoMonthsAgo = new Date(); twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
-    const { data, error } = await supabase.from('contacts')
-      .select('id,first_name,last_name,email,created_at,job:jobs(id,position,company:companies(name))')
-      .eq('email', email.toLowerCase().trim()).gte('created_at', twoMonthsAgo.toISOString()).limit(1);
-    if (error) throw error;
-    if (!data?.length) return res.json({ duplicate: false });
-    const c = data[0];
-    const daysSince = Math.floor((new Date() - new Date(c.created_at)) / 86400000);
-    res.json({ duplicate: true, days_ago: daysSince, contact_name: `${c.first_name} ${c.last_name}`.trim(), company: c.job?.company?.name || '', position: c.job?.position || '' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+// /industries, /lookup/zipcode, /contacts/check-email → extracted to
+// routes/lookups.js (mounted below).
 
 // ══════════════════════════════════════════════════════════════
 // JOBS
@@ -2438,6 +2400,7 @@ app.use(require('./routes/ai')(routeCtx));
 app.use(require('./routes/events')(routeCtx));
 app.use(require('./routes/jobs')(routeCtx));
 app.use(require('./routes/emails')(routeCtx));
+app.use(require('./routes/lookups')(routeCtx));
 
 require('./bd_recruiter_routes')(app, { supabase, auth, hasRole, notGuest, today });
 

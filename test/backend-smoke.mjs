@@ -140,7 +140,9 @@ try {
   // Pipeline routes deliberately kept inline — still respond (401 without token).
   check('POST /emails/queue-all → 401 (still inline)', await req('POST', '/emails/queue-all'), 401);
   check('POST /emails/generate → 401 (still inline)', await req('POST', '/emails/generate'), 401);
-  check('GET /industries → 401 (still inline)', await req('GET', '/industries'), 401);
+  check('GET /industries → 401 (extracted)', await req('GET', '/industries'), 401);
+  check('GET /lookup/zipcode → 401 (extracted)', await req('GET', '/lookup/zipcode'), 401);
+  check('POST /contacts/check-email → 401 (extracted)', await req('POST', '/contacts/check-email'), 401);
 
   // Dependency check for the window-helper-heavy pending-summary route: an admin
   // token reaches getSendWindowHours + the window helpers before any per-row work.
