@@ -10,7 +10,37 @@
 <body>
 <div id="app"><div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;color:#64748B">Loading Fute Global LMS...</div></div>
 
-<script src="/app.js"></script>
+<!--
+  App scripts. These are ordered classic scripts split out of the former
+  single public/app.js. They share one global scope, so LOAD ORDER MATTERS
+  and must not be changed. See public/js/README.md.
+-->
+<script src="/js/01-seed-demo.js"></script>
+<script src="/js/02-state.js"></script>
+<script src="/js/03-core-render.js"></script>
+<script src="/js/04-shell-login.js"></script>
+<script src="/js/05-page-dashboard.js"></script>
+<script src="/js/06-page-leads.js"></script>
+<script src="/js/07-page-email.js"></script>
+<script src="/js/08-page-admin.js"></script>
+<script src="/js/09-page-workflows.js"></script>
+<script src="/js/10-page-modals.js"></script>
+<script src="/js/11-bind-and-actions.js"></script>
+<script src="/js/12-manager-users.js"></script>
+<script src="/js/13-pagination-mailmerge-actions.js"></script>
+<script src="/js/14-mailmerge-engine.js"></script>
+<script src="/js/15-ra-entry-form.js"></script>
+<script src="/js/16-insights.js"></script>
+<script src="/js/17-research.js"></script>
+<script src="/js/18-email-status-actions.js"></script>
+<script src="/js/19-distribution.js"></script>
+<script src="/js/20-email-accounts.js"></script>
+<script src="/js/21-assign-leads.js"></script>
+<script src="/js/22-api.js"></script>
+<script src="/js/23-auth-guest.js"></script>
+<script src="/js/24-jobs-wired.js"></script>
+<script src="/js/25-workflow-bd.js"></script>
+<script src="/js/26-boot.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </body>
 </html>
