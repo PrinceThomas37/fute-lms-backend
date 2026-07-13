@@ -34,3 +34,17 @@ reorganization, so anything that differs is a regression.
 - [ ] Background polling still refreshes jobs/emails as before.
 - [ ] Send-progress bar appears for BD users.
 - [ ] Guest mode still works and remains read-only (writes blocked by backend).
+
+## Admin: delete pending emails (one manager / all managers)
+- [ ] Preview count matches what's actually in the manager's pending queue.
+- [ ] Deleting only selected types/time removes exactly those and nothing else.
+- [ ] Sent emails and reminders are never affected.
+
+## Admin: System Settings (operational numbers)
+- [ ] Admin (not RA-Lead) sees the "System Settings" button on the Admin page.
+- [ ] Current values shown match the previous hardcoded defaults (21 / 24 / 20 / 5 / 5 / 20 / 3 / 200).
+- [ ] Saving a changed value persists — reopening the modal shows the new value.
+- [ ] Behavior actually changes: e.g. lower the company cooldown to 1 day and confirm
+      an RA can re-add a company after 1 day instead of 21; raise the workflow tick
+      batch and confirm more enrollments process per tick.
+- [ ] An out-of-range or non-numeric value is rejected with a clear message and nothing saves.

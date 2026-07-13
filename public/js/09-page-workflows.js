@@ -361,9 +361,14 @@ function renderAdmin(){
   }).join('');
 
   var canSeeEngine=userHasAnyRole(u,'admin','ra_lead');
+  var isAdmin=userHasRole(u,'admin');
   var engineBtn='<button onclick="openEmailEngineModal()" style="display:flex;align-items:center;gap:7px;padding:7px 14px;background:var(--card);border:1px solid var(--border2);border-radius:8px;font-size:13px;color:var(--text2);cursor:pointer">'+
     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'+
     'Email Engine Schedule'+
+  '</button>';
+  var sysSettingsBtn='<button onclick="openSystemSettingsModal()" style="display:flex;align-items:center;gap:7px;padding:7px 14px;background:var(--card);border:1px solid var(--border2);border-radius:8px;font-size:13px;color:var(--text2);cursor:pointer">'+
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>'+
+    'System Settings'+
   '</button>';
 
   var paused=STATE.sendingPaused;
@@ -384,6 +389,7 @@ function renderAdmin(){
       '<div><div class="ptitle">Admin</div><div class="psub">'+allUsers.length+' users · Fute Global LLC</div></div>'+
       '<div style="display:flex;gap:8px;align-items:center">'+
         (canSeeEngine?engineBtn:'')+
+        (isAdmin?sysSettingsBtn:'')+
         '<button class="btn btn-primary btn-sm" onclick="openAddUser()">'+ico('plus',13)+'Add user</button>'+
       '</div>'+
     '</div></div>'+

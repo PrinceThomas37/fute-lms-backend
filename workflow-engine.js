@@ -23,8 +23,7 @@
 //     event bus, so the audit timeline gets it for free.
 // ============================================================================
 
-const MAX_STEP_FAILURES = 3;
-const TICK_BATCH = 200;
+const { getSetting } = require('./config/settings');
 
 function createWorkflowEngine({ supabase, emit, EVENTS }) {
   const channels = new Map();
@@ -161,7 +160,8 @@ function createWorkflowEngine({ supabase, emit, EVENTS }) {
 
     if (result.outcome === 'failed') {
       const fails = ((enrollment.metadata || {}).fail_count || 0) + 1;
-      if (fails >= MAX_STEP_FAILURES) {
+      const maxStepFailures = await getSetting(supabase, 'wf_max_step_failures');
+      if (fails >= maxStepFailures) {
         await updateEnrollment(enrollment.id, { status: 'failed', exit_reason: 'step_failed', completed_at: new Date().toISOString(), metadata: { ...(enrollment.metadata || {}), fail_count: fails } });
       } else {
         await updateEnrollment(enrollment.id, { next_step_due_date: addDays(todayStr(), 1), metadata: { ...(enrollment.metadata || {}), fail_count: fails } });
@@ -186,9 +186,10 @@ function createWorkflowEngine({ supabase, emit, EVENTS }) {
     ticking = true;
     const log = { checked: 0, done: 0, skipped: 0, failed: 0, deferred: 0, completed: 0, exited: 0 };
     try {
+      const tickBatch = await getSetting(supabase, 'wf_tick_batch');
       const { data: due, error } = await supabase.from('workflow_enrollments')
         .select('*').eq('status', 'active').lte('next_step_due_date', todayStr())
-        .order('next_step_due_date').limit(TICK_BATCH);
+        .order('next_step_due_date').limit(tickBatch);
       if (error) { // table absent (migration 007 not applied) → engine is off
         if (/workflow_enrollments/.test(error.message || '')) return { off: true };
         throw error;

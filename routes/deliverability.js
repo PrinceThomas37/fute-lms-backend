@@ -15,6 +15,7 @@
 const express = require('express');
 const { emailSyntaxValid } = require('../email-validation');
 const { scoreEmailContent } = require('../deliverability');
+const { getSetting } = require('../config/settings');
 
 // Human-readable label for a template_variant id, shown next to the raw id
 // in the reply-rate table so PDs/BDs see a real name instead of "v1".
@@ -113,12 +114,16 @@ router.get('/admin/deliverability', auth, async (req, res) => {
     const { data: mailboxes } = await supabase.from('user_emails').select('id,email_address,display_name,is_active,daily_send_limit').eq('is_active', true);
     const delivCols = {};
     try { const { data } = await supabase.from('user_emails').select('id,warmup_start_date,auto_paused_at'); (data || []).forEach(r => { delivCols[r.id] = r; }); } catch (_) {}
+    const [warmupStart, warmupStep] = await Promise.all([
+      getSetting(supabase, 'mailbox_warmup_start'),
+      getSetting(supabase, 'mailbox_warmup_step'),
+    ]);
     const mailboxHealth = (mailboxes || []).map(m => {
       const dc = delivCols[m.id] || {};
       return {
         id: m.id, email: m.email_address, name: m.display_name, daily_limit: m.daily_send_limit,
         auto_paused: !!dc.auto_paused_at,
-        warmup: dc.warmup_start_date ? { since: dc.warmup_start_date, today_cap: warmupLimit(dc) } : null
+        warmup: dc.warmup_start_date ? { since: dc.warmup_start_date, today_cap: warmupLimit(dc, warmupStart, warmupStep) } : null
       };
     });
     res.json({ window_days: days, sent, failed, bounced_contacts: bounced, replied_contacts: replied, suppression_count: suppression, mailboxes: mailboxHealth });

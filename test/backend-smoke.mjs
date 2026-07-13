@@ -137,6 +137,8 @@ try {
   check('GET /emails/pending-summary → 401 (extracted)', await req('GET', '/emails/pending-summary'), 401);
   check('GET /emails/send-progress → 401 (extracted)', await req('GET', '/emails/send-progress'), 401);
   check('POST /admin/emails/purge-pending → 401 (new, gated)', await req('POST', '/admin/emails/purge-pending'), 401);
+  check('GET /admin/settings/numbers → 401 (new, gated)', await req('GET', '/admin/settings/numbers'), 401);
+  check('POST /admin/settings/numbers → 401 (new, gated)', await req('POST', '/admin/settings/numbers'), 401);
   check('DELETE /emails/x → 401 (extracted)', await req('DELETE', '/emails/x'), 401);
   // Pipeline routes deliberately kept inline — still respond (401 without token).
   check('POST /emails/queue-all → 401 (still inline)', await req('POST', '/emails/queue-all'), 401);

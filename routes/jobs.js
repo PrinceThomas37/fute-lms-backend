@@ -15,6 +15,7 @@
 const express = require('express');
 const { parseJobDescription, buildResearchFromLeadData, normalizeJobTitle, titleSimilarity } = require('../jd-parser');
 const { annotateContactEmailStatus } = require('../email-validation');
+const { getSetting } = require('../config/settings');
 
 module.exports = (ctx) => {
   const router = express.Router();
@@ -149,8 +150,9 @@ router.post('/jobs/bulk', auth, async (req, res) => {
   try {
     const { jobs } = req.body;
     if (!Array.isArray(jobs) || !jobs.length) return res.status(400).json({ error: 'jobs array required' });
-    // Filter out companies in 21-day cooldown for RA users
-    const cooldownDate = new Date(Date.now() - 21 * 24 * 3600 * 1000).toISOString();
+    // Filter out companies in cooldown for RA users (admin-editable — config/settings.js)
+    const cooldownDays = await getSetting(supabase, 'company_cooldown_days');
+    const cooldownDate = new Date(Date.now() - cooldownDays * 24 * 3600 * 1000).toISOString();
     const companyIds = [...new Set(jobs.map(j => j.company_id).filter(Boolean))];
     let cooledDown = new Set();
     if (companyIds.length) {
@@ -248,14 +250,16 @@ router.post('/jobs', auth, async (req, res) => {
   try {
     const { company_id, position, location, source, job_url, stage, notes, assigned_to, is_duplicate, duplicate_of, contacts, salary_range, job_created_date, job_opened_date, bdm_assigned_name, industry: jobIndustry, research } = req.body;
     if (!company_id || !position) return res.status(400).json({ error: 'company_id and position required' });
-    // 21-day company cooldown — block RA from re-adding same company within 21 days
+    // Company cooldown — block RA from re-adding the same company too soon
+    // (admin-editable — config/settings.js).
     if (hasRole(req, 'ra')) {
-      const cooldownDate = new Date(Date.now() - 21 * 24 * 3600 * 1000).toISOString();
+      const cooldownDays = await getSetting(supabase, 'company_cooldown_days');
+      const cooldownDate = new Date(Date.now() - cooldownDays * 24 * 3600 * 1000).toISOString();
       const { data: recent } = await supabase.from('jobs').select('id,position,created_at').eq('company_id', company_id).gte('created_at', cooldownDate).is('deleted_at', null).limit(1);
       if (recent && recent.length > 0) {
         const daysAgo = Math.floor((Date.now() - new Date(recent[0].created_at).getTime()) / 86400000);
-        const daysLeft = 21 - daysAgo;
-        return res.status(409).json({ error: `This company is in a 21-day cooldown period. ${daysLeft} day${daysLeft !== 1 ? 's' : ''} remaining (last added: ${recent[0].position}).` });
+        const daysLeft = cooldownDays - daysAgo;
+        return res.status(409).json({ error: `This company is in a ${cooldownDays}-day cooldown period. ${daysLeft} day${daysLeft !== 1 ? 's' : ''} remaining (last added: ${recent[0].position}).` });
       }
     }
     const timezone = getTimezoneFromLocation(location);
@@ -309,11 +313,13 @@ router.put('/jobs/:id', auth, async (req, res) => {
     const { data: existing } = await supabase.from('jobs').select('*').eq('id', req.params.id).single();
     if (!existing) return res.status(404).json({ error: 'Not found' });
     const isRA = hasRole(req, 'ra') && !hasRole(req, 'admin', 'ra_lead', 'bd', 'bd_lead');
+    // Admin-editable — config/settings.js.
+    const editWindowHours = await getSetting(supabase, 'ra_edit_window_hours');
     const hoursSinceCreation = (new Date() - new Date(existing.created_at)) / 3600000;
-    const raCanEdit = isRA && existing.created_by === req.user.id && hoursSinceCreation <= 24;
+    const raCanEdit = isRA && existing.created_by === req.user.id && hoursSinceCreation <= editWindowHours;
     const canEdit = hasRole(req, 'admin', 'ra_lead', 'bd', 'bd_lead') || existing.created_by === req.user.id || existing.assigned_to_bd === req.user.id || raCanEdit;
     if (!canEdit) return res.status(403).json({ error: 'Forbidden' });
-    if (isRA && !raCanEdit) return res.status(403).json({ error: 'Edit window has expired (24 hours)' });
+    if (isRA && !raCanEdit) return res.status(403).json({ error: `Edit window has expired (${editWindowHours} hours)` });
     const { position, location, source, job_url, stage, notes, assigned_to, assigned_to_bd, sending_email_id, salary_range, job_created_date, industry: jobIndustry, research } = req.body;
     const updates = { updated_at: new Date() };
     if (position !== undefined) updates.position = position;
