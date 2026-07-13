@@ -133,7 +133,31 @@ try {
   }
 
   // Still-inline routes unaffected.
+  check('GET /emails → 401 (extracted)', await req('GET', '/emails'), 401);
+  check('GET /emails/pending-summary → 401 (extracted)', await req('GET', '/emails/pending-summary'), 401);
+  check('GET /emails/send-progress → 401 (extracted)', await req('GET', '/emails/send-progress'), 401);
+  check('DELETE /emails/x → 401 (extracted)', await req('DELETE', '/emails/x'), 401);
+  // Pipeline routes deliberately kept inline — still respond (401 without token).
+  check('POST /emails/queue-all → 401 (still inline)', await req('POST', '/emails/queue-all'), 401);
+  check('POST /emails/generate → 401 (still inline)', await req('POST', '/emails/generate'), 401);
   check('GET /industries → 401 (still inline)', await req('GET', '/industries'), 401);
+
+  // Dependency check for the window-helper-heavy pending-summary route: an admin
+  // token reaches getSendWindowHours + the window helpers before any per-row work.
+  {
+    const token = jwt.sign({ id: 'test-admin', roles: ['admin'], role: 'admin', name: 'T' }, JWT_SECRET);
+    let ok, detail;
+    try {
+      const { status, body } = await new Promise((resolve, reject) => {
+        const r = http.request({ host: '127.0.0.1', port: PORT, path: '/emails/pending-summary', method: 'GET', timeout: 6000, headers: { Authorization: `Bearer ${token}` } },
+          (res) => { let b = ''; res.on('data', (d) => { b += d; }); res.on('end', () => resolve({ status: res.statusCode, body: b })); });
+        r.on('timeout', () => r.destroy(new Error('timeout'))); r.on('error', reject); r.end();
+      });
+      ok = !/is not defined|is not a function/i.test(body);
+      detail = `status=${status} body=${body.slice(0, 160)}`;
+    } catch (e) { ok = true; detail = `reached DB layer (${e.message})`; }
+    results.push({ name: 'GET /emails/pending-summary resolves window helpers (no ReferenceError)', ok, detail });
+  }
 
   // Unknown path still 404s → proves the 401s above mean "route exists + gated".
   check('GET /definitely-not-a-route → 404', await req('GET', '/definitely-not-a-route'), 404);
