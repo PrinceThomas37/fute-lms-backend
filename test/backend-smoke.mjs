@@ -75,6 +75,8 @@ try {
   check('GET /reminders → 401 (extracted)', await req('GET', '/reminders'), 401);
   check('POST /contacts → 401 (extracted)', await req('POST', '/contacts'), 401);
   check('PATCH /contacts/x/email-status → 401 (extracted)', await req('PATCH', '/contacts/x/email-status'), 401);
+  check('GET /app-settings → 401 (extracted)', await req('GET', '/app-settings'), 401);
+  check('GET /outreach-plan → 401 (extracted)', await req('GET', '/outreach-plan'), 401);
 
   // Still-inline routes unaffected.
   check('GET /jobs → 401 (still inline)', await req('GET', '/jobs'), 401);
