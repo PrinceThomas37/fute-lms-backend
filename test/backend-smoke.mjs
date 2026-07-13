@@ -143,6 +143,9 @@ try {
   check('GET /industries → 401 (extracted)', await req('GET', '/industries'), 401);
   check('GET /lookup/zipcode → 401 (extracted)', await req('GET', '/lookup/zipcode'), 401);
   check('POST /contacts/check-email → 401 (extracted)', await req('POST', '/contacts/check-email'), 401);
+  check('GET /distribute/pool-stats → 401 (extracted)', await req('GET', '/distribute/pool-stats'), 401);
+  check('GET /admin/manager-ra-modes → 401 (extracted)', await req('GET', '/admin/manager-ra-modes'), 401);
+  check('POST /distribute/execute → 401 (still inline)', await req('POST', '/distribute/execute'), 401);
 
   // Dependency check for the window-helper-heavy pending-summary route: an admin
   // token reaches getSendWindowHours + the window helpers before any per-row work.
