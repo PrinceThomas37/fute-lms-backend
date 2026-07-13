@@ -501,16 +501,8 @@ app.get('/industries', auth, (req, res) => res.json(INDUSTRIES));
 // ══════════════════════════════════════════════════════════════
 
 // ══════════════════════════════════════════════════════════════
-// COMPANIES
+// COMPANIES → extracted to routes/companies.js (mounted below)
 // ══════════════════════════════════════════════════════════════
-app.get('/companies', auth, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('companies').select('*').is('deleted_at', null).order('name');
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
 app.get('/lookup/zipcode', auth, async (req, res) => {
   try {
     const { zip } = req.query;
@@ -527,21 +519,6 @@ app.get('/lookup/zipcode', auth, async (req, res) => {
   } catch (err) { res.json([]); }
 });
 
-app.get('/companies/search', auth, async (req, res) => {
-  try {
-    const { q } = req.query;
-    if (!q || q.length < 2) return res.json([]);
-    const { data, error } = await supabase.from('companies')
-      .select('id,name,industry,location,website').ilike('name', `%${q}%`).is('deleted_at', null).limit(8);
-    if (error) throw error;
-    const result = await Promise.all((data || []).map(async co => {
-      const { count } = await supabase.from('jobs').select('id', { count: 'exact', head: true }).eq('company_id', co.id).is('deleted_at', null);
-      return { ...co, job_count: count || 0 };
-    }));
-    res.json(result);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
 app.post('/contacts/check-email', auth, async (req, res) => {
   try {
     const { email } = req.body;
@@ -555,51 +532,6 @@ app.post('/contacts/check-email', auth, async (req, res) => {
     const c = data[0];
     const daysSince = Math.floor((new Date() - new Date(c.created_at)) / 86400000);
     res.json({ duplicate: true, days_ago: daysSince, contact_name: `${c.first_name} ${c.last_name}`.trim(), company: c.job?.company?.name || '', position: c.job?.position || '' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/companies/bulk', auth, async (req, res) => {
-  try {
-    const { companies } = req.body;
-    if (!Array.isArray(companies) || !companies.length) return res.status(400).json({ error: 'companies array required' });
-    const rows = companies.map(c => ({ name: c.name, website: c.website || null, industry: c.industry || null, location: c.location || null, created_by: req.user.id }));
-    const { data, error } = await supabase.from('companies').insert(rows).select('id,name');
-    if (error) throw error;
-    res.status(201).json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/companies', auth, async (req, res) => {
-  try {
-    const { name, website, industry, location, size, notes } = req.body;
-    if (!name) return res.status(400).json({ error: 'Company name required' });
-    const { data, error } = await supabase.from('companies').insert({ name, website, industry, location, size, notes, created_by: req.user.id }).select().single();
-    if (error) throw error;
-    res.status(201).json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.put('/companies/:id', auth, async (req, res) => {
-  try {
-    const { name, website, industry, location, size, notes } = req.body;
-    const updates = { updated_at: new Date() };
-    if (name !== undefined) updates.name = name;
-    if (website !== undefined) updates.website = website;
-    if (industry !== undefined) updates.industry = industry;
-    if (location !== undefined) updates.location = location;
-    if (size !== undefined) updates.size = size;
-    if (notes !== undefined) updates.notes = notes;
-    const { data, error } = await supabase.from('companies').update(updates).eq('id', req.params.id).select().single();
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.delete('/companies/:id', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
-    await supabase.from('companies').update({ deleted_at: new Date() }).eq('id', req.params.id);
-    res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1042,69 +974,8 @@ app.get('/jobs/:job_id/contacts', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/contacts', auth, async (req, res) => {
-  try {
-    const { job_id, first_name, last_name, designation, email, phone, linkedin, is_primary } = req.body;
-    if (!job_id || !first_name) return res.status(400).json({ error: 'job_id and first_name required' });
-    if (!(await canTouchJob(req, job_id))) return res.status(403).json({ error: 'Forbidden' });
-    const contactRow = { job_id, first_name, last_name: last_name || '', designation, email, phone, linkedin, is_primary: !!is_primary };
-    if (email) { try { contactRow.email_status = await classifyEmailDeliverability(email); } catch (_) {} }
-    const { data, error } = await supabase.from('contacts').insert(contactRow).select().single();
-    if (error) throw error;
-    await logActivity(job_id, data.id, req.user.id, 'contact_added', `Contact added: ${first_name} ${last_name || ''}`.trim(), null, null);
-    res.status(201).json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.put('/contacts/:id', auth, async (req, res) => {
-  try {
-    const { data: existing } = await supabase.from('contacts').select('job_id').eq('id', req.params.id).single();
-    if (!existing) return res.status(404).json({ error: 'Not found' });
-    if (!(await canTouchJob(req, existing.job_id))) return res.status(403).json({ error: 'Forbidden' });
-    const fields = ['first_name','last_name','designation','email','phone','linkedin','is_primary','email_status','ooo_until'];
-    const updates = { updated_at: new Date() };
-    fields.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
-    const { data, error } = await supabase.from('contacts').update(updates).eq('id', req.params.id).select().single();
-    if (error) throw error;
-    if (req.body.email_status !== undefined && isPermanentFollowupBlock(req.body.email_status)) {
-      emit(EVENTS.CONTACT_INVALIDATED, { contactId: req.params.id, jobId: existing.job_id, reason: 'manual', actorUserId: req.user.id });
-    }
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.delete('/contacts/:id', auth, async (req, res) => {
-  try {
-    const { data: existing } = await supabase.from('contacts').select('job_id').eq('id', req.params.id).single();
-    if (!existing) return res.status(404).json({ error: 'Not found' });
-    if (!(await canTouchJob(req, existing.job_id))) return res.status(403).json({ error: 'Forbidden' });
-    await supabase.from('contacts').delete().eq('id', req.params.id);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.patch('/contacts/:id/email-status', auth, async (req, res) => {
-  try {
-    if (!hasRole(req, 'admin', 'bd', 'bd_lead')) return res.status(403).json({ error: 'BD role required' });
-    const { email_status, ooo_until } = req.body;
-    const allowed = ['valid','invalid','deactivated','out_of_office'];
-    if (!allowed.includes(email_status)) return res.status(400).json({ error: 'Invalid status' });
-    const updates = { email_status, updated_at: new Date() };
-    if (email_status === 'out_of_office' && ooo_until) updates.ooo_until = ooo_until;
-    if (email_status !== 'out_of_office') updates.ooo_until = null;
-    const { data: contact, error } = await supabase.from('contacts').update(updates).eq('id', req.params.id).select('*, job:jobs(id,position,company:companies(name))').single();
-    if (error) throw error;
-    if (email_status === 'out_of_office' && ooo_until) {
-      const contactName = `${contact.first_name || ''} ${contact.last_name || ''}`.trim();
-      await supabase.from('reminders').insert({ job_id: contact.job_id, user_id: req.user.id, contact_name: contactName, company_name: contact.job?.company?.name || '', email: contact.email, return_date: ooo_until, reminder_time: '09:00', note: `${contactName} is back from OOO.`, status: 'pending', reminder_type: 'ooo_return', contact_id: contact.id });
-      await logActivity(contact.job_id, contact.id, req.user.id, 'ooo_set', `${contactName} marked OOO until ${ooo_until}`, null, { ooo_until });
-    }
-    if (isPermanentFollowupBlock(email_status)) {
-      emit(EVENTS.CONTACT_INVALIDATED, { contactId: contact.id, jobId: contact.job_id, reason: 'manual', actorUserId: req.user.id });
-    }
-    res.json(contact);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+// Contact write endpoints (POST/PUT/DELETE /contacts, PATCH email-status)
+// → extracted to routes/contacts.js (mounted below).
 
 // ══════════════════════════════════════════════════════════════
 // EMAILS
@@ -1591,44 +1462,7 @@ app.patch('/emails/:id', auth, async (req, res) => {
 // ══════════════════════════════════════════════════════════════
 // REMINDERS
 // ══════════════════════════════════════════════════════════════
-app.get('/reminders', auth, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('reminders').select(`*, job:jobs(id,position,stage,company_id,company:companies(name)), contact:contacts(id,first_name,last_name,email)`).eq('user_id', req.user.id).order('return_date');
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/reminders', auth, async (req, res) => {
-  try {
-    const { job_id, contact_name, company_name, email, return_date, reminder_time, note, contact_id, reminder_type } = req.body;
-    if (!return_date) return res.status(400).json({ error: 'Return date required' });
-    const { data, error } = await supabase.from('reminders').insert({ job_id: job_id || null, user_id: req.user.id, contact_name, company_name, email, return_date, reminder_time: reminder_time || '09:00', note, status: 'pending', contact_id: contact_id || null, reminder_type: reminder_type || null }).select().single();
-    if (error) throw error;
-    res.status(201).json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.patch('/reminders/:id', auth, async (req, res) => {
-  try {
-    const { status, return_date, reminder_time, note } = req.body;
-    const updates = { updated_at: new Date() };
-    if (status) updates.status = status;
-    if (return_date) updates.return_date = return_date;
-    if (reminder_time) updates.reminder_time = reminder_time;
-    if (note !== undefined) updates.note = note;
-    const { data, error } = await supabase.from('reminders').update(updates).eq('id', req.params.id).eq('user_id', req.user.id).select().single();
-    if (error) throw error;
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.delete('/reminders/:id', auth, async (req, res) => {
-  try {
-    await supabase.from('reminders').delete().eq('id', req.params.id).eq('user_id', req.user.id);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+// Reminders CRUD → extracted to routes/reminders.js (mounted below).
 
 // ══════════════════════════════════════════════════════════════
 // INSIGHTS
@@ -3383,10 +3217,14 @@ const routeCtx = {
   loadMailboxSignatures, getMailboxSignature, getMicrosoftToken, buildHtmlEmailBody,
   MS_TENANT, MS_CLIENT, MS_SECRET, MS_REDIRECT, MS_SCOPES,
   logActivity, INDUSTRIES, normInd,
+  canTouchJob, isPermanentFollowupBlock,
 };
 app.use(require('./routes/auth')(routeCtx));
 app.use(require('./routes/microsoft')(routeCtx));
 app.use(require('./routes/workflows')(routeCtx));
+app.use(require('./routes/companies')(routeCtx));
+app.use(require('./routes/reminders')(routeCtx));
+app.use(require('./routes/contacts')(routeCtx));
 
 require('./bd_recruiter_routes')(app, { supabase, auth, hasRole, notGuest, today });
 
