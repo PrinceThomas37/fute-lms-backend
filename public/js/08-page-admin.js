@@ -1,4 +1,92 @@
 // ── ADMIN ──────────────────────────────────────
+// ── System Settings — admin-editable operational numbers (config/settings.js) ──
+window.openSystemSettingsModal=function(){
+  STATE._sysSettingsErrors={};
+  if(STATE.sysSettings){renderSystemSettingsModal();return;}
+  STATE.modal='<div class="modal modal-w480"><div class="mh"><div class="mt">System Settings</div></div><div class="mb_" style="padding:24px;text-align:center;color:var(--text3)">Loading…</div></div>';
+  render();
+  apiGet('/admin/settings/numbers').then(function(r){
+    STATE.sysSettings=r||[];
+    renderSystemSettingsModal();
+  }).catch(function(e){
+    closeModal();
+    showToast('Failed to load settings: '+(e&&e.message||e),'error');
+  });
+};
+function sysSettingsGrouped(){
+  var list=STATE.sysSettings||[];
+  var groups={};
+  var order=[];
+  list.forEach(function(s){
+    if(!groups[s.group]){groups[s.group]=[];order.push(s.group);}
+    groups[s.group].push(s);
+  });
+  return order.map(function(g){return {group:g,items:groups[g]};});
+}
+function renderSystemSettingsModal(){
+  var errors=STATE._sysSettingsErrors||{};
+  var groups=sysSettingsGrouped();
+  var body=groups.map(function(g){
+    var rows=g.items.map(function(s){
+      var err=errors[s.key];
+      return '<div style="margin-bottom:14px">'+
+        '<label class="flbl" style="display:flex;justify-content:space-between;align-items:baseline">'+
+          '<span>'+htmlEsc(s.label)+'</span>'+
+          '<span style="font-size:11px;color:var(--text3);font-weight:400">'+s.min+'–'+s.max+' '+htmlEsc(s.unit||'')+'</span>'+
+        '</label>'+
+        '<input class="inp" type="number" id="sys-'+s.key+'" value="'+htmlEsc(String(s.value))+'" min="'+s.min+'" max="'+s.max+'" step="any" data-key="'+s.key+'" style="'+(err?'border-color:var(--red)':'')+'"/>'+
+        '<div style="font-size:11.5px;color:'+(err?'var(--red)':'var(--text3)')+';margin-top:3px">'+htmlEsc(err||s.description)+'</div>'+
+      '</div>';
+    }).join('');
+    return '<div style="margin-bottom:18px">'+
+      '<div style="font-weight:700;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">'+htmlEsc(g.group)+'</div>'+
+      rows+
+    '</div>';
+  }).join('');
+  STATE.modal='<div class="modal modal-w480" style="max-height:88vh;overflow-y:auto">'+
+    '<div class="mh"><div><div class="mt">System Settings</div><div style="font-size:12px;color:var(--text3);margin-top:2px">Operational numbers used across the platform. Changes apply the next time each check runs (within about a minute).</div></div>'+
+      '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+body+'</div>'+
+    '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" id="sys-settings-save" onclick="saveSystemSettings()">Save changes</button></div>'+
+  '</div>';
+  render();
+}
+window.saveSystemSettings=function(){
+  var list=STATE.sysSettings||[];
+  var values={};
+  var clientErrors={};
+  list.forEach(function(s){
+    var el=document.getElementById('sys-'+s.key);
+    if(!el)return;
+    var raw=el.value;
+    var num=parseFloat(raw);
+    if(raw===''||isNaN(num)){clientErrors[s.key]='"'+s.label+'" must be a number';return;}
+    if(num<s.min||num>s.max){clientErrors[s.key]='"'+s.label+'" must be between '+s.min+' and '+s.max;return;}
+    if(num!==s.value)values[s.key]=num;
+  });
+  if(Object.keys(clientErrors).length){
+    STATE._sysSettingsErrors=clientErrors;
+    renderSystemSettingsModal();
+    showToast('Fix the highlighted field(s) before saving','warning');
+    return;
+  }
+  if(!Object.keys(values).length){
+    showToast('No changes to save','info');
+    return;
+  }
+  var btn=document.getElementById('sys-settings-save'); if(btn){btn.disabled=true;btn.textContent='Saving…';}
+  apiPost('/admin/settings/numbers',{values:values}).then(function(r){
+    STATE.sysSettings=r.settings||STATE.sysSettings;
+    STATE._sysSettingsErrors={};
+    closeModal();
+    showToast('Settings saved','success');
+  }).catch(function(e){
+    var btn2=document.getElementById('sys-settings-save'); if(btn2){btn2.disabled=false;btn2.textContent='Save changes';}
+    showToast('Save failed: '+(e&&e.message||e),'error');
+  });
+};
+
 function loadSendingStatus(){
   apiGet('/admin/sending/status').then(function(s){
     STATE.sendingPaused=!!(s&&s.paused);

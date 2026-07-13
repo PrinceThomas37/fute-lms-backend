@@ -34,3 +34,34 @@ reorganization, so anything that differs is a regression.
 - [ ] Background polling still refreshes jobs/emails as before.
 - [ ] Send-progress bar appears for BD users.
 - [ ] Guest mode still works and remains read-only (writes blocked by backend).
+
+## Admin: delete pending emails (one manager / all managers)
+Reachable via: sidebar **Admin** → click a BD/BD-Lead user → **Control Center**
+card → "Delete pending…" (one manager), or sidebar **Admin** → header →
+"Delete pending (all managers)…" (all at once). (Earlier revisions of this
+feature put it on a "Manager Users" page with no nav link to it — fixed; both
+buttons now live on the Admin page, which the sidebar always links to.)
+- [ ] Preview count matches what's actually in the manager's pending queue.
+- [ ] Deleting only selected types/time removes exactly those and nothing else.
+- [ ] Sent emails and reminders are never affected.
+
+## Admin: Control Center (per-user, on the Admin page's user detail view)
+- [ ] Only shows for BD / BD Lead users (not RA/Recruiter/Admin-only accounts).
+- [ ] Sending status matches the manager's real state; Pause/Resume here matches
+      the existing Assign Leads / Admin emergency-stop controls (same backend flag).
+- [ ] RA Mode Switch matches the existing toggle in the Admin BD-tab list row.
+- [ ] Pending queue counts (total + by type) match what "Delete pending emails…"
+      previews for that manager.
+- [ ] Active sequence enrollments list shows this manager's leads only (not other
+      managers'); Pause/Resume/Stop here matches the Workflows page's own controls
+      on the same enrollment.
+- [ ] ↻ Refresh reloads the queue counts and enrollments without a full page reload.
+
+## Admin: System Settings (operational numbers)
+- [ ] Admin (not RA-Lead) sees the "System Settings" button on the Admin page.
+- [ ] Current values shown match the previous hardcoded defaults (21 / 24 / 20 / 5 / 5 / 20 / 3 / 200).
+- [ ] Saving a changed value persists — reopening the modal shows the new value.
+- [ ] Behavior actually changes: e.g. lower the company cooldown to 1 day and confirm
+      an RA can re-add a company after 1 day instead of 21; raise the workflow tick
+      batch and confirm more enrollments process per tick.
+- [ ] An out-of-range or non-numeric value is rejected with a clear message and nothing saves.

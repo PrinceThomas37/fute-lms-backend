@@ -8,6 +8,7 @@
 // ============================================================================
 const express = require('express');
 const { resolveTemplate } = require('../email-vars');
+const numberSettings = require('../config/settings');
 
 module.exports = (ctx) => {
   const router = express.Router();
@@ -77,6 +78,32 @@ router.post('/outreach-plan', auth, async (req, res) => {
     const { error } = await supabase.from('app_settings').upsert({ key: fullKey, value: String(value), updated_at: new Date() }, { onConflict: 'key' });
     if (error) throw error;
     res.json({ success: true, key: fullKey, value });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════
+// SYSTEM SETTINGS (admin-only) — operational numbers that used to be
+// hardcoded constants. See config/settings.js for the schema.
+// ══════════════════════════════════════════════════════════════
+router.get('/admin/settings/numbers', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
+    const settings = await numberSettings.getAllSettings(supabase);
+    res.json(settings);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/admin/settings/numbers', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
+    const updates = (req.body && req.body.values) || {};
+    if (!updates || typeof updates !== 'object' || !Object.keys(updates).length) {
+      return res.status(400).json({ error: 'values object with at least one setting required' });
+    }
+    const result = await numberSettings.setSettings(supabase, updates);
+    if (result.error) return res.status(400).json({ error: result.error, key: result.key });
+    const settings = await numberSettings.getAllSettings(supabase);
+    res.json({ success: true, settings });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

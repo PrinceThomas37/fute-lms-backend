@@ -41,6 +41,7 @@ const { EVENTS, emit, on } = require('./events');
 const registerSubscribers = require('./subscribers');
 const { scoreEmailContent, deliverabilityFlags, isOptOutReply } = require('./deliverability');
 const { loadConfig } = require('./config/env');
+const settingsConfig = require('./config/settings');
 
 // Validate environment and centralize config at startup (fails fast with a
 // clear message if a required secret is missing).
@@ -368,13 +369,17 @@ async function loadMailboxDelivState(ids) {
   return map;
 }
 // Warm-up: effective daily cap ramps from a small number; null = no ramp.
-const WARMUP_START = 20, WARMUP_STEP = 5;
-function warmupLimit(mailboxRow) {
+// start/step are admin-editable (config/settings.js: mailbox_warmup_start,
+// mailbox_warmup_step) — callers fetch them once per batch and pass them in;
+// the literals here are only a last-resort fallback if a caller omits them.
+function warmupLimit(mailboxRow, start, step) {
   if (!mailboxRow || !mailboxRow.warmup_start_date) return null;
-  const start = new Date(mailboxRow.warmup_start_date);
-  if (isNaN(start.getTime())) return null;
-  const days = Math.max(0, Math.floor((Date.now() - start.getTime()) / 86400000));
-  return WARMUP_START + WARMUP_STEP * days;
+  const startDate = new Date(mailboxRow.warmup_start_date);
+  if (isNaN(startDate.getTime())) return null;
+  const days = Math.max(0, Math.floor((Date.now() - startDate.getTime()) / 86400000));
+  const warmupStart = start != null ? start : 20;
+  const warmupStep = step != null ? step : 5;
+  return warmupStart + warmupStep * days;
 }
 async function setMailboxAutoPaused(userEmailId, paused, reason) {
   try { await supabase.from('user_emails').update({ auto_paused_at: paused ? new Date() : null }).eq('id', userEmailId); } catch (_) {}
@@ -1266,10 +1271,12 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
   const suppressed = await loadSuppressedSet([...new Set(pendingEmails.map(e => (e.to_email || '').toLowerCase()).filter(Boolean))]);
 
   const mailboxIds = [...new Set(pendingEmails.map(e => e.job?.sending_email_id).filter(Boolean))];
-  const [mailboxSignatures, quotaState, mailboxDeliv] = await Promise.all([
+  const [mailboxSignatures, quotaState, mailboxDeliv, warmupStart, warmupStep] = await Promise.all([
     loadMailboxSignatures(mailboxIds, userId),
     loadMailboxQuotaState(mailboxIds),
-    loadMailboxDelivState(mailboxIds)
+    loadMailboxDelivState(mailboxIds),
+    settingsConfig.getSetting(supabase, 'mailbox_warmup_start'),
+    settingsConfig.getSetting(supabase, 'mailbox_warmup_step'),
   ]);
   const { limits, sentToday, delays, settings } = quotaState;
   const lastSendAtByMailbox = {};
@@ -1342,7 +1349,7 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
     }
 
     const baseLimit = limits[userEmailId] || sendingEmail?.daily_send_limit || settings.defaultDailyLimit;
-    const wl = warmupLimit(mailboxDeliv[userEmailId]);
+    const wl = warmupLimit(mailboxDeliv[userEmailId], warmupStart, warmupStep);
     const limit = wl != null ? Math.min(baseLimit, wl) : baseLimit;
     if ((sentToday[userEmailId] || 0) >= limit) {
       skippedQuota++;
@@ -1925,7 +1932,7 @@ function extractBounceRecipients(text, ownAddresses) {
 // minimum sample), auto-pause it to protect domain reputation. Counts live in
 // app_settings so this needs no schema change; the pause uses
 // user_emails.auto_paused_at (a no-op until migration 006 is applied).
-const BOUNCE_RATE_THRESHOLD = 0.05, BOUNCE_MIN_SAMPLE = 20;
+// Threshold + min-sample are admin-editable — config/settings.js.
 async function maybeAutoPauseMailboxOnBounces(userEmailId, newBounces) {
   if (!userEmailId || !newBounces) return;
   const bkey = `bounce_count_${userEmailId}_${today()}`;
@@ -1934,7 +1941,11 @@ async function maybeAutoPauseMailboxOnBounces(userEmailId, newBounces) {
   await supabase.from('app_settings').upsert({ key: bkey, value: String(bouncesToday), updated_at: new Date() }, { onConflict: 'key' });
   const { data: sRow } = await supabase.from('email_send_log').select('emails_sent').eq('user_email_id', userEmailId).eq('send_date', today()).maybeSingle();
   const sentToday = sRow?.emails_sent || 0;
-  if (sentToday >= BOUNCE_MIN_SAMPLE && bouncesToday / sentToday > BOUNCE_RATE_THRESHOLD) {
+  const [thresholdPct, minSample] = await Promise.all([
+    settingsConfig.getSetting(supabase, 'bounce_rate_threshold_pct'),
+    settingsConfig.getSetting(supabase, 'bounce_min_sample'),
+  ]);
+  if (sentToday >= minSample && bouncesToday / sentToday > thresholdPct / 100) {
     await setMailboxAutoPaused(userEmailId, true, `bounce rate ${(bouncesToday / sentToday * 100).toFixed(1)}% (${bouncesToday}/${sentToday} today)`);
   }
 }
@@ -2395,7 +2406,11 @@ wfEngine.registerChannel('email', async ({ step, enrollment, context }) => {
   if (delivState[mailbox.id]?.auto_paused_at) return { outcome: 'defer', detail: { reason: 'mailbox_autopaused' } };
   const { data: sendLog } = await supabase.from('email_send_log').select('emails_sent').eq('send_date', today()).eq('user_email_id', mailbox.id).maybeSingle();
   const base = mailbox.daily_send_limit || 150;
-  const wl = warmupLimit(delivState[mailbox.id]);
+  const [warmupStart, warmupStep] = await Promise.all([
+    settingsConfig.getSetting(supabase, 'mailbox_warmup_start'),
+    settingsConfig.getSetting(supabase, 'mailbox_warmup_step'),
+  ]);
+  const wl = warmupLimit(delivState[mailbox.id], warmupStart, warmupStep);
   const cap = wl ? Math.min(base, wl) : base;
   if ((sendLog?.emails_sent || 0) >= cap) return { outcome: 'defer', detail: { reason: 'quota' } };
 
