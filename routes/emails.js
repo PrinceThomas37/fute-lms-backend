@@ -182,8 +182,8 @@ function purgeTypeOf(followupType) {
 router.post('/admin/emails/purge-pending', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
-    const { manager_id, types, before, dry_run } = req.body || {};
-    if (!manager_id) return res.status(400).json({ error: 'manager_id required' });
+    const { manager_id, all_managers, types, before, dry_run } = req.body || {};
+    if (!manager_id && !all_managers) return res.status(400).json({ error: 'manager_id or all_managers required' });
     const selected = Array.isArray(types) ? types.filter(t => PURGE_TYPES.includes(t)) : [];
     if (!selected.length) return res.status(400).json({ error: 'Select at least one email type' });
     let beforeTs = null;
@@ -192,10 +192,21 @@ router.post('/admin/emails/purge-pending', auth, async (req, res) => {
       if (Number.isNaN(beforeTs)) return res.status(400).json({ error: 'Invalid "before" timestamp' });
     }
 
-    const { data, error } = await supabase.from('emails')
-      .select('id, followup_type, created_at')
-      .eq('status', 'pending').eq('sent_by', manager_id);
-    if (error) throw error;
+    // Fetch all matching pending rows (paginated past Supabase's 1000-row cap —
+    // matters for the all-managers scope, which can be large). When all_managers
+    // is set we don't constrain by sent_by, so every manager's queue is covered.
+    let data = [], pageFrom = 0;
+    while (true) {
+      let q = supabase.from('emails').select('id, followup_type, created_at').eq('status', 'pending');
+      if (!all_managers) q = q.eq('sent_by', manager_id);
+      q = q.range(pageFrom, pageFrom + 999);
+      const { data: page, error } = await q;
+      if (error) throw error;
+      if (!page || !page.length) break;
+      data = data.concat(page);
+      if (page.length < 1000) break;
+      pageFrom += 1000;
+    }
 
     const matches = (data || []).filter(e => {
       const t = purgeTypeOf(e.followup_type);

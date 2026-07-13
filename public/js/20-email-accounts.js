@@ -43,7 +43,7 @@ function renderManagerUsers(){
       return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);margin-bottom:14px;overflow:hidden"><div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center;gap:10px">'+av(mgr,'32')+'<div style="font-weight:700;font-size:13.5px">'+htmlEsc(mgr.name)+'</div></div><button onclick="openAssignRAToManager(\''+mgr.id+'\')" style="font-size:12px;padding:5px 12px;background:var(--accent);color:#fff;border:0;border-radius:7px;cursor:pointer">+ Assign RA</button></div>'+memberRows+'</div>';
     }).join(''):'<div style="padding:30px;text-align:center;color:var(--text3);font-size:13px;background:var(--card);border:1px solid var(--border);border-radius:var(--r2)">No BD Managers yet.</div>';
   }
-  return '<div class="page"><div class="ph"><div class="flex jb aic"><div><div class="ptitle">Manager Users</div><div class="psub">'+allUsers.length+' users</div></div><button class="btn btn-primary btn-sm" onclick="STATE.page=\'admin\';STATE.adminSelectedUser=null;render()">'+ico('plus',13)+' Manage Users</button></div></div><div style="display:flex;gap:10px;margin-bottom:20px">'+tabBar+'</div>'+body+'</div>';
+  return '<div class="page"><div class="ph"><div class="flex jb aic"><div><div class="ptitle">Manager Users</div><div class="psub">'+allUsers.length+' users</div></div><div style="display:flex;gap:8px">'+(userHasRole(u,'admin')?'<button class="btn btn-sm" onclick="openPurgePending(\'all\')" style="background:transparent;color:var(--red);border:1px solid #fca5a5">Delete pending (all managers)…</button>':'')+'<button class="btn btn-primary btn-sm" onclick="STATE.page=\'admin\';STATE.adminSelectedUser=null;render()">'+ico('plus',13)+' Manage Users</button></div></div></div><div style="display:flex;gap:10px;margin-bottom:20px">'+tabBar+'</div>'+body+'</div>';
 }
 
 function renderManagerUserDetail(userId){
@@ -72,12 +72,18 @@ function renderManagerUserDetail(userId){
 
 // ── Admin: delete a manager's pending (unsent) emails, by type + time ──────────
 window.openPurgePending=function(managerId){
-  var m=(STATE.users||[]).find(function(x){return x.id===managerId;})||{name:'this manager'};
+  var allMode=(!managerId||managerId==='all');
+  var m=allMode?null:((STATE.users||[]).find(function(x){return x.id===managerId;})||{name:'this manager'});
+  var scopeLabel=allMode?'<strong>ALL managers</strong>':'<strong>'+htmlEsc(m.name)+'</strong>';
+  var scopeRow=allMode
+    ? '<div style="display:flex;gap:8px;align-items:center;font-size:12.5px;padding:8px 10px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;margin-bottom:12px;color:var(--red)"><input type="checkbox" id="pp-all" checked disabled style="width:15px;height:15px"/> Scope: <strong>ALL managers</strong> — every manager&#39;s pending queue</div>'
+    : '<label style="display:flex;gap:8px;align-items:center;font-size:12.5px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:12px;cursor:pointer"><input type="checkbox" id="pp-all" style="width:15px;height:15px"/> Delete for <strong style="margin:0 3px">ALL managers</strong> instead of just '+htmlEsc(m.name)+'</label>';
   STATE.modal='<div class="modal modal-w480">'+
     '<div class="mh"><div class="mt">Delete pending emails</div>'+
       '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
     '<div class="mb_">'+
-      '<div style="font-size:12.5px;color:var(--text3);margin-bottom:14px">Permanently delete <strong>pending (unsent)</strong> emails from <strong>'+htmlEsc(m.name)+'</strong>. Already-sent emails are never affected.</div>'+
+      '<div style="font-size:12.5px;color:var(--text3);margin-bottom:12px">Permanently delete <strong>pending (unsent)</strong> emails from '+scopeLabel+'. Already-sent emails are never affected.</div>'+
+      scopeRow+
       '<div style="font-weight:700;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Email types</div>'+
       '<label style="display:flex;gap:8px;align-items:center;font-size:13px;padding:4px 0;cursor:pointer"><input type="checkbox" id="pp-outreach" checked style="width:15px;height:15px"/> Outreach (initial)</label>'+
       '<label style="display:flex;gap:8px;align-items:center;font-size:13px;padding:4px 0;cursor:pointer"><input type="checkbox" id="pp-fu1" checked style="width:15px;height:15px"/> Follow-up 1</label>'+
@@ -116,28 +122,33 @@ function ppReadForm(){
   if((document.getElementById('pp-fu2')||{}).checked)types.push('fu2');
   var beforeVal=(document.getElementById('pp-before')||{}).value||'';
   var before=beforeVal?new Date(beforeVal).toISOString():null; // datetime-local (local) → ISO/UTC
-  return {types:types,before:before};
+  var all=!!(document.getElementById('pp-all')||{}).checked;
+  return {types:types,before:before,all:all};
 }
 
 window.purgePendingPreview=function(managerId){
   var f=ppReadForm();
   if(!f.types.length){showToast('Select at least one email type','warning');return;}
+  var body={types:f.types,before:f.before,dry_run:true};
+  if(f.all){body.all_managers=true;}else{body.manager_id=managerId;}
   var rd=document.getElementById('pp-result'); if(rd)rd.innerHTML='<span style="color:var(--text3)">Counting…</span>';
-  apiPost('/admin/emails/purge-pending',{manager_id:managerId,types:f.types,before:f.before,dry_run:true}).then(function(r){
+  apiPost('/admin/emails/purge-pending',body).then(function(r){
     var rd2=document.getElementById('pp-result');
-    if(rd2)rd2.innerHTML='<div style="padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px"><strong>'+r.count+'</strong> pending email'+(r.count!==1?'s':'')+' match — outreach: '+r.by_type.outreach+', FU1: '+r.by_type.fu1+', FU2: '+r.by_type.fu2+'</div>';
+    if(rd2)rd2.innerHTML='<div style="padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px"><strong>'+r.count+'</strong> pending email'+(r.count!==1?'s':'')+' match'+(f.all?' across ALL managers':'')+' — outreach: '+r.by_type.outreach+', FU1: '+r.by_type.fu1+', FU2: '+r.by_type.fu2+'</div>';
   }).catch(function(e){var rd2=document.getElementById('pp-result');if(rd2)rd2.innerHTML='<span style="color:var(--red)">'+htmlEsc(e.message||String(e))+'</span>';});
 };
 
 window.purgePendingExecute=function(managerId){
   var f=ppReadForm();
   if(!f.types.length){showToast('Select at least one email type','warning');return;}
-  var m=(STATE.users||[]).find(function(x){return x.id===managerId;})||{name:'this manager'};
-  if(!confirm('Permanently delete the matching pending emails from '+m.name+'?\n\nThis cannot be undone. Preview the count first if you are unsure.'))return;
+  var scope=f.all?'ALL managers':(((STATE.users||[]).find(function(x){return x.id===managerId;})||{name:'this manager'}).name);
+  if(!confirm('Permanently delete the matching pending emails from '+scope+'?\n\nThis cannot be undone. Preview the count first if you are unsure.'))return;
+  var body={types:f.types,before:f.before,dry_run:false};
+  if(f.all){body.all_managers=true;}else{body.manager_id=managerId;}
   var btn=document.getElementById('pp-delete-btn'); if(btn){btn.disabled=true;btn.textContent='Deleting…';}
-  apiPost('/admin/emails/purge-pending',{manager_id:managerId,types:f.types,before:f.before,dry_run:false}).then(function(r){
+  apiPost('/admin/emails/purge-pending',body).then(function(r){
     closeModal();
-    showToast('Deleted '+r.deleted+' pending email'+(r.deleted!==1?'s':''),'success');
+    showToast('Deleted '+r.deleted+' pending email'+(r.deleted!==1?'s':'')+(f.all?' (all managers)':''),'success');
     render();
   }).catch(function(e){
     var btn2=document.getElementById('pp-delete-btn'); if(btn2){btn2.disabled=false;btn2.textContent='Delete';}
