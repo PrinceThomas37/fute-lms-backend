@@ -70,26 +70,10 @@ function auth(req, res, next) {
   } catch { res.status(401).json({ error: 'Invalid token' }); }
 }
 
-// Role helper — works with both old single role and new roles array
-function hasRole(req, ...roles) {
-  const u = req.user;
-  if (!u) return false;
-  // New: roles array
-  if (Array.isArray(u.roles) && u.roles.length) {
-    return roles.some(r => u.roles.includes(r));
-  }
-  // Legacy: single role field
-  return roles.includes(u.role);
-}
-
-// Guest guard — block write operations
-function notGuest(req, res) {
-  if (req.user && req.user.isGuest) {
-    res.status(403).json({ error: 'Guest users cannot perform write operations.' });
-    return true;
-  }
-  return false;
-}
+// Authorization helpers (hasRole, notGuest, canTouchJob, requireRole) live in
+// middleware/authorize.js. canTouchJob needs the Supabase client, so the module
+// is a factory. Behaviour is identical to the previous inline definitions.
+const { hasRole, notGuest, canTouchJob, requireRole } = require('./middleware/authorize')({ supabase });
 
 const today = () => new Date().toISOString().split('T')[0];
 
@@ -963,12 +947,7 @@ app.post('/jobs/:id/parse-jd', auth, async (req, res) => {
 // ══════════════════════════════════════════════════════════════
 // CONTACTS
 // ══════════════════════════════════════════════════════════════
-async function canTouchJob(req, job_id) {
-  if (hasRole(req, 'admin')) return true;
-  const { data } = await supabase.from('jobs').select('created_by,assigned_to,assigned_to_bd').eq('id', job_id).single();
-  if (!data) return false;
-  return data.created_by === req.user.id || data.assigned_to === req.user.id || data.assigned_to_bd === req.user.id;
-}
+// canTouchJob is provided by middleware/authorize.js (see top of file).
 
 app.get('/jobs/:job_id/contacts', auth, async (req, res) => {
   try {
@@ -3225,7 +3204,7 @@ const routeCtx = {
   loadMailboxSignatures, getMailboxSignature, getMicrosoftToken, buildHtmlEmailBody,
   MS_TENANT, MS_CLIENT, MS_SECRET, MS_REDIRECT, MS_SCOPES,
   logActivity, INDUSTRIES, normInd,
-  canTouchJob, isPermanentFollowupBlock,
+  canTouchJob, isPermanentFollowupBlock, requireRole,
 };
 app.use(require('./routes/auth')(routeCtx));
 app.use(require('./routes/microsoft')(routeCtx));
