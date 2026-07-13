@@ -40,6 +40,18 @@ reorganization, so anything that differs is a regression.
 - [ ] Deleting only selected types/time removes exactly those and nothing else.
 - [ ] Sent emails and reminders are never affected.
 
+## Admin: Control Center (per-user, on the Admin page's user detail view)
+- [ ] Only shows for BD / BD Lead users (not RA/Recruiter/Admin-only accounts).
+- [ ] Sending status matches the manager's real state; Pause/Resume here matches
+      the existing Assign Leads / Admin emergency-stop controls (same backend flag).
+- [ ] RA Mode Switch matches the existing toggle in the Admin BD-tab list row.
+- [ ] Pending queue counts (total + by type) match what "Delete pending emails…"
+      previews for that manager.
+- [ ] Active sequence enrollments list shows this manager's leads only (not other
+      managers'); Pause/Resume/Stop here matches the Workflows page's own controls
+      on the same enrollment.
+- [ ] ↻ Refresh reloads the queue counts and enrollments without a full page reload.
+
 ## Admin: System Settings (operational numbers)
 - [ ] Admin (not RA-Lead) sees the "System Settings" button on the Admin page.
 - [ ] Current values shown match the previous hardcoded defaults (21 / 24 / 20 / 5 / 5 / 20 / 3 / 200).

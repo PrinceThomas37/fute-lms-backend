@@ -404,6 +404,22 @@ function renderAdmin(){
   '</div>';
 }
 
+// ── Control Center — per-user pending-queue counts (lazy, cached per user) ──
+function loadUserQueueCounts(userId){
+  STATE._ccQueue=STATE._ccQueue||{};
+  if(STATE._ccQueue[userId]!==undefined)return;
+  STATE._ccQueue[userId]='loading';
+  apiPost('/admin/emails/purge-pending',{manager_id:userId,types:['outreach','fu1','fu2'],dry_run:true})
+    .then(function(r){STATE._ccQueue[userId]=r;scheduleRender();})
+    .catch(function(){STATE._ccQueue[userId]=null;scheduleRender();});
+}
+window.refreshUserControlCenter=function(userId){
+  STATE._ccQueue=STATE._ccQueue||{};
+  delete STATE._ccQueue[userId];
+  loadUserQueueCounts(userId);
+  loadWorkflows();
+};
+
 function renderAdminUserDetail(userId){
   var usr=STATE.users.find(function(x){return x.id===userId;});
   if(!usr)return'';
@@ -417,6 +433,83 @@ function renderAdminUserDetail(userId){
   var assignments=STATE.teamAssignments||[];
   var myManagers=assignments.filter(function(a){return a.member_id===userId;});
   var myMembers=assignments.filter(function(a){return a.manager_id===userId;});
+
+  // ── Control Center — sending status, RA mode, pending queue, active
+  // sequence enrollments, all in one place instead of hunting across pages.
+  // BD / BD Lead only (these are the users who send outreach).
+  var isBDish=userHasAnyRole(usr,'bd','bd_lead');
+  var ccCard='';
+  if(isBDish){
+    loadUserQueueCounts(userId);
+    if(STATE.wf===undefined&&!STATE._wfLoading)loadWorkflows();
+
+    var mgrPaused=(STATE.pausedManagers||[]).indexOf(userId)>-1;
+    var raMode=(STATE.raModes&&STATE.raModes[userId])||'auto';
+    var q=STATE._ccQueue&&STATE._ccQueue[userId];
+    var qLoading=(q===undefined||q==='loading');
+    var qFailed=(q===null);
+
+    // Cross-reference this manager's job ids against the org-wide enrollment
+    // list (already loaded for the Workflows page) — avoids a new backend
+    // query. NOTE: /wf/enrollments caps at 500 rows org-wide, so a very large
+    // backlog could clip older enrollments from this view (same cap the
+    // Workflows page itself has today).
+    var myJobIds={};
+    (STATE.jobs||[]).forEach(function(j){if(j.assigned_to_bd===userId)myJobIds[j.id]=true;});
+    var myEnrollments=((STATE.wf&&STATE.wf.enrollments)||[]).filter(function(e){return e.job&&myJobIds[e.job.id];});
+    var activeEnrollments=myEnrollments.filter(function(e){return e.status==='active'||e.status==='paused';});
+
+    var enrollRows=activeEnrollments.length?activeEnrollments.map(function(e){
+      var cName=e.contact?((e.contact.first_name||'')+' '+(e.contact.last_name||'')).trim():'—';
+      var seqName=(e.workflow&&e.workflow.name)||'—';
+      var acts=e.status==='active'
+        ?'<a onclick="wfEnrollmentAction(\''+e.id+'\',\'pause\')" style="cursor:pointer;color:var(--amber);font-size:11px">Pause</a> <a onclick="wfEnrollmentAction(\''+e.id+'\',\'exit\')" style="cursor:pointer;color:var(--red);font-size:11px;margin-left:10px">Stop</a>'
+        :'<a onclick="wfEnrollmentAction(\''+e.id+'\',\'resume\')" style="cursor:pointer;color:var(--green);font-size:11px">Resume</a> <a onclick="wfEnrollmentAction(\''+e.id+'\',\'exit\')" style="cursor:pointer;color:var(--red);font-size:11px;margin-left:10px">Stop</a>';
+      return '<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border2)">'+
+        '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">'+htmlEsc(seqName)+'</div><div style="font-size:11px;color:var(--text3)">'+htmlEsc(cName)+'</div></div>'+
+        wfStatusBadge(e.status)+'<span style="white-space:nowrap">'+acts+'</span>'+
+      '</div>';
+    }).join(''):'<div style="padding:14px;color:var(--text3);font-size:12.5px">No active or paused sequence enrollments for this manager\'s leads.</div>';
+
+    ccCard='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
+        '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Control Center</div>'+
+        '<button onclick="refreshUserControlCenter(\''+userId+'\')" style="font-size:11px;color:var(--text3);background:transparent;border:0;cursor:pointer">↻ Refresh</button>'+
+      '</div>'+
+      '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px">'+
+        '<div style="flex:1;min-width:180px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px">'+
+          '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Sending</div>'+
+          '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'+
+            '<span style="font-weight:700;font-size:13px;color:'+(mgrPaused?'var(--red)':'var(--green)')+'">'+(mgrPaused?'Paused':'Active')+'</span>'+
+            (mgrPaused
+              ?'<button onclick="toggleManagerSending(\''+userId+'\',false)" style="font-size:11px;padding:4px 10px;background:var(--green);color:#fff;border:0;border-radius:6px;cursor:pointer">Resume</button>'
+              :'<button onclick="toggleManagerSending(\''+userId+'\',true)" style="font-size:11px;padding:4px 10px;background:transparent;color:var(--red);border:1px solid #fca5a5;border-radius:6px;cursor:pointer">Pause</button>')+
+          '</div></div>'+
+        '<div style="flex:1;min-width:180px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px">'+
+          '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">RA Mode</div>'+
+          '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'+
+            '<span style="font-weight:700;font-size:13px">'+(raMode==='manual'?'Manual':'Automatic')+'</span>'+
+            '<button onclick="toggleManagerRaMode(event,\''+userId+'\')" style="font-size:11px;padding:4px 10px;background:transparent;color:var(--text2);border:1px solid var(--border2);border-radius:6px;cursor:pointer">Switch</button>'+
+          '</div></div>'+
+      '</div>'+
+      '<div style="padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:14px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
+          '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em">Pending queue</div>'+
+          '<button onclick="openPurgePending(\''+userId+'\')" style="font-size:11px;color:var(--red);background:transparent;border:0;cursor:pointer">Delete pending…</button>'+
+        '</div>'+
+        (qLoading?'<div style="font-size:12.5px;color:var(--text3)">Loading…</div>':
+         qFailed?'<div style="font-size:12.5px;color:var(--text3)">Could not load queue counts.</div>':
+          '<div style="display:flex;gap:16px;font-size:13px;flex-wrap:wrap">'+
+            '<div><strong>'+q.count+'</strong> total pending</div>'+
+            '<div style="color:var(--text3)">Outreach: '+((q.by_type&&q.by_type.outreach)||0)+'</div>'+
+            '<div style="color:var(--text3)">FU1: '+((q.by_type&&q.by_type.fu1)||0)+'</div>'+
+            '<div style="color:var(--text3)">FU2: '+((q.by_type&&q.by_type.fu2)||0)+'</div>'+
+          '</div>')+
+      '</div>'+
+      '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Active sequence enrollments'+(activeEnrollments.length?' ('+activeEnrollments.length+')':'')+'</div>'+
+      '<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">'+enrollRows+'</div>'+
+    '</div>';
+  }
 
   // role dropdown only — this IS the designation
   var roleOpts=['ra','ra_lead','bd','bd_lead','admin','recruiter'].map(function(r){
@@ -478,6 +571,8 @@ function renderAdminUserDetail(userId){
           (usr.id!==STATE.user.id?'<button onclick="removeUser(\''+userId+'\',true)" style="background:transparent;color:var(--red);border:1px solid var(--red);padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer">Deactivate</button>':'<span style="font-size:12px;color:var(--text3)">Cannot deactivate yourself</span>')+
         '</div>'+
       '</div>'+
+
+      ccCard+
 
       // Outreach Email IDs — BD and Admin only
       (showEmails?
