@@ -77,6 +77,9 @@ try {
   check('PATCH /contacts/x/email-status → 401 (extracted)', await req('PATCH', '/contacts/x/email-status'), 401);
   check('GET /app-settings → 401 (extracted)', await req('GET', '/app-settings'), 401);
   check('GET /outreach-plan → 401 (extracted)', await req('GET', '/outreach-plan'), 401);
+  check('GET /suppression → 401 (extracted)', await req('GET', '/suppression'), 401);
+  check('GET /analytics/templates → 401 (extracted)', await req('GET', '/analytics/templates'), 401);
+  check('GET /admin/deliverability → 401 (extracted)', await req('GET', '/admin/deliverability'), 401);
 
   // Still-inline routes unaffected.
   check('GET /jobs → 401 (still inline)', await req('GET', '/jobs'), 401);
