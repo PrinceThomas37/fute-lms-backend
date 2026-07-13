@@ -168,5 +168,69 @@ router.patch('/emails/:id', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Admin tool: bulk-delete a manager's PENDING (unsent) emails, filtered by type
+// (outreach = initial/null, fu1, fu2) and optionally by a "created before" cutoff.
+// Only status='pending' rows are ever touched — sent mail is never affected.
+// Pass dry_run:true to preview the count + per-type breakdown before deleting.
+const PURGE_TYPES = ['outreach', 'fu1', 'fu2'];
+function purgeTypeOf(followupType) {
+  if (!followupType || followupType === 'initial') return 'outreach';
+  if (followupType === 'fu1') return 'fu1';
+  if (followupType === 'fu2') return 'fu2';
+  return null; // e.g. 'reminder' — never matched by this tool
+}
+router.post('/admin/emails/purge-pending', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
+    const { manager_id, all_managers, types, before, dry_run } = req.body || {};
+    if (!manager_id && !all_managers) return res.status(400).json({ error: 'manager_id or all_managers required' });
+    const selected = Array.isArray(types) ? types.filter(t => PURGE_TYPES.includes(t)) : [];
+    if (!selected.length) return res.status(400).json({ error: 'Select at least one email type' });
+    let beforeTs = null;
+    if (before) {
+      beforeTs = new Date(before).getTime();
+      if (Number.isNaN(beforeTs)) return res.status(400).json({ error: 'Invalid "before" timestamp' });
+    }
+
+    // Fetch all matching pending rows (paginated past Supabase's 1000-row cap —
+    // matters for the all-managers scope, which can be large). When all_managers
+    // is set we don't constrain by sent_by, so every manager's queue is covered.
+    let data = [], pageFrom = 0;
+    while (true) {
+      let q = supabase.from('emails').select('id, followup_type, created_at').eq('status', 'pending');
+      if (!all_managers) q = q.eq('sent_by', manager_id);
+      q = q.range(pageFrom, pageFrom + 999);
+      const { data: page, error } = await q;
+      if (error) throw error;
+      if (!page || !page.length) break;
+      data = data.concat(page);
+      if (page.length < 1000) break;
+      pageFrom += 1000;
+    }
+
+    const matches = (data || []).filter(e => {
+      const t = purgeTypeOf(e.followup_type);
+      if (!t || !selected.includes(t)) return false;
+      if (beforeTs != null && new Date(e.created_at).getTime() >= beforeTs) return false;
+      return true;
+    });
+
+    const by_type = { outreach: 0, fu1: 0, fu2: 0 };
+    matches.forEach(e => { by_type[purgeTypeOf(e.followup_type)]++; });
+
+    if (dry_run) return res.json({ count: matches.length, by_type });
+
+    const ids = matches.map(e => e.id);
+    let deleted = 0;
+    for (let i = 0; i < ids.length; i += 200) {
+      const batch = ids.slice(i, i + 200);
+      const { error: delErr } = await supabase.from('emails').delete().in('id', batch);
+      if (delErr) throw delErr;
+      deleted += batch.length;
+    }
+    res.json({ deleted, by_type });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
   return router;
 };
