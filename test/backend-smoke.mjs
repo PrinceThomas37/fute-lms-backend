@@ -167,6 +167,27 @@ try {
     results.push({ name: 'GET /emails/pending-summary resolves window helpers (no ReferenceError)', ok, detail });
   }
 
+  // Sequencing (workflow engine) routes — mounted + auth-gated.
+  check('GET /wf/definitions → 401 (gated)', await req('GET', '/wf/definitions'), 401);
+  check('GET /wf/sending-mailboxes → 401 (new, gated)', await req('GET', '/wf/sending-mailboxes'), 401);
+  check('POST /wf/enroll-bulk → 401 (gated)', await req('POST', '/wf/enroll-bulk'), 401);
+
+  // Dependency check: enroll-bulk with an admin token + a from_mailbox_ids body
+  // exercises resolveFromMailboxes (the rotation validator) and the metadata
+  // assembly before the engine's Supabase call — a mis-wired helper would
+  // ReferenceError here rather than hang on the dead DB host.
+  {
+    const token = jwt.sign({ id: 'test-admin', roles: ['admin'], role: 'admin', name: 'T' }, JWT_SECRET);
+    let ok, detail;
+    try {
+      const { status, body } = await postJson('/wf/enroll-bulk', token,
+        { workflow_id: 'w1', entity_type: 'contact', items: [{ entity_id: 'c1', job_id: 'j1' }], from_mailbox_ids: ['m1', 'm2'], any_stage: true });
+      ok = !/is not defined|is not a function/i.test(body);
+      detail = `status=${status} body=${body.slice(0, 160)}`;
+    } catch (e) { ok = true; detail = `reached DB layer (${e.message})`; }
+    results.push({ name: 'POST /wf/enroll-bulk resolves rotation deps (no ReferenceError)', ok, detail });
+  }
+
   // Unknown path still 404s → proves the 401s above mean "route exists + gated".
   check('GET /definitely-not-a-route → 404', await req('GET', '/definitely-not-a-route'), 404);
 } catch (e) {

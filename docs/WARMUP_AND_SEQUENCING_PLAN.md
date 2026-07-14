@@ -72,7 +72,7 @@ proven in the send pipeline.
 - After the set days (or when admin ends it early), the mailbox is marked
   **`warmed`**; the UI offers **"Switch to outreach."**
 
-## 1.2 Data model — `migrations/008_warmup_pool.sql`
+## 1.2 Data model — `migrations/009_warmup_pool.sql`
 
 All additive (`ADD COLUMN IF NOT EXISTS`, new tables), same safety posture as 006/007.
 
@@ -349,9 +349,13 @@ The engine and bulk-enroll are done. Two gaps:
 | `index.js:2530` (candidate_email) | Prefer `enrollment.metadata.from_mailbox_id` |
 | `routes/wf.js` `/wf/enrollments` | Return the assigned `metadata.from_mailbox_id` (+ address) so the UI can show "sending from" per enrollment |
 
-No schema migration required — rotation state rides in the existing
-`workflow_enrollments.metadata JSONB`. (Optional nicety: a promotable
-`from_mailbox_id` column later if we want to index/report on it.)
+Rotation *choice* rides in the existing `workflow_enrollments.metadata JSONB`,
+but making the **live send loop** actually authenticate with the rotated mailbox
+needs a per-email override the loop reads: `migrations/008_email_sending_override.sql`
+adds `emails.sending_email_id` (nullable → falls back to `job.sending_email_id`,
+so every existing row is unchanged). The workflow email channel pins the queued
+row to the chosen mailbox; the send loop resolves it best-effort (a missing
+column just means no rotation, never a break). **Status: shipped** — see the PR.
 
 ## 2.6 Frontend changes summary
 

@@ -531,15 +531,27 @@
         '<span style="font-size:11px;color:var(--text3)">'+esc(s.stage||'')+'</span>'+
       '</div>';
     }).join('')||'<div style="font-size:12.5px;color:var(--text3);padding:6px 2px">No candidates on this job yet.</div>';
+    var allOn=subs.length&&subs.every(function(s){return sel.indexOf(s.id)>-1;});
     return '<div class="card" style="padding:16px;margin-bottom:16px">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
         '<div style="font-weight:600;font-size:14px">Candidates ('+subs.length+')</div>'+
-        '<button class="btn btn-sm btn-primary" '+(sel.length?'':'disabled style="opacity:.45;cursor:default"')+' onclick="bdStartSequence()">▶ Start sequence'+(sel.length?' ('+sel.length+')':'')+'</button>'+
+        '<div style="display:flex;gap:8px;align-items:center">'+
+          (subs.length?'<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text2);cursor:pointer"><input type="checkbox" '+(allOn?'checked':'')+' onclick="bdToggleSeqSelAll(\''+jid+'\')" style="cursor:pointer"> All</label>':'')+
+          '<button class="btn btn-sm btn-primary" '+(sel.length?'':'disabled style="opacity:.45;cursor:default"')+' onclick="bdStartSequence()">▶ Start sequence'+(sel.length?' ('+sel.length+')':'')+'</button>'+
+        '</div>'+
       '</div>'+rows+
-      (sel.length?'':'<div style="font-size:11.5px;color:var(--text3);margin-top:8px">Tick candidates, then Start sequence to set up automated outreach for them.</div>')+
+      (sel.length?'':'<div style="font-size:11.5px;color:var(--text3);margin-top:8px">Tick candidates from any stage, then Start sequence — you\'ll pick which mailbox(es) to send from (rotated across the batch).</div>')+
     '</div>';
   }
   window.bdToggleSeqSel=function(sid){ STATE.bd.seqSel=STATE.bd.seqSel||[]; var i=STATE.bd.seqSel.indexOf(sid); if(i>-1)STATE.bd.seqSel.splice(i,1); else STATE.bd.seqSel.push(sid); render(); };
+  window.bdToggleSeqSelAll=function(jid){
+    var subs=(STATE.bd.submissions||[]).filter(function(s){return s.job_order_id===jid;});
+    var sel=STATE.bd.seqSel||[];
+    var allOn=subs.length&&subs.every(function(s){return sel.indexOf(s.id)>-1;});
+    if(allOn){ subs.forEach(function(s){ var i=sel.indexOf(s.id); if(i>-1)sel.splice(i,1); }); }
+    else { subs.forEach(function(s){ if(sel.indexOf(s.id)<0)sel.push(s.id); }); }
+    STATE.bd.seqSel=sel; render();
+  };
   window.bdStartSequence=function(){
     var sel=STATE.bd.seqSel||[]; if(!sel.length)return;
     var subs=(STATE.bd.submissions||[]);

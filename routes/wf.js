@@ -12,6 +12,20 @@ module.exports = (ctx) => {
 
   const canDesign = (req) => hasRole(req, 'admin', 'ra_lead', 'bd_lead', 'recruiter');
 
+  // Validate + order a set of "from" mailbox ids for rotation. Drops ids that
+  // are inactive, non-existent, or (for a plain BD/recruiter) not their own.
+  // Returns [{ id, email }] in the caller's order.
+  async function resolveFromMailboxes(req, ids) {
+    if (!Array.isArray(ids) || !ids.length) return [];
+    let q = supabase.from('user_emails').select('id,email_address,user_id').in('id', ids).eq('is_active', true);
+    if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) q = q.eq('user_id', req.user.id);
+    const { data } = await q;
+    const byId = {}; (data || []).forEach(m => { byId[m.id] = m; });
+    const seen = new Set(); const out = [];
+    for (const id of ids) if (byId[id] && !seen.has(id)) { seen.add(id); out.push({ id, email: byId[id].email_address }); }
+    return out;
+  }
+
   const DEF_SELECT = '*, steps:workflow_steps(*), creator:users!created_by(id,name)';
 
   function normalizeSteps(steps) {
@@ -29,6 +43,32 @@ module.exports = (ctx) => {
     channels: engine.listChannels(),
     catalogue: engine.describeChannels ? engine.describeChannels() : engine.listChannels().map(name => ({ name }))
   }));
+
+  // Sending mailboxes a sequence can rotate its "from" address across.
+  // Privileged designers see every active mailbox (with its owner); a plain BD /
+  // recruiter sees only their own. `connected` = can actually send right now
+  // (Microsoft mailbox with a stored token) — the picker warns on the rest.
+  router.get('/wf/sending-mailboxes', auth, async (req, res) => {
+    try {
+      let q = supabase.from('user_emails')
+        .select('id,user_id,email_address,display_name,platform,is_active,is_primary,daily_send_limit,owner:users!user_id(name)')
+        .eq('is_active', true).order('is_primary', { ascending: false });
+      if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) q = q.eq('user_id', req.user.id);
+      const { data, error } = await q;
+      if (error) throw error;
+      const ids = (data || []).map(e => e.id);
+      const { data: tokens } = ids.length
+        ? await supabase.from('microsoft_tokens').select('user_email_id').in('user_email_id', ids)
+        : { data: [] };
+      const connected = new Set((tokens || []).map(t => t.user_email_id));
+      res.json((data || []).map(e => ({
+        id: e.id, email: e.email_address, display_name: e.display_name || e.email_address,
+        platform: e.platform, is_primary: !!e.is_primary, owner: (e.owner && e.owner.name) || null,
+        owner_id: e.user_id, daily_send_limit: e.daily_send_limit,
+        connected: e.platform === 'Microsoft' ? connected.has(e.id) : false
+      })));
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
 
   router.get('/wf/definitions', auth, async (req, res) => {
     try {
@@ -110,6 +150,10 @@ module.exports = (ctx) => {
       if (!b.workflow_id) return res.status(400).json({ error: 'workflow_id required' });
       const entityId = b.entity_id || b.contact_id;
       if (!entityId) return res.status(400).json({ error: 'entity_id (or contact_id) required' });
+      const metadata = { ...(b.metadata || {}) };
+      const rot = await resolveFromMailboxes(req, b.from_mailbox_id ? [b.from_mailbox_id] : b.from_mailbox_ids);
+      if (rot.length) { metadata.from_mailbox_id = rot[0].id; metadata.from_mailbox_email = rot[0].email; }
+      if (b.any_stage) metadata.any_stage = true;
       const enrollment = await engine.enroll({
         workflow_id: b.workflow_id,
         entity_type: b.entity_type || 'contact',
@@ -117,7 +161,7 @@ module.exports = (ctx) => {
         job_id: b.job_id || null,
         contact_id: b.contact_id || ((b.entity_type || 'contact') === 'contact' ? entityId : null),
         enrolled_by: req.user.id,
-        metadata: b.metadata || {}
+        metadata
       });
       if (b.job_id) await logActivity(b.job_id, b.contact_id || null, req.user.id, 'workflow_enrolled', `Enrolled in workflow`, null, null);
       res.json(enrollment);
@@ -140,16 +184,29 @@ module.exports = (ctx) => {
         ? b.items
         : (Array.isArray(b.entity_ids) ? b.entity_ids.map(id => ({ entity_id: id })) : []);
       if (!items.length) return res.status(400).json({ error: 'items or entity_ids required' });
-      const out = { enrolled: 0, skipped: 0, errors: [] };
+
+      // Validated "from" mailboxes to rotate across (in the order given). A
+      // plain BD/recruiter may only rotate through their own mailboxes.
+      const rotation = await resolveFromMailboxes(req, b.from_mailbox_ids);
+      const anyStage = !!b.any_stage;
+      const baseMeta = b.metadata || {};
+
+      const out = { enrolled: 0, skipped: 0, errors: [], rotation: rotation.map(m => m.email) };
+      let idx = 0;
       for (const it of items) {
         const entityId = it.entity_id || it.contact_id;
         if (!entityId) { out.errors.push({ entity_id: null, error: 'missing entity_id' }); continue; }
         const jobId = it.job_id || b.job_id || null;
+        const chosen = rotation.length ? rotation[idx % rotation.length] : null;
+        idx++;
+        const metadata = { ...baseMeta, ...(it.metadata || {}) };
+        if (chosen) { metadata.from_mailbox_id = chosen.id; metadata.from_mailbox_email = chosen.email; }
+        if (anyStage) metadata.any_stage = true;
         try {
           await engine.enroll({
             workflow_id: b.workflow_id, entity_type: entityType, entity_id: entityId,
             job_id: jobId, contact_id: it.contact_id || (entityType === 'contact' ? entityId : null),
-            enrolled_by: req.user.id, metadata: it.metadata || b.metadata || {}
+            enrolled_by: req.user.id, metadata
           });
           out.enrolled++;
           if (jobId) await logActivity(jobId, it.contact_id || null, req.user.id, 'workflow_enrolled', 'Enrolled in sequence', null, null);

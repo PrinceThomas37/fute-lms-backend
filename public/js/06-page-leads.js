@@ -27,13 +27,23 @@ function renderJobs(){
   var stageOpts=stages.map(function(st){return '<option value="'+st+'"'+(f.stage===st?" selected":"")+'>'+st+'</option>';}).join("");
 
   var canChangeStageInline=userHasAnyRole(u,'admin','bd','bd_lead');
+  // Cross-group sequencing: BD / BD Lead / Admin can multi-select leads across
+  // any stage group and start one sequence for the lot (rotating "from" mailboxes).
+  var canSequence=userHasAnyRole(u,'admin','bd','bd_lead');
+  var leadSel=STATE.leadSeqSel||{};
+  // Selectable = filtered leads (all pages) whose primary contact has an email.
+  var leadSelectable=jobs.filter(function(j){var cs=jobContacts(j.id);return (cs.find(function(c){return c.is_primary;})||cs[0]||{}).email;});
+  STATE._leadSelectableIds=leadSelectable.map(function(j){return j.id;});
+  var leadSelCount=Object.keys(leadSel).filter(function(k){return leadSel[k];}).length;
   var _tp=Math.max(1,Math.ceil(jobs.length/20));
   var _pg=Math.min(STATE.leadsPage||0,_tp-1);
   var rows=jobs.slice(_pg*20,(_pg+1)*20).map(function(j){
     var cs=jobContacts(j.id);
     var primary=cs[0]||{};
+    var hasEmail=(cs.find(function(c){return c.is_primary;})||cs[0]||{}).email;
     var stageColor={Unassigned:"#94a3b8",Assigned:"#3b82f6",Connected:"#8b5cf6",Rejected:"#ef4444",Future:"#f59e0b",Qualified:"#10b981"}[j.stage]||"#64748b";
     return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer" onclick="openJob(\''+j.id+'\')">'+
+      (canSequence?'<td style="padding:12px;width:34px" onclick="event.stopPropagation()">'+(hasEmail?'<input type="checkbox" '+(leadSel[j.id]?'checked':'')+' onclick="event.stopPropagation();leadToggleSel(\''+j.id+'\')" style="cursor:pointer;width:15px;height:15px;accent-color:var(--accent)" title="Select for sequence"/>':'<span title="No contact email" style="color:var(--border2)">·</span>')+'</td>':'')+
       '<td style="padding:12px"><div style="font-weight:600;color:var(--text)">'+escHtml(j.company_name)+(j.is_duplicate?'<span style="margin-left:6px;background:#fef9c3;color:#b45309;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">DUP</span>':'')+(j.freshness==='Old'?'<span style="margin-left:6px;background:#fef2f2;color:#dc2626;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">OLD</span>':'')+(j.freshness==='New'?'<span style="margin-left:6px;background:#f0fdf4;color:#16a34a;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600">NEW</span>':'')+'</div></td>'+
       '<td style="padding:12px"><div style="font-weight:500">'+escHtml(j.position)+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(j.location||"—")+'</div></td>'+
       '<td style="padding:12px"><div>'+escHtml((primary.first_name||"")+" "+(primary.last_name||""))+'</div><div style="font-size:11px;color:var(--text3)">'+escHtml(primary.email||"—")+'</div></td>'+
@@ -168,10 +178,16 @@ function renderJobs(){
         '<input type="file" id="xl-import" accept=".xlsx,.xls" style="display:none" onchange="importXL(this)"/>'+
       '</div>'+
     '</div>'+
+    (canSequence&&leadSelCount?'<div style="position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:12px;padding:11px 15px;background:var(--accent-l);border:1px solid var(--accent);border-radius:10px;margin-bottom:12px;flex-wrap:wrap">'+
+      '<span style="font-size:13px;font-weight:700;color:var(--accent)">'+leadSelCount+' lead'+(leadSelCount>1?'s':'')+' selected</span>'+
+      '<button onclick="leadStartSequence()" style="background:var(--accent);color:#fff;border:0;padding:8px 15px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer">▶ Sequence selected</button>'+
+      '<button onclick="leadClearSel()" style="background:transparent;color:var(--text2);border:1px solid var(--border);padding:8px 13px;border-radius:8px;font-size:12px;cursor:pointer">Clear</button>'+
+      '<span style="font-size:11.5px;color:var(--text3);margin-left:auto">Pick your "from" mailbox(es) next — sends rotate across them, regardless of stage.</span>'+
+    '</div>':'')+
     '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden">'+
       '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
         '<thead style="background:var(--bg3);color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+
-          '<tr><th style="padding:12px;text-align:left">Company</th><th style="padding:12px;text-align:left">Position</th><th style="padding:12px;text-align:left">Primary Contact</th><th style="padding:12px;text-align:center">Contacts</th><th style="padding:12px;text-align:left">Stage</th><th style="padding:12px;text-align:left">Assigned BD</th><th style="padding:12px;text-align:left">Created</th></tr>'+
+          '<tr>'+(canSequence?'<th style="padding:12px;width:34px"><input type="checkbox" '+(leadSelectable.length&&leadSelectable.every(function(j){return leadSel[j.id];})?'checked':'')+' onclick="leadToggleSelAll()" style="cursor:pointer;width:15px;height:15px;accent-color:var(--accent)" title="Select all matching leads"/></th>':'')+'<th style="padding:12px;text-align:left">Company</th><th style="padding:12px;text-align:left">Position</th><th style="padding:12px;text-align:left">Primary Contact</th><th style="padding:12px;text-align:center">Contacts</th><th style="padding:12px;text-align:left">Stage</th><th style="padding:12px;text-align:left">Assigned BD</th><th style="padding:12px;text-align:left">Created</th></tr>'+
         '</thead>'+
         '<tbody>'+rows+'</tbody>'+
       '</table>'+
@@ -201,6 +217,29 @@ window.jobStartSequence=function(jobId){
   var sel=STATE.jobSeqSel||[]; if(!sel.length)return;
   var items=sel.map(function(cid){ var c=STATE.contacts.find(function(x){return x.id===cid;})||{}; return {entity_id:cid,job_id:jobId,contact_id:cid,label:((c.first_name||'')+' '+(c.last_name||'')).trim()||'Contact'}; });
   wfStartSequence('contact',items);
+};
+// ── Cross-group lead selection → bulk sequence (any stage) ──
+window.leadToggleSel=function(jid){ STATE.leadSeqSel=STATE.leadSeqSel||{}; STATE.leadSeqSel[jid]=!STATE.leadSeqSel[jid]; render(); };
+window.leadToggleSelAll=function(){
+  var ids=STATE._leadSelectableIds||[]; var sel=STATE.leadSeqSel||{};
+  var allOn=ids.length&&ids.every(function(id){return sel[id];});
+  ids.forEach(function(id){ sel[id]=!allOn; });
+  STATE.leadSeqSel=sel; render();
+};
+window.leadClearSel=function(){ STATE.leadSeqSel={}; render(); };
+window.leadStartSequence=function(){
+  var sel=STATE.leadSeqSel||{};
+  var ids=Object.keys(sel).filter(function(k){return sel[k];});
+  if(!ids.length){ showToast('Select at least one lead','warning'); return; }
+  var items=[], skipped=0;
+  ids.forEach(function(jid){
+    var cs=jobContacts(jid); var primary=cs.find(function(c){return c.is_primary;})||cs[0];
+    if(primary&&primary.email)items.push({entity_id:primary.id,job_id:jid,contact_id:primary.id,label:((primary.first_name||'')+' '+(primary.last_name||'')).trim()||'Contact'});
+    else skipped++;
+  });
+  if(!items.length){ showToast('None of the selected leads have a contact email','warning'); return; }
+  if(skipped)showToast(skipped+' selected lead'+(skipped>1?'s':'')+' had no contact email — skipped','info');
+  wfStartSequence('contact',items,{anyStage:true});
 };
 // From the send-results panel: open the failed lead's detail.
 function closeAndOpenLead(jobId){ if(jobId){ openJob(jobId); } }

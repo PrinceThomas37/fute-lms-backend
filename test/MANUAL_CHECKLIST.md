@@ -69,6 +69,31 @@ card → **"+ Enroll leads…"**.
       selected leads (verify in Workflows → Enrollments) without the manager
       having done anything themselves.
 
+## Sequencing: cross-group selection + "from"-mailbox rotation
+Requires **migration `008_email_sending_override.sql`** applied (adds
+`emails.sending_email_id`). Without it, rotation silently falls back to each
+job's default mailbox — nothing breaks, but sends won't actually rotate.
+Reachable via: sidebar **Leads** → tick leads across any stage group → sticky
+**"▶ Sequence selected"** bar; or a **job detail** / **BD job** candidate
+multi-select → **Start sequence**.
+- [ ] The Leads list shows a checkbox column + "select all matching" for
+      BD / BD-Lead / Admin only (not RA); leads with no contact email aren't selectable.
+- [ ] Selecting leads across different stages (e.g. Connected + Future + Rejected)
+      and starting a sequence enrolls all of them (verify in Workflows → Enrollments);
+      the email step does **not** skip the non-Assigned ones (any_stage in effect).
+- [ ] The Start-sequence modal lists sending mailboxes with a connected/not-connected
+      badge; a plain BD sees only their own, admin/leads see all.
+- [ ] Picking 2+ "from" mailboxes then Start: enrollments show "✉ <mailbox>" and the
+      addresses **round-robin** across the batch (enrollment 1→mbA, 2→mbB, 3→mbA…).
+- [ ] Run the engine (Workflows → Run sequence now): each lead's email actually
+      **sends from its assigned mailbox** (check the recipient's From header / the
+      mailbox's Sent Items), not the job's default mailbox.
+- [ ] Follow-ups (fu1/fu2) for a rotated lead thread from the **same** assigned
+      mailbox as its initial email.
+- [ ] Picking **no** mailbox falls back to each lead's job default (unchanged behaviour).
+- [ ] Candidate side (BD job → Candidates → select across stages → Start sequence)
+      rotates the recruiter's chosen mailboxes the same way.
+
 ## Admin: System Settings (operational numbers)
 - [ ] Admin (not RA-Lead) sees the "System Settings" button on the Admin page.
 - [ ] Current values shown match the previous hardcoded defaults (21 / 24 / 20 / 5 / 5 / 20 / 3 / 200).
