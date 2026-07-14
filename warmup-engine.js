@@ -48,8 +48,10 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const domainOf = (email) => (String(email || '').split('@')[1] || '').toLowerCase();
 
 function createWarmupEngine(ctx) {
-  const { supabase, graphMailRequest, getMicrosoftToken, emit, EVENTS } = ctx;
+  const { supabase, graphMailRequest, getMicrosoftToken, gmail, emit, EVENTS } = ctx;
   let ticking = false;
+  const isGmail = (m) => (m && (m.platform || '').toLowerCase() === 'gmail');
+  const gmailReady = () => !!(gmail && gmail.isConfigured && gmail.isConfigured());
 
   const nowIso = () => new Date().toISOString();
   const todayStr = () => new Date().toISOString().split('T')[0];
@@ -65,13 +67,22 @@ function createWarmupEngine(ctx) {
   // Connected + active mailboxes that either warm up or opted in to receive.
   async function poolMailboxes() {
     const { data: mbs } = await supabase.from('user_emails')
-      .select('id,email_address,display_name,warmup_status,warmup_start_date,warmup_days,warmup_pool_opt_in,is_active')
+      .select('id,email_address,display_name,platform,warmup_status,warmup_start_date,warmup_days,warmup_pool_opt_in,is_active')
       .eq('is_active', true);
     const list = (mbs || []).filter(m => m.warmup_status === 'warming' || m.warmup_pool_opt_in);
     if (!list.length) return [];
-    const { data: tokens } = await supabase.from('microsoft_tokens').select('user_email_id').in('user_email_id', list.map(m => m.id));
-    const connected = new Set((tokens || []).map(t => t.user_email_id));
-    return list.filter(m => connected.has(m.id));
+    // A mailbox can participate if it has a live token for its provider.
+    const ids = list.map(m => m.id);
+    const { data: msTok } = await supabase.from('microsoft_tokens').select('user_email_id').in('user_email_id', ids);
+    const msConnected = new Set((msTok || []).map(t => t.user_email_id));
+    let gmConnected = new Set();
+    if (gmailReady()) {
+      try {
+        const { data: gTok } = await supabase.from('gmail_tokens').select('user_email_id').in('user_email_id', ids);
+        gmConnected = new Set((gTok || []).map(t => t.user_email_id));
+      } catch (_) {}
+    }
+    return list.filter(m => isGmail(m) ? gmConnected.has(m.id) : msConnected.has(m.id));
   }
 
   async function warmupSentToday(mailboxId) {
@@ -88,7 +99,6 @@ function createWarmupEngine(ctx) {
 
   // ── Send a fresh warm-up opener from `from` to `to`, recording the thread ──
   async function sendOpener(from, to, targetExchanges) {
-    const token = await getMicrosoftToken(from.id);
     const { subject, body } = pick(OPENERS);
     const { data: thread, error } = await supabase.from('warmup_threads').insert({
       from_mailbox_id: from.id, to_mailbox_id: to.id, subject,
@@ -97,24 +107,34 @@ function createWarmupEngine(ctx) {
     }).select('id').single();
     if (error) throw error;
 
-    const draft = await graphMailRequest(token, '/me/messages', {
-      method: 'POST',
-      body: JSON.stringify({
-        subject,
-        body: { contentType: 'HTML', content: body },
-        toRecipients: [{ emailAddress: { address: to.email_address } }],
-        internetMessageHeaders: [{ name: WARMUP_HEADER, value: String(thread.id) }]
-      })
-    });
-    await graphMailRequest(token, `/me/messages/${draft.id}/send`, { method: 'POST' });
+    let messageId = null, conversationId = null;
+    if (isGmail(from)) {
+      const r = await gmail.sendNewMessage(from.id, {
+        to: to.email_address, subject, htmlBody: body, fromAddress: from.email_address,
+        headers: { [WARMUP_HEADER]: String(thread.id) }
+      });
+      messageId = r.messageId; conversationId = r.threadId || null;
+    } else {
+      const token = await getMicrosoftToken(from.id);
+      const draft = await graphMailRequest(token, '/me/messages', {
+        method: 'POST',
+        body: JSON.stringify({
+          subject, body: { contentType: 'HTML', content: body },
+          toRecipients: [{ emailAddress: { address: to.email_address } }],
+          internetMessageHeaders: [{ name: WARMUP_HEADER, value: String(thread.id) }]
+        })
+      });
+      await graphMailRequest(token, `/me/messages/${draft.id}/send`, { method: 'POST' });
+      messageId = draft.id; conversationId = draft.conversationId || null;
+    }
 
     const delayMs = await replyDelayMs();
     await supabase.from('warmup_threads').update({
-      conversation_id: draft.conversationId || null, root_message_id: draft.id,
+      conversation_id: conversationId, root_message_id: messageId,
       exchanges: 1, landed_in: 'unknown',
       next_due_at: new Date(Date.now() + delayMs).toISOString(), updated_at: nowIso()
     }).eq('id', thread.id);
-    await supabase.from('warmup_messages').insert({ thread_id: thread.id, sender_mailbox_id: from.id, graph_message_id: draft.id, direction: 'out' });
+    await supabase.from('warmup_messages').insert({ thread_id: thread.id, sender_mailbox_id: from.id, graph_message_id: messageId, direction: 'out' });
     await bumpWarmupSendLog(from.id);
     return thread.id;
   }
@@ -165,7 +185,71 @@ function createWarmupEngine(ctx) {
     return log;
   }
 
+  const gmailHeader = (msg, name) => {
+    const hs = (msg && msg.payload && msg.payload.headers) || [];
+    const h = hs.find(x => (x.name || '').toLowerCase() === name.toLowerCase());
+    return h ? h.value : null;
+  };
+
+  // Gmail counterpart of processMailbox: INBOX/SPAM by label, identify warm-up
+  // mail by the X-Fute-Warmup header, rescue via label move, reply by threadId.
+  async function processMailboxGmail(mb, log) {
+    for (const label of ['INBOX', 'SPAM']) {
+      let refs;
+      try { refs = await gmail.listMessages(mb.id, { labelIds: [label], maxResults: 25 }); }
+      catch (e) { continue; }
+      for (const ref of (refs || [])) {
+        let msg;
+        try { msg = await gmail.getMessage(mb.id, ref.id, { format: 'metadata', metadataHeaders: [WARMUP_HEADER, 'Message-Id', 'From', 'Subject'] }); }
+        catch (_) { continue; }
+        const threadHeader = gmailHeader(msg, WARMUP_HEADER);
+        if (!threadHeader) continue;
+        const { data: thread } = await supabase.from('warmup_threads').select('*').eq('id', threadHeader).maybeSingle();
+        if (!thread) continue;
+
+        if (label === 'SPAM') {
+          try {
+            await gmail.modifyLabels(mb.id, ref.id, { remove: ['SPAM'], add: ['INBOX'] });
+            log.rescued++;
+            await supabase.from('warmup_threads').update({ landed_in: 'junk', rescued: true, updated_at: nowIso() }).eq('id', thread.id);
+          } catch (_) {}
+        } else if (thread.landed_in === 'unknown' || !thread.landed_in) {
+          await supabase.from('warmup_threads').update({ landed_in: 'inbox', updated_at: nowIso() }).eq('id', thread.id);
+        }
+
+        const due = !thread.next_due_at || new Date(thread.next_due_at).getTime() <= Date.now();
+        if (thread.status === 'open' && thread.next_actor_mailbox_id === mb.id && thread.exchanges < thread.target_exchanges && due) {
+          const fromAddr = (gmailHeader(msg, 'From') || '').replace(/.*<(.+)>.*/, '$1').trim();
+          if (!fromAddr) continue; // can't determine who to reply to — retry next tick
+          try {
+            const inReplyTo = gmailHeader(msg, 'Message-Id');
+            const subj = gmailHeader(msg, 'Subject') || thread.subject || '';
+            await gmail.sendThreadReply(mb.id, {
+              to: fromAddr, subject: /^re:/i.test(subj) ? subj : `Re: ${subj}`,
+              htmlBody: pick(REPLIES), fromAddress: mb.email_address,
+              threadId: msg.threadId || ref.threadId, inReplyTo, references: inReplyTo,
+              headers: { [WARMUP_HEADER]: String(thread.id) }
+            });
+            const nextExchanges = (thread.exchanges || 0) + 1;
+            const otherId = thread.from_mailbox_id === mb.id ? thread.to_mailbox_id : thread.from_mailbox_id;
+            const done = nextExchanges >= thread.target_exchanges;
+            const delayMs = await replyDelayMs();
+            await supabase.from('warmup_threads').update({
+              exchanges: nextExchanges, status: done ? 'done' : 'open',
+              next_actor_mailbox_id: done ? null : otherId,
+              next_due_at: done ? null : new Date(Date.now() + delayMs).toISOString(), updated_at: nowIso()
+            }).eq('id', thread.id);
+            await supabase.from('warmup_messages').insert({ thread_id: thread.id, sender_mailbox_id: mb.id, graph_message_id: ref.id, direction: 'reply' });
+            await bumpWarmupSendLog(mb.id);
+            log.replied++;
+          } catch (e) { console.error(`[warmup] gmail reply in thread ${thread.id}: ${e.message}`); }
+        }
+      }
+    }
+  }
+
   async function processMailbox(mb, log) {
+    if (isGmail(mb)) return processMailboxGmail(mb, log);
     const token = await getMicrosoftToken(mb.id);
     for (const folder of ['Inbox', 'JunkEmail']) {
       let data;

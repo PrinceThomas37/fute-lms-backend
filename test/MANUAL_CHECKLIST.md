@@ -123,6 +123,26 @@ on a production inbox until confirmed. Reachable via: sidebar **Deliverability**
 - [ ] With only **one** connected mailbox, warm-up no-ops gracefully (nothing to
       exchange with) and says so.
 
+## Gmail / Google Workspace provider (once GOOGLE_CLIENT_ID/SECRET are set)
+Inert until configured + Google approves the restricted scopes (gmail.send /
+gmail.modify). Requires migration `010_gmail_tokens.sql` (applied). The Microsoft
+path must be byte-identical regardless — verify a Microsoft send still behaves
+exactly as before after this change.
+- [ ] With Gmail unconfigured: a job whose sending mailbox is Gmail fails with
+      "Gmail sending is not configured on the server yet" (not a crash); Microsoft
+      sends unaffected.
+- [ ] After configuring + connecting a Gmail mailbox (Admin → user → Email IDs →
+      + Gmail → Connect): the green "✓ Connected" state shows; `/users/:id/emails`
+      returns gmail_connected=true.
+- [ ] Outreach from a Gmail sending mailbox actually delivers (initial email) and
+      follow-ups thread in the same Gmail thread (threadId reused via conversation_id).
+- [ ] A Gmail mailbox can join the warm-up pool: it sends openers (X-Fute-Warmup
+      header present in the raw message), replies to inbound warm-up mail, and
+      rescues warm-up mail from SPAM → INBOX (label modify).
+- [ ] Google specifics to confirm on the pilot: refresh_token is returned on first
+      consent (prompt=consent) and refresh works; custom header survives send + is
+      readable via messages.get metadata; threadId replies thread correctly.
+
 ## Domain authentication & blacklist health
 Reachable via: sidebar **Deliverability** → **Domain authentication & blacklists**
 card. Pure DNS (no paid service); needs the server to be able to make outbound

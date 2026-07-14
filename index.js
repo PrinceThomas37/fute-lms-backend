@@ -1134,12 +1134,40 @@ async function persistGraphIds(emailId, graph) {
   }
 }
 
+// Gmail delivery — the provider counterpart to the Microsoft path below. Only
+// reached for platform=Gmail mailboxes (dispatched in deliverOutboundEmail).
+// Gmail threads by threadId, which we stash in the same conversation_id column
+// the Graph path uses, so persistGraphIds + later follow-ups thread naturally.
+async function deliverViaGmail(email, userEmailId, htmlBody, sendingEmail) {
+  const fromAddress = sendingEmail?.email_address || email.from_email || undefined;
+  const isFollowup = email.followup_type === 'fu1' || email.followup_type === 'fu2';
+  let threadId = null;
+  if (isFollowup) {
+    const { data: prior } = await supabase.from('emails')
+      .select('conversation_id').eq('job_id', email.job_id).eq('contact_id', email.contact_id)
+      .not('conversation_id', 'is', null).order('sent_at', { ascending: false }).limit(1).maybeSingle();
+    threadId = prior?.conversation_id || null;
+  }
+  if (isFollowup && threadId) {
+    const r = await gmailProvider.sendThreadReply(userEmailId, { to: email.to_email, subject: email.subject, htmlBody, fromAddress, threadId });
+    return { graphMessageId: r.messageId, conversationId: r.threadId || threadId, inReplyTo: null };
+  }
+  const r = await gmailProvider.sendNewMessage(userEmailId, { to: email.to_email, subject: email.subject, htmlBody, fromAddress });
+  return { graphMessageId: r.messageId, conversationId: r.threadId || null, inReplyTo: null };
+}
+
 async function deliverOutboundEmail(email, userEmailId, signatureHtml, sendingEmail) {
   const filledSig = fillSignatureHtml(signatureHtml, {
     displayName: sendingEmail?.display_name || '',
     emailAddress: sendingEmail?.email_address || email.from_email || ''
   });
   const htmlBody = buildHtmlEmailBody(email.body, filledSig);
+  // Provider dispatch: Gmail mailboxes go through the Gmail adapter; everything
+  // else keeps the exact Microsoft Graph path unchanged.
+  const platform = (sendingEmail?.platform || 'Microsoft').toLowerCase();
+  if (platform === 'gmail' || platform === 'google') {
+    return deliverViaGmail(email, userEmailId, htmlBody, sendingEmail);
+  }
   const isFollowup = email.followup_type === 'fu1' || email.followup_type === 'fu2';
   if (!isFollowup) {
     return sendMicrosoftNewMessage(userEmailId, { to: email.to_email, subject: email.subject, htmlBody });
@@ -1393,10 +1421,14 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
       continue;
     }
 
-    if (platform === 'gmail' || platform === 'google') {
+    // Gmail sends now dispatch through the Gmail adapter in deliverOutboundEmail.
+    // Only hard-fail here when Gmail isn't configured on the server at all; a
+    // configured-but-not-connected mailbox falls through and surfaces a clear
+    // "reconnect" error from the provider via the normal catch below.
+    if ((platform === 'gmail' || platform === 'google') && !gmailProvider.isConfigured()) {
       sendAttempts++;
       failed++;
-      failDetails.push({ id: email.id, job_id: email.job_id, contact_id: email.contact_id, to: email.to_email, from: sendingEmail?.email_address || '—', error: 'Gmail sending not connected yet' });
+      failDetails.push({ id: email.id, job_id: email.job_id, contact_id: email.contact_id, to: email.to_email, from: sendingEmail?.email_address || '—', error: 'Gmail sending is not configured on the server yet' });
       try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch (_) {}
       await setSendProgress(userId, { ...progressBase, current: email.to_email });
       continue;
@@ -2695,7 +2727,7 @@ setTimeout(() => { wfEngine.tick().catch(err => console.error('[wf] tick failed:
 // OFF by default: a mailbox only participates once an admin starts warm-up
 // (warmup_status='warming') or opts it in as a receiver. Spread across a couple
 // of ticks a day so the traffic looks organic; offset from the other sweeps.
-const warmupEngine = createWarmupEngine({ supabase, graphMailRequest, getMicrosoftToken, emit, EVENTS });
+const warmupEngine = createWarmupEngine({ supabase, graphMailRequest, getMicrosoftToken, gmail: gmailProvider, emit, EVENTS });
 app.use(require('./routes/warmup')({ supabase, auth, hasRole, engine: warmupEngine, emit, EVENTS }));
 setInterval(() => { warmupEngine.tick().catch(err => console.error('[warmup] tick failed:', err.message)); }, 2 * 60 * 60 * 1000);
 setTimeout(() => { warmupEngine.tick().catch(err => console.error('[warmup] tick failed:', err.message)); }, 6 * 60 * 1000);
