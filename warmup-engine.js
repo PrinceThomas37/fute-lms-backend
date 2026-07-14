@@ -45,6 +45,7 @@ const REPLIES = [
   'Great, thanks. Happy to sync up whenever is convenient for you.',
 ];
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const domainOf = (email) => (String(email || '').split('@')[1] || '').toLowerCase();
 
 function createWarmupEngine(ctx) {
   const { supabase, graphMailRequest, getMicrosoftToken, emit, EVENTS } = ctx;
@@ -137,11 +138,15 @@ function createWarmupEngine(ctx) {
     for (const mb of warming) {
       const partners = pool.filter(p => p.id !== mb.id);
       if (!partners.length) continue; // nobody to warm with
+      // Cross-domain traffic is the reputation signal that matters; prefer
+      // partners on a different domain, fall back to any partner.
+      const myDomain = domainOf(mb.email_address);
+      const crossDomain = partners.filter(p => domainOf(p.email_address) !== myDomain);
       const target = Math.min(hardCap, start + step * daysSince(mb.warmup_start_date));
       const already = await warmupSentToday(mb.id);
       const toSend = Math.max(0, target - already);
       for (let i = 0; i < toSend; i++) {
-        const partner = pick(partners);
+        const partner = pick(crossDomain.length ? crossDomain : partners);
         try { await sendOpener(mb, partner, repliesPer); sent++; }
         catch (e) { console.error(`[warmup] send from ${mb.email_address} failed: ${e.message}`); break; }
       }

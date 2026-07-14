@@ -268,7 +268,11 @@ function renderDeliverability(){
   }).join('')||'<div style="padding:14px;color:var(--text3);font-size:13px">No active mailboxes.</div>';
   var warmExtra=(isAdmin?'<button onclick="runWarmupTick()" style="font-size:11px;color:var(--text2);background:transparent;border:1px solid var(--border2);padding:4px 11px;border-radius:6px;cursor:pointer">'+(wtick==='running'?'Running…':'▶ Run warm-up now')+'</button>':'')+
     (wtick&&wtick!=='running'?'<span style="font-size:11px;color:var(--text3);margin-left:8px">'+(wtick.off?'engine off — apply migration 009':'sent '+(wtick.sent||0)+' · replies '+(wtick.replied||0)+' · rescued '+(wtick.rescued||0)+' · pool '+(wtick.pool||0))+'</span>':'');
-  var warmSub='<div style="padding:10px 14px;font-size:11.5px;color:var(--text3);border-bottom:1px solid var(--border)">Warm-up sends real email between your connected mailboxes and holds short conversations to build reputation, then graduates them to outreach. Needs 2+ connected mailboxes. '+(w&&w.pool_count!=null?'<b>'+w.pool_count+'</b> in the pool now.':'')+'</div>';
+  var readyColors={none:'var(--red)',minimal:'var(--amber)',ok:'var(--accent)',good:'var(--green)'};
+  var rd=w&&w.readiness;
+  var readyBanner=rd?'<div style="padding:9px 14px;font-size:11.5px;border-bottom:1px solid var(--border);background:'+readyColors[rd.level]+'14;color:'+(readyColors[rd.level]||'var(--text2)')+';font-weight:600">'+
+    (w.pool_count||0)+' mailbox'+((w.pool_count||0)===1?'':'es')+' · '+(w.pool_domains||0)+' domain'+((w.pool_domains||0)===1?'':'s')+' in pool — '+htmlEsc(rd.note)+'</div>':'';
+  var warmSub='<div style="padding:10px 14px;font-size:11.5px;color:var(--text3);border-bottom:1px solid var(--border)">Warm-up sends real email between your connected mailboxes and holds short conversations to build reputation, then graduates them to outreach. Every mailbox that participates — the ones you warm <b>and</b> their partners — must be added and connected here.</div>'+readyBanner;
 
   var tplRows=tpls.length?tpls.map(function(t){
     var hasSample=t.sample&&t.sample.subject;

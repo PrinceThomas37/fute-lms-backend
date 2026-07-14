@@ -23,6 +23,24 @@ module.exports = (ctx) => {
     return isNaN(t) ? 0 : Math.max(0, Math.floor((Date.now() - t) / 86400000));
   };
 
+  // A plain-English readiness read on the pool, shown in the admin UI so the
+  // system tells you whether you have enough mailboxes/domains for smooth
+  // warm-up (rather than you having to guess). Rule of thumb: reputation is
+  // domain-scoped and built by CROSS-domain traffic, and each warming mailbox
+  // needs healthy partners to email — aim for ~1.5x as many pool mailboxes as
+  // you warm at once, spread over 3+ domains.
+  function poolReadiness(poolCount, domainCount, warmingCount) {
+    if (poolCount < 2)
+      return { level: 'none', note: 'Add at least 2 connected mailboxes — a mailbox needs partners to warm up with. Nothing sends until then.' };
+    if (domainCount < 2)
+      return { level: 'minimal', note: `All ${poolCount} pool mailboxes are on one domain. Add mailboxes on other domains — cross-domain email is the reputation signal that matters.` };
+    if (warmingCount > 0 && poolCount < Math.ceil(warmingCount * 1.5))
+      return { level: 'minimal', note: `Thin pool for ${warmingCount} warming mailbox(es): add more receiver mailboxes (aim for ~1.5x the number you warm at once) so no single inbox is flooded.` };
+    if (domainCount < 3)
+      return { level: 'ok', note: `${poolCount} mailboxes across ${domainCount} domains — workable. 3+ domains warms more naturally.` };
+    return { level: 'good', note: `${poolCount} mailboxes across ${domainCount} domains — healthy pool.` };
+  }
+
   async function connectedSet(ids) {
     if (!ids.length) return new Set();
     const { data } = await supabase.from('microsoft_tokens').select('user_email_id').in('user_email_id', ids);
@@ -70,8 +88,17 @@ module.exports = (ctx) => {
         });
       }
       // pool = participants that can actually exchange mail
-      const poolCount = out.filter(m => (m.warmup_status === 'warming' || m.opt_in) && m.connected).length;
-      res.json({ mailboxes: out, pool_count: poolCount, defaults: { start, step, days: defDays } });
+      const poolMembers = out.filter(m => (m.warmup_status === 'warming' || m.opt_in) && m.connected);
+      const domains = new Set(poolMembers.map(m => (m.email.split('@')[1] || '').toLowerCase()).filter(Boolean));
+      const warmingCount = out.filter(m => m.warmup_status === 'warming').length;
+      res.json({
+        mailboxes: out,
+        pool_count: poolMembers.length,
+        pool_domains: domains.size,
+        warming_count: warmingCount,
+        readiness: poolReadiness(poolMembers.length, domains.size, warmingCount),
+        defaults: { start, step, days: defDays }
+      });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
