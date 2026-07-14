@@ -57,6 +57,18 @@ buttons now live on the Admin page, which the sidebar always links to.)
       on the same enrollment.
 - [ ] ↻ Refresh reloads the queue counts and enrollments without a full page reload.
 
+## Admin: enroll another manager's leads in a sequence
+Reachable via: sidebar **Admin** → click a BD/BD-Lead user → **Control Center**
+card → **"+ Enroll leads…"**.
+- [ ] Picker lists only that manager's leads (not other managers').
+- [ ] A lead already in an active/paused sequence is correctly excluded from the list.
+- [ ] Select-all and individual checkboxes both update the "selected" count and
+      enable/disable Continue correctly.
+- [ ] Continue hands off to the existing "Start sequence" modal with the right
+      lead count; picking or building a sequence there enrolls exactly the
+      selected leads (verify in Workflows → Enrollments) without the manager
+      having done anything themselves.
+
 ## Admin: System Settings (operational numbers)
 - [ ] Admin (not RA-Lead) sees the "System Settings" button on the Admin page.
 - [ ] Current values shown match the previous hardcoded defaults (21 / 24 / 20 / 5 / 5 / 20 / 3 / 200).
