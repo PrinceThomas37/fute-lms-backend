@@ -16,6 +16,7 @@ const express = require('express');
 const { emailSyntaxValid } = require('../email-validation');
 const { scoreEmailContent } = require('../deliverability');
 const { getSetting } = require('../config/settings');
+const { domainHealthReport } = require('../domain-health');
 
 // Human-readable label for a template_variant id, shown next to the raw id
 // in the reply-rate table so PDs/BDs see a real name instead of "v1".
@@ -129,6 +130,31 @@ router.get('/admin/deliverability', auth, async (req, res) => {
     res.json({ window_days: days, sent, failed, bounced_contacts: bounced, replied_contacts: replied, suppression_count: suppression, mailboxes: mailboxHealth });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+  // ── Domain authentication + blacklist health ───────────────────────────────
+  // SPF/DKIM/DMARC record checks + DNSBL lookups for every sending domain.
+  // DNS is slow, so results are cached ~15 min; ?refresh=1 forces a re-check.
+  const healthCache = new Map(); // domain -> { report, at }
+  const HEALTH_TTL_MS = 15 * 60 * 1000;
+  router.get('/admin/domain-health', auth, async (req, res) => {
+    try {
+      if (!hasRole(req, 'admin', 'bd_lead', 'ra_lead')) return res.status(403).json({ error: 'Forbidden' });
+      const refresh = req.query.refresh === '1' || req.query.refresh === 'true';
+      const { data: mbs } = await supabase.from('user_emails').select('email_address').eq('is_active', true);
+      const domains = [...new Set((mbs || [])
+        .map(m => (m.email_address || '').split('@')[1])
+        .filter(Boolean).map(d => d.toLowerCase()))];
+      const reports = await Promise.all(domains.map(async (d) => {
+        const cached = healthCache.get(d);
+        if (!refresh && cached && (Date.now() - cached.at) < HEALTH_TTL_MS) return cached.report;
+        const report = await domainHealthReport(d);
+        healthCache.set(d, { report, at: Date.now() });
+        return report;
+      }));
+      reports.sort((a, b) => (a.score == null ? 101 : a.score) - (b.score == null ? 101 : b.score)); // worst first
+      res.json({ domains: reports, checked: reports.length });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
 
   return router;
 };

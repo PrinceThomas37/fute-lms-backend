@@ -123,6 +123,19 @@ on a production inbox until confirmed. Reachable via: sidebar **Deliverability**
 - [ ] With only **one** connected mailbox, warm-up no-ops gracefully (nothing to
       exchange with) and says so.
 
+## Domain authentication & blacklist health
+Reachable via: sidebar **Deliverability** → **Domain authentication & blacklists**
+card. Pure DNS (no paid service); needs the server to be able to make outbound
+DNS queries (works in production; a sandbox with DNS blocked shows "unknown").
+- [ ] Card lists every distinct sending domain from active mailboxes, worst score first.
+- [ ] SPF / DKIM / DMARC / Blacklist chips reflect reality for a known-good domain
+      (all ✓) and a domain missing a record (✗ on the missing one).
+- [ ] "Fixes (N)" expands to the exact record/setting to add for each failing check.
+- [ ] A domain on a DNSBL shows "Blacklisted" with a delisting cure.
+- [ ] "↻ Re-check" forces a fresh lookup (bypasses the ~15-min cache).
+- [ ] DKIM uses common selectors (selector1/2 for M365, google for Workspace); a
+      domain with a custom selector may show "unknown" rather than a false ✗.
+
 ## Admin: System Settings (operational numbers)
 - [ ] Admin (not RA-Lead) sees the "System Settings" button on the Admin page.
 - [ ] Current values shown match the previous hardcoded defaults (21 / 24 / 20 / 5 / 5 / 20 / 3 / 200).

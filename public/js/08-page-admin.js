@@ -199,6 +199,16 @@ window.submitWarmupStart=function(id){
   var optin=!(document.getElementById('wu-optin')&&document.getElementById('wu-optin').checked===false);
   apiPost('/warmup/'+id+'/start',{days:days,opt_in_receive:optin}).then(function(){ showToast('Warm-up started','success'); closeModal(); loadWarmup(); }).catch(function(e){ showToast('Failed: '+(e&&e.message||e),'error'); });
 };
+
+// ── Domain authentication & blacklist health ──
+function loadDomainHealth(refresh){
+  if(STATE._dhLoading)return;
+  STATE._dhLoading=true;
+  if(refresh)STATE.domainHealth='loading';
+  apiGet('/admin/domain-health'+(refresh?'?refresh=1':'')).then(function(r){ STATE.domainHealth=r||{domains:[]}; STATE._dhLoading=false; scheduleRender(); }).catch(function(){ STATE.domainHealth={domains:[],_err:true}; STATE._dhLoading=false; scheduleRender(); });
+}
+window.refreshDomainHealth=function(){ STATE._dhLoading=false; loadDomainHealth(true); showToast('Re-checking domains…','info'); };
+window.toggleDomainFindings=function(d){ STATE._dhOpen=STATE._dhOpen||{}; STATE._dhOpen[d]=!STATE._dhOpen[d]; scheduleRender(); };
 window.runSpamCheck=function(){ apiPost('/emails/spam-check',{subject:STATE.spamSubj||'',body:STATE.spamBody||''}).then(function(r){ STATE.spamResult=r; scheduleRender(); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
 window.previewTemplateSample=function(variant){
   var t=(STATE.delivTemplates||[]).find(function(x){return x.variant===variant;});
@@ -274,6 +284,37 @@ function renderDeliverability(){
     (w.pool_count||0)+' mailbox'+((w.pool_count||0)===1?'':'es')+' · '+(w.pool_domains||0)+' domain'+((w.pool_domains||0)===1?'':'s')+' in pool — '+htmlEsc(rd.note)+'</div>':'';
   var warmSub='<div style="padding:10px 14px;font-size:11.5px;color:var(--text3);border-bottom:1px solid var(--border)">Warm-up sends real email between your connected mailboxes and holds short conversations to build reputation, then graduates them to outreach. Every mailbox that participates — the ones you warm <b>and</b> their partners — must be added and connected here.</div>'+readyBanner;
 
+  // ── Domain authentication & blacklists ──
+  if(STATE.domainHealth===undefined&&!STATE._dhLoading)loadDomainHealth(false);
+  var dh=STATE.domainHealth;
+  var dhColors={good:'var(--green)',ok:'var(--accent)',warn:'var(--amber)',bad:'var(--red)',unknown:'var(--text3)'};
+  function dhChip(label,state){ var c=state==='pass'?'var(--green)':state==='fail'?'var(--red)':state==='warn'?'var(--amber)':'var(--text3)'; var sym=state==='pass'?'✓':state==='fail'?'✗':state==='warn'?'!':'?'; return '<span style="font-size:10.5px;padding:2px 7px;border-radius:6px;font-weight:700;background:'+c+'1a;color:'+c+'">'+label+' '+sym+'</span>'; }
+  var dhRows;
+  if(dh===undefined||dh==='loading')dhRows='<div style="padding:14px;color:var(--text3);font-size:13px">Checking domains (DNS lookups)…</div>';
+  else if(!dh.domains||!dh.domains.length)dhRows='<div style="padding:14px;color:var(--text3);font-size:13px">No sending domains found — add mailboxes first.</div>';
+  else dhRows=dh.domains.map(function(D){
+    var spfState=D.spf.found===true?(D.spf.ok?'pass':'warn'):(D.spf.found===false?'fail':'unknown');
+    var dkimState=D.dkim.found===true?'pass':(D.dkim.found===false?'fail':'unknown');
+    var dmarcState=D.dmarc.found===true?(D.dmarc.ok?'pass':'warn'):(D.dmarc.found===false?'fail':'unknown');
+    var listed=D.blacklist&&D.blacklist.listed&&D.blacklist.listed.length;
+    var blState=listed?'fail':'pass';
+    var open=STATE._dhOpen&&STATE._dhOpen[D.domain];
+    var findings=D.findings||[];
+    var findingsHtml=open?'<div style="padding:8px 14px 10px;background:var(--bg3)">'+(findings.length?findings.map(function(f){
+      var fc=f.severity==='high'?'var(--red)':f.severity==='warn'?'var(--amber)':'var(--text3)';
+      return '<div style="margin-bottom:9px"><div style="font-size:12px;font-weight:600;color:'+fc+'">'+htmlEsc(f.area)+' — '+htmlEsc(f.detail)+'</div>'+(f.cure?'<div style="font-size:11px;color:var(--text2);margin-top:3px;font-family:ui-monospace,monospace;white-space:pre-wrap;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'+htmlEsc(f.cure)+'</div>':'')+'</div>';
+    }).join(''):'<div style="font-size:12px;color:var(--green)">All checks passed — nothing to fix.</div>')+'</div>':'';
+    return '<div style="border-bottom:1px solid var(--border)">'+
+      '<div style="display:flex;align-items:center;gap:8px;padding:9px 14px;flex-wrap:wrap">'+
+        '<div style="flex:1;min-width:120px"><span style="font-size:13px;font-weight:600">'+htmlEsc(D.domain)+'</span> <span style="font-size:11px;color:'+(dhColors[D.level]||'var(--text3)')+';font-weight:700;margin-left:4px">'+(D.score==null?'unknown':D.score+'/100')+'</span></div>'+
+        dhChip('SPF',spfState)+dhChip('DKIM',dkimState)+dhChip('DMARC',dmarcState)+dhChip(listed?'Blacklisted':'Blacklist',blState)+
+        '<a onclick="toggleDomainFindings(\''+D.domain+'\')" style="cursor:pointer;font-size:11px;color:var(--accent);white-space:nowrap">'+(open?'Hide':'Fixes'+(findings.length?' ('+findings.length+')':''))+'</a>'+
+      '</div>'+findingsHtml+
+    '</div>';
+  }).join('');
+  var dhExtra='<button onclick="refreshDomainHealth()" style="font-size:11px;color:var(--text2);background:transparent;border:1px solid var(--border2);padding:4px 11px;border-radius:6px;cursor:pointer">↻ Re-check</button>';
+  var dhSub='<div style="padding:10px 14px;font-size:11.5px;color:var(--text3);border-bottom:1px solid var(--border)">SPF, DKIM, DMARC and blacklist status for every sending domain. Fix these <b>before</b> warming — broken authentication or a blacklisting lands you in spam no matter how well a mailbox is warmed. Cached ~15 min.</div>';
+
   var tplRows=tpls.length?tpls.map(function(t){
     var hasSample=t.sample&&t.sample.subject;
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border)">'+
@@ -297,6 +338,7 @@ function renderDeliverability(){
     statsRow+
     card('Mailbox health (outreach cap & auto-pause)', mbRows||'<div style="padding:14px;color:var(--text3);font-size:13px">No active mailboxes.</div>')+
     card('Warm-up pool'+(w&&w.pool_count?' · '+w.pool_count+' active':''), warmSub+warmRows, warmExtra)+
+    card('Domain authentication & blacklists', dhSub+dhRows, dhExtra)+
     card('Reply rate by template', tplRows)+
     card('Spam-content checker',
       '<div style="padding:14px">'+
