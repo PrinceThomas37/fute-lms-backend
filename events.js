@@ -31,6 +31,8 @@ const EVENTS = {
   CONTACT_REPLIED:     'contact.replied',
   CONTACT_UNSUBSCRIBED:'contact.unsubscribed',
   MAILBOX_AUTOPAUSED:  'mailbox.autopaused',
+  WARMUP_STARTED:      'warmup.started',
+  MAILBOX_WARMED:      'mailbox.warmed',
   WORKFLOW_ENROLLED:      'workflow.enrolled',
   WORKFLOW_STEP_EXECUTED: 'workflow.step_executed',
   WORKFLOW_COMPLETED:     'workflow.completed',

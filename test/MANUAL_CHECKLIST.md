@@ -94,6 +94,35 @@ multi-select → **Start sequence**.
 - [ ] Candidate side (BD job → Candidates → select across stages → Start sequence)
       rotates the recruiter's chosen mailboxes the same way.
 
+## Warm-up pool (real Graph sends between mailboxes)
+Requires **migration `009_warmup_pool.sql`** applied. This tier sends **real
+email** from real mailboxes, so verify on a **test-mailbox pair first** — never
+on a production inbox until confirmed. Reachable via: sidebar **Deliverability**
+→ **Warm-up pool** card. Off by default until an admin starts a mailbox.
+- [ ] "Warm-up pool" card lists active mailboxes with a connected/not-connected
+      state; "Start warm-up" only offered for connected Microsoft mailboxes, admin only.
+- [ ] Start warm-up on **two** connected test mailboxes (duration e.g. 2 days) →
+      both show "Warming · day 1/N".
+- [ ] "▶ Run warm-up now" (or wait for the tick): each warming mailbox sends the
+      day's quota (starts at `warmup_pool_start`, +`warmup_pool_step`/day) to the
+      other pool mailbox — confirm the messages actually arrive.
+- [ ] Every warm-up message carries an `X-Fute-Warmup` header (check message
+      source) and does **not** appear as a reply/bounce in Deliverability stats,
+      template analytics, or stop any real sequence.
+- [ ] The receiving mailbox **replies** within the delay window; conversations
+      run up to `warmup_replies_per_thread` exchanges then stop.
+- [ ] A warm-up message landing in **Junk** is moved to **Inbox** (rescued) and
+      the mailbox's inbox-placement % reflects it.
+- [ ] Warm-up sends increment `warmup_send_log` only — a BD's outreach daily quota
+      (`email_send_log`) is untouched.
+- [ ] Pause / Resume / Graduate work; past the duration the mailbox auto-graduates
+      to **✓ Warmed** and stops sending warm-up mail.
+- [ ] Graph specifics to confirm on the pilot: custom `internetMessageHeaders`
+      survive send + are readable on the received copy; `createReply` + PATCH
+      header + send threads correctly; `/messages/{id}/move` to `inbox` rescues.
+- [ ] With only **one** connected mailbox, warm-up no-ops gracefully (nothing to
+      exchange with) and says so.
+
 ## Admin: System Settings (operational numbers)
 - [ ] Admin (not RA-Lead) sees the "System Settings" button on the Admin page.
 - [ ] Current values shown match the previous hardcoded defaults (21 / 24 / 20 / 5 / 5 / 20 / 3 / 200).

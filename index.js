@@ -42,6 +42,7 @@ const registerSubscribers = require('./subscribers');
 const { scoreEmailContent, deliverabilityFlags, isOptOutReply } = require('./deliverability');
 const { loadConfig } = require('./config/env');
 const settingsConfig = require('./config/settings');
+const { createWarmupEngine, WARMUP_HEADER } = require('./warmup-engine');
 
 // Validate environment and centralize config at startup (fails fast with a
 // clear message if a required secret is missing).
@@ -1939,6 +1940,12 @@ function isNdrMessage(msg) {
     || subj.includes('returned mail');
 }
 
+// Warm-up pool traffic carries an X-Fute-Warmup header; the outreach reply and
+// bounce sweeps must never treat it as a prospect reply or a bounce.
+function isWarmupMessage(msg) {
+  return (msg.internetMessageHeaders || []).some(h => (h.name || '').toLowerCase() === WARMUP_HEADER.toLowerCase());
+}
+
 // Pull every email address out of NDR text, dropping our own mailboxes and the
 // postmaster/daemon senders — what remains is the failed recipient(s).
 function extractBounceRecipients(text, ownAddresses) {
@@ -1988,7 +1995,7 @@ async function sweepMailboxBounces(tokenRow, ownAddresses) {
 
   const filter = encodeURIComponent(`receivedDateTime ge ${since}`);
   const path = `/me/mailFolders/Inbox/messages?$top=50&$orderby=receivedDateTime desc`
-    + `&$select=id,subject,from,bodyPreview,body,receivedDateTime&$filter=${filter}`;
+    + `&$select=id,subject,from,bodyPreview,body,receivedDateTime,internetMessageHeaders&$filter=${filter}`;
   let data;
   try { data = await graphMailRequest(accessToken, path); }
   catch (e) { console.error(`[BounceSweep] list for ${tokenRow.email_address}: ${e.message}`); return 0; }
@@ -1997,6 +2004,7 @@ async function sweepMailboxBounces(tokenRow, ownAddresses) {
   let marked = 0, newest = since;
   for (const msg of messages) {
     if (msg.receivedDateTime && msg.receivedDateTime > newest) newest = msg.receivedDateTime;
+    if (isWarmupMessage(msg)) continue; // warm-up pool traffic — never a bounce
     if (!isNdrMessage(msg)) continue;
     const text = `${msg.body?.content || ''} ${msg.bodyPreview || ''}`;
     for (const addr of extractBounceRecipients(text, ownAddresses)) {
@@ -2058,7 +2066,7 @@ async function sweepMailboxReplies(tokenRow, ownAddresses) {
 
   const filter = encodeURIComponent(`receivedDateTime ge ${since}`);
   const path = `/me/mailFolders/Inbox/messages?$top=50&$orderby=receivedDateTime desc`
-    + `&$select=id,subject,from,bodyPreview,body,receivedDateTime&$filter=${filter}`;
+    + `&$select=id,subject,from,bodyPreview,body,receivedDateTime,internetMessageHeaders&$filter=${filter}`;
   let data;
   try { data = await graphMailRequest(accessToken, path); }
   catch (e) { console.error(`[ReplySweep] list for ${tokenRow.email_address}: ${e.message}`); return 0; }
@@ -2067,6 +2075,7 @@ async function sweepMailboxReplies(tokenRow, ownAddresses) {
   let detected = 0, newest = since;
   for (const msg of messages) {
     if (msg.receivedDateTime && msg.receivedDateTime > newest) newest = msg.receivedDateTime;
+    if (isWarmupMessage(msg)) continue; // warm-up pool traffic — never a prospect reply
     if (isNdrMessage(msg)) continue; // bounces are the bounce sweep's job
     const from = (msg.from?.emailAddress?.address || '').toLowerCase();
     if (!from || ownAddresses.has(from)) continue; // ignore internal / our own mail
@@ -2675,6 +2684,15 @@ app.use(require('./routes/wf')({ supabase, auth, hasRole, engine: wfEngine, logA
 // (offset from the bounce/reply sweeps so they don't stack).
 setInterval(() => { wfEngine.tick().catch(err => console.error('[wf] tick failed:', err.message)); }, 60 * 60 * 1000);
 setTimeout(() => { wfEngine.tick().catch(err => console.error('[wf] tick failed:', err.message)); }, 4 * 60 * 1000);
+
+// ── Warm-up pool engine — real Graph sends between our own connected mailboxes.
+// OFF by default: a mailbox only participates once an admin starts warm-up
+// (warmup_status='warming') or opts it in as a receiver. Spread across a couple
+// of ticks a day so the traffic looks organic; offset from the other sweeps.
+const warmupEngine = createWarmupEngine({ supabase, graphMailRequest, getMicrosoftToken, emit, EVENTS });
+app.use(require('./routes/warmup')({ supabase, auth, hasRole, engine: warmupEngine, emit, EVENTS }));
+setInterval(() => { warmupEngine.tick().catch(err => console.error('[warmup] tick failed:', err.message)); }, 2 * 60 * 60 * 1000);
+setTimeout(() => { warmupEngine.tick().catch(err => console.error('[warmup] tick failed:', err.message)); }, 6 * 60 * 1000);
 
 // ── START ──────────────────────────────────────────────────────
 app.listen(PORT, () => console.log(`Fute Global LMS API v3.0.0 running on port ${PORT}`));

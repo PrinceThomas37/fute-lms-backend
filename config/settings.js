@@ -32,6 +32,36 @@ const SETTINGS_SCHEMA = [
     default: 5, min: 0, max: 200,
   },
   {
+    key: 'warmup_pool_start', label: 'Warm-up starting emails/day', unit: 'emails/day', group: 'Deliverability',
+    description: 'How many warm-up emails a mailbox sends to the pool on day 1 of its warm-up.',
+    default: 5, min: 1, max: 200,
+  },
+  {
+    key: 'warmup_pool_step', label: 'Warm-up daily increase', unit: 'emails/day', group: 'Deliverability',
+    description: 'How many more warm-up emails per day are sent each day after day 1.',
+    default: 3, min: 0, max: 100,
+  },
+  {
+    key: 'warmup_pool_days', label: 'Default warm-up duration', unit: 'days', group: 'Deliverability',
+    description: 'Default number of days a mailbox warms up before it graduates to outreach (admin can override per mailbox).',
+    default: 25, min: 1, max: 120,
+  },
+  {
+    key: 'warmup_replies_per_thread', label: 'Replies per warm-up conversation', unit: 'messages', group: 'Deliverability',
+    description: 'How many back-and-forth messages each warm-up conversation runs before it is considered done.',
+    default: 3, min: 0, max: 10,
+  },
+  {
+    key: 'warmup_reply_delay_min', label: 'Warm-up reply delay', unit: 'minutes', group: 'Deliverability',
+    description: 'Minimum minutes before a warm-up email is auto-replied to (jittered above this), so exchanges look human.',
+    default: 30, min: 1, max: 1440,
+  },
+  {
+    key: 'warmup_daily_hard_cap', label: 'Warm-up daily hard cap', unit: 'emails/day', group: 'Deliverability',
+    description: 'Absolute safety ceiling on warm-up emails a single mailbox may send per day, regardless of the ramp.',
+    default: 200, min: 1, max: 1000,
+  },
+  {
     key: 'bounce_rate_threshold_pct', label: 'Bounce-rate auto-pause threshold', unit: '%', group: 'Deliverability',
     description: "A mailbox is auto-paused for the day once its bounce rate exceeds this percentage.",
     default: 5, min: 1, max: 100,

@@ -188,6 +188,25 @@ try {
     results.push({ name: 'POST /wf/enroll-bulk resolves rotation deps (no ReferenceError)', ok, detail });
   }
 
+  // Warm-up pool routes — mounted + auth-gated.
+  check('GET /warmup/mailboxes → 401 (new, gated)', await req('GET', '/warmup/mailboxes'), 401);
+  check('POST /warmup/tick → 401 (new, gated)', await req('POST', '/warmup/tick'), 401);
+  check('POST /warmup/x/start → 401 (new, gated)', await req('POST', '/warmup/x/start'), 401);
+
+  // Dependency check: /warmup/tick with an admin token exercises the warm-up
+  // engine's tick (poolMailboxes → Supabase) — a mis-wired engine/ctx would
+  // ReferenceError rather than hang on the dead DB host.
+  {
+    const token = jwt.sign({ id: 'test-admin', roles: ['admin'], role: 'admin', name: 'T' }, JWT_SECRET);
+    let ok, detail;
+    try {
+      const { status, body } = await postJson('/warmup/tick', token, {});
+      ok = !/is not defined|is not a function/i.test(body);
+      detail = `status=${status} body=${body.slice(0, 160)}`;
+    } catch (e) { ok = true; detail = `reached DB layer (${e.message})`; }
+    results.push({ name: 'POST /warmup/tick resolves engine deps (no ReferenceError)', ok, detail });
+  }
+
   // Unknown path still 404s → proves the 401s above mean "route exists + gated".
   check('GET /definitely-not-a-route → 404', await req('GET', '/definitely-not-a-route'), 404);
 } catch (e) {
