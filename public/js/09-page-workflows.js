@@ -507,7 +507,10 @@ function renderAdminUserDetail(userId){
             '<div style="color:var(--text3)">FU2: '+((q.by_type&&q.by_type.fu2)||0)+'</div>'+
           '</div>')+
       '</div>'+
-      '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Active sequence enrollments'+(activeEnrollments.length?' ('+activeEnrollments.length+')':'')+'</div>'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
+        '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em">Active sequence enrollments'+(activeEnrollments.length?' ('+activeEnrollments.length+')':'')+'</div>'+
+        '<button onclick="openAdminEnrollPicker(\''+userId+'\')" style="font-size:11px;color:var(--accent);background:transparent;border:0;cursor:pointer">+ Enroll leads…</button>'+
+      '</div>'+
       '<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">'+enrollRows+'</div>'+
     '</div>';
   }
@@ -597,4 +600,87 @@ function renderAdminUserDetail(userId){
     '</div>'+
   '</div>';
 }
+
+// ── Admin: enroll another manager's leads into a sequence on their behalf ───
+// (Control Center → "+ Enroll leads…") Reuses the existing "Start sequence"
+// picker and POST /wf/enroll-bulk exactly as the manager's own Leads/Email
+// pages do — this only adds the missing step of choosing WHICH of another
+// user's leads to enroll, since normally that selection happens on a page the
+// manager themselves is viewing.
+window.openAdminEnrollPicker=function(userId){
+  var usr=STATE.users.find(function(x){return x.id===userId;});
+  if(!usr)return;
+
+  // A job is eligible if it belongs to this manager, has at least one contact,
+  // and has no ACTIVE or PAUSED enrollment already (re-enrolling a completed/
+  // exited/failed one is fine — the backend's own uniqueness rule already
+  // guards against double-enrolling an active one, this is just so the admin
+  // isn't offered leads that are already mid-sequence).
+  var busyJobIds={};
+  ((STATE.wf&&STATE.wf.enrollments)||[]).forEach(function(e){
+    if((e.status==='active'||e.status==='paused')&&e.job)busyJobIds[e.job.id]=true;
+  });
+  var myJobs=(STATE.jobs||[]).filter(function(j){return j.assigned_to_bd===userId;});
+  var eligible=myJobs.map(function(j){
+    var contacts=(STATE.contacts||[]).filter(function(c){return c.job_id===j.id;});
+    var primary=contacts.find(function(c){return c.is_primary;})||contacts[0];
+    return primary?{job:j,contact:primary}:null;
+  }).filter(function(x){return x&&!busyJobIds[x.job.id];});
+
+  STATE._adminEnrollSel={};
+  STATE._adminEnrollPool=eligible;
+  renderAdminEnrollPicker(userId);
+};
+function renderAdminEnrollPicker(userId){
+  var usr=STATE.users.find(function(x){return x.id===userId;});
+  var pool=STATE._adminEnrollPool||[];
+  var sel=STATE._adminEnrollSel||{};
+  var selCount=Object.keys(sel).filter(function(k){return sel[k];}).length;
+  var rows=pool.length?pool.map(function(x){
+    var cName=((x.contact.first_name||'')+' '+(x.contact.last_name||'')).trim()||'Contact';
+    var statusOk=x.contact.email_status==='valid'||!x.contact.email_status;
+    return '<label style="display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);cursor:pointer">'+
+      '<input type="checkbox" '+(sel[x.job.id]?'checked':'')+' onchange="adminEnrollToggle(\''+x.job.id+'\',this.checked)" style="width:15px;height:15px;flex-shrink:0"/>'+
+      '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">'+htmlEsc(x.job.position||'—')+' · '+htmlEsc(x.job.company_name||'')+'</div>'+
+        '<div style="font-size:11.5px;color:var(--text3)">'+htmlEsc(cName)+(x.contact.email?' · '+htmlEsc(x.contact.email):'')+'</div></div>'+
+      (statusOk?'':'<span style="font-size:10px;padding:2px 7px;background:var(--red-l);color:var(--red);border-radius:6px;font-weight:600">'+htmlEsc(x.contact.email_status)+'</span>')+
+    '</label>';
+  }).join(''):'<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px">No eligible leads — every lead is either already in an active sequence or has no contact on file.</div>';
+
+  STATE.modal='<div class="modal modal-w480" style="max-height:88vh;overflow-y:auto">'+
+    '<div class="mh"><div><div class="mt">Enroll leads · '+htmlEsc(usr?usr.name:'')+'</div>'+
+      '<div style="font-size:12px;color:var(--text3);margin-top:2px">Pick which of their leads to enroll, then choose or build a sequence. This does not require '+htmlEsc(usr?usr.name:'them')+' to do anything.</div></div>'+
+      '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+
+      (pool.length?'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer"><input type="checkbox" '+(selCount===pool.length?'checked':'')+' onchange="adminEnrollToggleAll(this.checked)" style="width:15px;height:15px"/> Select all ('+pool.length+')</label><span style="font-size:12px;color:var(--text3)">'+selCount+' selected</span></div>':'')+
+      '<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;max-height:320px;overflow-y:auto">'+rows+'</div>'+
+    '</div>'+
+    '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn btn-primary" '+(selCount?'':'disabled')+' onclick="adminEnrollContinue(\''+userId+'\')">Continue ('+selCount+')</button></div>'+
+  '</div>';
+  render();
+}
+window.adminEnrollToggle=function(jobId,checked){
+  STATE._adminEnrollSel=STATE._adminEnrollSel||{};
+  STATE._adminEnrollSel[jobId]=checked;
+  renderAdminEnrollPicker(STATE.adminSelectedUser);
+};
+window.adminEnrollToggleAll=function(checked){
+  var sel={};
+  (STATE._adminEnrollPool||[]).forEach(function(x){sel[x.job.id]=checked;});
+  STATE._adminEnrollSel=sel;
+  renderAdminEnrollPicker(STATE.adminSelectedUser);
+};
+window.adminEnrollContinue=function(userId){
+  var sel=STATE._adminEnrollSel||{};
+  var pool=STATE._adminEnrollPool||[];
+  var items=pool.filter(function(x){return sel[x.job.id];}).map(function(x){
+    return {entity_id:x.contact.id,job_id:x.job.id,contact_id:x.contact.id,
+      label:((x.contact.first_name||'')+' '+(x.contact.last_name||'')).trim()||'Contact'};
+  });
+  if(!items.length)return;
+  // Hands off to the existing "Start sequence" flow (pick/build + POST
+  // /wf/enroll-bulk) — identical to how a manager enrolls their own leads.
+  wfStartSequence('contact',items);
+};
 
