@@ -43,6 +43,7 @@ const { scoreEmailContent, deliverabilityFlags, isOptOutReply } = require('./del
 const { loadConfig } = require('./config/env');
 const settingsConfig = require('./config/settings');
 const { createWarmupEngine, WARMUP_HEADER } = require('./warmup-engine');
+const { createGmailProvider } = require('./gmail-provider');
 
 // Validate environment and centralize config at startup (fails fast with a
 // clear message if a required secret is missing).
@@ -2224,6 +2225,10 @@ const MS_SECRET   = config.microsoft.clientSecret;
 const MS_REDIRECT = config.microsoft.redirectUri;
 const MS_SCOPES   = config.microsoft.scopes;
 
+// Gmail / Google Workspace provider — inert until GOOGLE_CLIENT_ID/SECRET are
+// set (see config/env.js). Microsoft path is unaffected.
+const gmailProvider = createGmailProvider({ supabase, google: config.google });
+
 
 
 // Random delay between emails to avoid domain flagging (1–120 seconds)
@@ -2373,6 +2378,7 @@ const routeCtx = {
 };
 app.use(require('./routes/auth')(routeCtx));
 app.use(require('./routes/microsoft')(routeCtx));
+app.use(require('./routes/gmail')({ supabase, auth, hasRole, provider: gmailProvider }));
 app.use(require('./routes/workflows')(routeCtx));
 app.use(require('./routes/companies')(routeCtx));
 app.use(require('./routes/reminders')(routeCtx));

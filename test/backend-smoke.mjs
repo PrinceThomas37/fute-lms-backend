@@ -189,6 +189,14 @@ try {
     results.push({ name: 'POST /wf/enroll-bulk resolves rotation deps (no ReferenceError)', ok, detail });
   }
 
+  // Gmail OAuth routes — mounted. Status is auth-gated (401 without token);
+  // connect is a redirect/HTML flow (not a 401), so just assert it's not a 404.
+  check('GET /auth/google/status/x → 401 (new, gated)', await req('GET', '/auth/google/status/x'), 401);
+  {
+    const s = await req('GET', '/auth/google/connect');
+    results.push({ name: 'GET /auth/google/connect → mounted (not 404)', ok: s !== 404, detail: `got ${s}` });
+  }
+
   // Warm-up pool routes — mounted + auth-gated.
   check('GET /warmup/mailboxes → 401 (new, gated)', await req('GET', '/warmup/mailboxes'), 401);
   check('POST /warmup/tick → 401 (new, gated)', await req('POST', '/warmup/tick'), 401);

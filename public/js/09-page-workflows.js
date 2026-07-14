@@ -585,7 +585,12 @@ function renderAdminUserDetail(userId){
   var emailRows=userEmails.map(function(e){
     var msConn=e.ms_connected;
     var platBadge='<span style="font-size:10px;padding:2px 7px;border-radius:6px;font-weight:600;background:'+(e.platform==='Microsoft'?'#e0f2fe':'#f0fdf4')+';color:'+(e.platform==='Microsoft'?'#0369a1':'#166534')+'">'+htmlEsc(e.platform)+'</span>';
-    var connBtn=e.platform==='Microsoft'&&!msConn?'<button onclick="connectMicrosoftUserEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:10px;padding:2px 8px;background:#0078d4;color:#fff;border:0;border-radius:6px;cursor:pointer">Connect</button>':(e.platform==='Microsoft'&&msConn?'<span style="font-size:10px;color:var(--green)">✓ Connected</span>':'');
+    var connBtn='';
+    if(e.platform==='Microsoft'){
+      connBtn=!msConn?'<button onclick="connectMicrosoftUserEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:10px;padding:2px 8px;background:#0078d4;color:#fff;border:0;border-radius:6px;cursor:pointer">Connect</button>':'<span style="font-size:10px;color:var(--green)">✓ Connected</span>';
+    } else if(e.platform==='Gmail'){
+      connBtn=!e.gmail_connected?'<button onclick="connectGmailUserEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:10px;padding:2px 8px;background:#16a34a;color:#fff;border:0;border-radius:6px;cursor:pointer">Connect</button>':'<span style="font-size:10px;color:var(--green)">✓ Connected</span>';
+    }
     return '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">'+
       '<div style="flex:1;min-width:160px"><div style="font-weight:500;font-size:13px">'+htmlEsc(e.display_name||e.email_address)+'</div>'+
         '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(e.email_address)+'</div></div>'+
