@@ -162,6 +162,53 @@ function loadDeliverability(){
 window.openDeliverability=function(){ STATE.page='deliverability'; STATE.deliv=undefined; render(); loadDeliverability(); };
 window.setDelivDays=function(days){ STATE.delivDays=days; STATE.deliv=undefined; render(); loadDeliverability(); };
 window.resumeMailbox=function(id){ apiPost('/admin/mailbox/'+id+'/resume',{}).then(function(){ showToast('Mailbox resumed','success'); loadDeliverability(); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
+
+// ── Warm-up pool ──
+function loadWarmup(){
+  if(STATE._warmupLoading)return;
+  STATE._warmupLoading=true;
+  apiGet('/warmup/mailboxes').then(function(r){ STATE.warmup=r||{mailboxes:[]}; STATE._warmupLoading=false; scheduleRender(); }).catch(function(){ STATE.warmup={mailboxes:[],_err:true}; STATE._warmupLoading=false; scheduleRender(); });
+}
+window.runWarmupTick=function(){
+  STATE.warmupTick='running'; scheduleRender();
+  apiPost('/warmup/tick',{}).then(function(r){ STATE.warmupTick=r;
+    showToast(r.off?'Engine off — apply migration 009':'Warm-up ran · '+(r.sent||0)+' sent · '+(r.replied||0)+' replies · '+(r.rescued||0)+' rescued',(r.off?'warning':'success'));
+    loadWarmup();
+  }).catch(function(e){ STATE.warmupTick=null; showToast('Warm-up failed: '+(e&&e.message||e),'error'); scheduleRender(); });
+};
+window.warmupAction=function(id,action){
+  apiPost('/warmup/'+id+'/'+action,{}).then(function(){ showToast('Warm-up '+action+'d','success'); loadWarmup(); }).catch(function(e){ showToast('Failed: '+(e&&e.message||e),'error'); });
+};
+window.openWarmupStart=function(id){
+  var mb=((STATE.warmup&&STATE.warmup.mailboxes)||[]).find(function(m){return m.id===id;})||{};
+  var defDays=(STATE.warmup&&STATE.warmup.defaults&&STATE.warmup.defaults.days)||25;
+  STATE.modal='<div class="modal modal-w480">'+
+    '<div class="mh"><div class="mt">Start warm-up · '+htmlEsc(mb.email||'')+'</div></div>'+
+    '<div class="mb_">'+
+      '<div style="font-size:12.5px;color:var(--text3);margin-bottom:12px">This mailbox will send warm-up emails to your other pool mailboxes and hold short conversations with them each day, ramping up over the duration below, then graduate to outreach. Needs at least one other connected pool mailbox.</div>'+
+      '<label style="font-size:12px;color:var(--text2)">Warm-up duration (days)</label>'+
+      '<input id="wu-days" class="inp" type="number" min="1" max="120" value="'+defDays+'" style="margin:4px 0 12px">'+
+      '<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer"><input type="checkbox" id="wu-optin" checked style="width:15px;height:15px"> Also let this mailbox receive + reply to other warm-up mail (recommended)</label>'+
+    '</div>'+
+    '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="submitWarmupStart(\''+id+'\')">Start warm-up</button></div>'+
+  '</div>';
+  render();
+};
+window.submitWarmupStart=function(id){
+  var days=parseInt((document.getElementById('wu-days')||{}).value,10)||25;
+  var optin=!(document.getElementById('wu-optin')&&document.getElementById('wu-optin').checked===false);
+  apiPost('/warmup/'+id+'/start',{days:days,opt_in_receive:optin}).then(function(){ showToast('Warm-up started','success'); closeModal(); loadWarmup(); }).catch(function(e){ showToast('Failed: '+(e&&e.message||e),'error'); });
+};
+
+// ── Domain authentication & blacklist health ──
+function loadDomainHealth(refresh){
+  if(STATE._dhLoading)return;
+  STATE._dhLoading=true;
+  if(refresh)STATE.domainHealth='loading';
+  apiGet('/admin/domain-health'+(refresh?'?refresh=1':'')).then(function(r){ STATE.domainHealth=r||{domains:[]}; STATE._dhLoading=false; scheduleRender(); }).catch(function(){ STATE.domainHealth={domains:[],_err:true}; STATE._dhLoading=false; scheduleRender(); });
+}
+window.refreshDomainHealth=function(){ STATE._dhLoading=false; loadDomainHealth(true); showToast('Re-checking domains…','info'); };
+window.toggleDomainFindings=function(d){ STATE._dhOpen=STATE._dhOpen||{}; STATE._dhOpen[d]=!STATE._dhOpen[d]; scheduleRender(); };
 window.runSpamCheck=function(){ apiPost('/emails/spam-check',{subject:STATE.spamSubj||'',body:STATE.spamBody||''}).then(function(r){ STATE.spamResult=r; scheduleRender(); }).catch(function(e){showToast('Failed: '+(e&&e.message||e),'error');}); };
 window.previewTemplateSample=function(variant){
   var t=(STATE.delivTemplates||[]).find(function(x){return x.variant===variant;});
@@ -195,6 +242,79 @@ function renderDeliverability(){
     var status=m.auto_paused?'<span style="font-size:11px;padding:2px 8px;background:#fee2e2;color:#b91c1c;border-radius:6px;font-weight:700">Auto-paused</span> <button onclick="resumeMailbox(\''+m.id+'\')" style="font-size:11px;color:var(--green);background:transparent;border:0;cursor:pointer">Resume</button>':(m.warmup?'<span style="font-size:11px;padding:2px 8px;background:var(--amber-l);color:var(--amber);border-radius:6px;font-weight:600">Warm-up · cap '+m.warmup.today_cap+'/day</span>':'<span style="font-size:11px;padding:2px 8px;background:var(--green-l);color:var(--green);border-radius:6px;font-weight:600">Healthy</span>');
     return '<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border)"><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">'+htmlEsc(m.name||m.email)+'</div><div style="font-size:11px;color:var(--text3)">'+htmlEsc(m.email)+' · '+m.daily_limit+'/day cap</div></div>'+status+'</div>';
   }).join('');
+  // ── Warm-up pool ──
+  var isAdmin=userHasRole(u,'admin');
+  if(STATE.warmup===undefined&&!STATE._warmupLoading)loadWarmup();
+  var w=STATE.warmup;
+  var wtick=STATE.warmupTick;
+  var warmMuted='font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600';
+  var warmRows=(w&&w.mailboxes||[]).map(function(m){
+    var badge, actions='';
+    var btn=function(action,label,color){ return '<button onclick="warmupAction(\''+m.id+'\',\''+action+'\')" style="font-size:11px;color:'+color+';background:transparent;border:1px solid var(--border2);padding:3px 9px;border-radius:6px;cursor:pointer;margin-left:5px">'+label+'</button>'; };
+    if(m.warmup_status==='warming'){
+      badge='<span style="'+warmMuted+';background:var(--amber-l);color:var(--amber)">Warming · day '+(m.day_label||'')+'</span>';
+      if(isAdmin)actions=btn('pause','Pause','var(--amber)')+btn('stop','Graduate','var(--green)');
+    } else if(m.warmup_status==='paused'){
+      badge='<span style="'+warmMuted+';background:var(--bg3);color:var(--text2)">Paused</span>';
+      if(isAdmin)actions=btn('resume','Resume','var(--green)')+btn('stop','Graduate','var(--text2)');
+    } else if(m.warmup_status==='warmed'){
+      badge='<span style="'+warmMuted+';background:var(--green-l);color:var(--green)">✓ Warmed — ready for outreach</span>';
+      if(isAdmin)actions='<button onclick="openWarmupStart(\''+m.id+'\')" style="font-size:11px;color:var(--accent);background:transparent;border:1px solid var(--border2);padding:3px 9px;border-radius:6px;cursor:pointer;margin-left:5px">Warm again</button>';
+    } else {
+      badge=m.opt_in?'<span style="'+warmMuted+';background:var(--accent-l);color:var(--accent)">Pool receiver</span>':'<span style="'+warmMuted+';background:var(--bg3);color:var(--text3)">Not warming</span>';
+      if(isAdmin)actions=m.connected
+        ?'<button onclick="openWarmupStart(\''+m.id+'\')" style="font-size:11px;color:#fff;background:var(--accent);border:0;padding:4px 11px;border-radius:6px;cursor:pointer;margin-left:5px">Start warm-up</button>'
+        :'<span style="font-size:10.5px;color:var(--amber)" title="Connect this mailbox under the user\'s Email IDs first">⚠ not connected</span>';
+    }
+    var meta=[];
+    if(m.warmup_status==='warming')meta.push(m.sent_today+'/'+(m.target_today||0)+' today');
+    if(m.health&&m.health.inbox_placement_pct!=null)meta.push('inbox '+m.health.inbox_placement_pct+'%');
+    if(m.health&&m.health.rescued)meta.push(m.health.rescued+' rescued');
+    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">'+
+      '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">'+htmlEsc(m.display_name||m.email)+'</div>'+
+        '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(m.email)+(m.owner?' · '+htmlEsc(m.owner):'')+(meta.length?' · '+meta.join(' · '):'')+'</div></div>'+
+      badge+actions+
+    '</div>';
+  }).join('')||'<div style="padding:14px;color:var(--text3);font-size:13px">No active mailboxes.</div>';
+  var warmExtra=(isAdmin?'<button onclick="runWarmupTick()" style="font-size:11px;color:var(--text2);background:transparent;border:1px solid var(--border2);padding:4px 11px;border-radius:6px;cursor:pointer">'+(wtick==='running'?'Running…':'▶ Run warm-up now')+'</button>':'')+
+    (wtick&&wtick!=='running'?'<span style="font-size:11px;color:var(--text3);margin-left:8px">'+(wtick.off?'engine off — apply migration 009':'sent '+(wtick.sent||0)+' · replies '+(wtick.replied||0)+' · rescued '+(wtick.rescued||0)+' · pool '+(wtick.pool||0))+'</span>':'');
+  var readyColors={none:'var(--red)',minimal:'var(--amber)',ok:'var(--accent)',good:'var(--green)'};
+  var rd=w&&w.readiness;
+  var readyBanner=rd?'<div style="padding:9px 14px;font-size:11.5px;border-bottom:1px solid var(--border);background:'+readyColors[rd.level]+'14;color:'+(readyColors[rd.level]||'var(--text2)')+';font-weight:600">'+
+    (w.pool_count||0)+' mailbox'+((w.pool_count||0)===1?'':'es')+' · '+(w.pool_domains||0)+' domain'+((w.pool_domains||0)===1?'':'s')+' in pool — '+htmlEsc(rd.note)+'</div>':'';
+  var warmSub='<div style="padding:10px 14px;font-size:11.5px;color:var(--text3);border-bottom:1px solid var(--border)">Warm-up sends real email between your connected mailboxes and holds short conversations to build reputation, then graduates them to outreach. Every mailbox that participates — the ones you warm <b>and</b> their partners — must be added and connected here.</div>'+readyBanner;
+
+  // ── Domain authentication & blacklists ──
+  if(STATE.domainHealth===undefined&&!STATE._dhLoading)loadDomainHealth(false);
+  var dh=STATE.domainHealth;
+  var dhColors={good:'var(--green)',ok:'var(--accent)',warn:'var(--amber)',bad:'var(--red)',unknown:'var(--text3)'};
+  function dhChip(label,state){ var c=state==='pass'?'var(--green)':state==='fail'?'var(--red)':state==='warn'?'var(--amber)':'var(--text3)'; var sym=state==='pass'?'✓':state==='fail'?'✗':state==='warn'?'!':'?'; return '<span style="font-size:10.5px;padding:2px 7px;border-radius:6px;font-weight:700;background:'+c+'1a;color:'+c+'">'+label+' '+sym+'</span>'; }
+  var dhRows;
+  if(dh===undefined||dh==='loading')dhRows='<div style="padding:14px;color:var(--text3);font-size:13px">Checking domains (DNS lookups)…</div>';
+  else if(!dh.domains||!dh.domains.length)dhRows='<div style="padding:14px;color:var(--text3);font-size:13px">No sending domains found — add mailboxes first.</div>';
+  else dhRows=dh.domains.map(function(D){
+    var spfState=D.spf.found===true?(D.spf.ok?'pass':'warn'):(D.spf.found===false?'fail':'unknown');
+    var dkimState=D.dkim.found===true?'pass':(D.dkim.found===false?'fail':'unknown');
+    var dmarcState=D.dmarc.found===true?(D.dmarc.ok?'pass':'warn'):(D.dmarc.found===false?'fail':'unknown');
+    var listed=D.blacklist&&D.blacklist.listed&&D.blacklist.listed.length;
+    var blState=listed?'fail':'pass';
+    var open=STATE._dhOpen&&STATE._dhOpen[D.domain];
+    var findings=D.findings||[];
+    var findingsHtml=open?'<div style="padding:8px 14px 10px;background:var(--bg3)">'+(findings.length?findings.map(function(f){
+      var fc=f.severity==='high'?'var(--red)':f.severity==='warn'?'var(--amber)':'var(--text3)';
+      return '<div style="margin-bottom:9px"><div style="font-size:12px;font-weight:600;color:'+fc+'">'+htmlEsc(f.area)+' — '+htmlEsc(f.detail)+'</div>'+(f.cure?'<div style="font-size:11px;color:var(--text2);margin-top:3px;font-family:ui-monospace,monospace;white-space:pre-wrap;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'+htmlEsc(f.cure)+'</div>':'')+'</div>';
+    }).join(''):'<div style="font-size:12px;color:var(--green)">All checks passed — nothing to fix.</div>')+'</div>':'';
+    return '<div style="border-bottom:1px solid var(--border)">'+
+      '<div style="display:flex;align-items:center;gap:8px;padding:9px 14px;flex-wrap:wrap">'+
+        '<div style="flex:1;min-width:120px"><span style="font-size:13px;font-weight:600">'+htmlEsc(D.domain)+'</span> <span style="font-size:11px;color:'+(dhColors[D.level]||'var(--text3)')+';font-weight:700;margin-left:4px">'+(D.score==null?'unknown':D.score+'/100')+'</span></div>'+
+        dhChip('SPF',spfState)+dhChip('DKIM',dkimState)+dhChip('DMARC',dmarcState)+dhChip(listed?'Blacklisted':'Blacklist',blState)+
+        '<a onclick="toggleDomainFindings(\''+D.domain+'\')" style="cursor:pointer;font-size:11px;color:var(--accent);white-space:nowrap">'+(open?'Hide':'Fixes'+(findings.length?' ('+findings.length+')':''))+'</a>'+
+      '</div>'+findingsHtml+
+    '</div>';
+  }).join('');
+  var dhExtra='<button onclick="refreshDomainHealth()" style="font-size:11px;color:var(--text2);background:transparent;border:1px solid var(--border2);padding:4px 11px;border-radius:6px;cursor:pointer">↻ Re-check</button>';
+  var dhSub='<div style="padding:10px 14px;font-size:11.5px;color:var(--text3);border-bottom:1px solid var(--border)">SPF, DKIM, DMARC and blacklist status for every sending domain. Fix these <b>before</b> warming — broken authentication or a blacklisting lands you in spam no matter how well a mailbox is warmed. Cached ~15 min.</div>';
+
   var tplRows=tpls.length?tpls.map(function(t){
     var hasSample=t.sample&&t.sample.subject;
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border)">'+
@@ -216,7 +336,9 @@ function renderDeliverability(){
       dayFilter+
     '</div></div>'+
     statsRow+
-    card('Mailbox health (warm-up & auto-pause)', mbRows||'<div style="padding:14px;color:var(--text3);font-size:13px">No active mailboxes.</div>')+
+    card('Mailbox health (outreach cap & auto-pause)', mbRows||'<div style="padding:14px;color:var(--text3);font-size:13px">No active mailboxes.</div>')+
+    card('Warm-up pool'+(w&&w.pool_count?' · '+w.pool_count+' active':''), warmSub+warmRows, warmExtra)+
+    card('Domain authentication & blacklists', dhSub+dhRows, dhExtra)+
     card('Reply rate by template', tplRows)+
     card('Spam-content checker',
       '<div style="padding:14px">'+

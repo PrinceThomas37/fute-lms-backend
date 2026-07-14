@@ -42,6 +42,8 @@ const registerSubscribers = require('./subscribers');
 const { scoreEmailContent, deliverabilityFlags, isOptOutReply } = require('./deliverability');
 const { loadConfig } = require('./config/env');
 const settingsConfig = require('./config/settings');
+const { createWarmupEngine, WARMUP_HEADER } = require('./warmup-engine');
+const { createGmailProvider } = require('./gmail-provider');
 
 // Validate environment and centralize config at startup (fails fast with a
 // clear message if a required secret is missing).
@@ -1132,12 +1134,40 @@ async function persistGraphIds(emailId, graph) {
   }
 }
 
+// Gmail delivery — the provider counterpart to the Microsoft path below. Only
+// reached for platform=Gmail mailboxes (dispatched in deliverOutboundEmail).
+// Gmail threads by threadId, which we stash in the same conversation_id column
+// the Graph path uses, so persistGraphIds + later follow-ups thread naturally.
+async function deliverViaGmail(email, userEmailId, htmlBody, sendingEmail) {
+  const fromAddress = sendingEmail?.email_address || email.from_email || undefined;
+  const isFollowup = email.followup_type === 'fu1' || email.followup_type === 'fu2';
+  let threadId = null;
+  if (isFollowup) {
+    const { data: prior } = await supabase.from('emails')
+      .select('conversation_id').eq('job_id', email.job_id).eq('contact_id', email.contact_id)
+      .not('conversation_id', 'is', null).order('sent_at', { ascending: false }).limit(1).maybeSingle();
+    threadId = prior?.conversation_id || null;
+  }
+  if (isFollowup && threadId) {
+    const r = await gmailProvider.sendThreadReply(userEmailId, { to: email.to_email, subject: email.subject, htmlBody, fromAddress, threadId });
+    return { graphMessageId: r.messageId, conversationId: r.threadId || threadId, inReplyTo: null };
+  }
+  const r = await gmailProvider.sendNewMessage(userEmailId, { to: email.to_email, subject: email.subject, htmlBody, fromAddress });
+  return { graphMessageId: r.messageId, conversationId: r.threadId || null, inReplyTo: null };
+}
+
 async function deliverOutboundEmail(email, userEmailId, signatureHtml, sendingEmail) {
   const filledSig = fillSignatureHtml(signatureHtml, {
     displayName: sendingEmail?.display_name || '',
     emailAddress: sendingEmail?.email_address || email.from_email || ''
   });
   const htmlBody = buildHtmlEmailBody(email.body, filledSig);
+  // Provider dispatch: Gmail mailboxes go through the Gmail adapter; everything
+  // else keeps the exact Microsoft Graph path unchanged.
+  const platform = (sendingEmail?.platform || 'Microsoft').toLowerCase();
+  if (platform === 'gmail' || platform === 'google') {
+    return deliverViaGmail(email, userEmailId, htmlBody, sendingEmail);
+  }
   const isFollowup = email.followup_type === 'fu1' || email.followup_type === 'fu2';
   if (!isFollowup) {
     return sendMicrosoftNewMessage(userEmailId, { to: email.to_email, subject: email.subject, htmlBody });
@@ -1270,7 +1300,31 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
   // best-effort: absent table/columns => empty => no behaviour change.
   const suppressed = await loadSuppressedSet([...new Set(pendingEmails.map(e => (e.to_email || '').toLowerCase()).filter(Boolean))]);
 
-  const mailboxIds = [...new Set(pendingEmails.map(e => e.job?.sending_email_id).filter(Boolean))];
+  // Per-email sending-mailbox override (sequence "from"-mailbox rotation).
+  // Best-effort: a NULL/absent column (migration 008 not applied) => no
+  // overrides => every email uses its job's sending mailbox, exactly as before.
+  const overrideByEmailId = {};
+  try {
+    const emailIds = pendingEmails.map(e => e.id);
+    if (emailIds.length) {
+      const { data: ovr } = await supabase.from('emails').select('id,sending_email_id').in('id', emailIds);
+      (ovr || []).forEach(r => { if (r.sending_email_id) overrideByEmailId[r.id] = r.sending_email_id; });
+    }
+  } catch (_) { /* column absent -> no overrides */ }
+  const overrideMailboxIds = [...new Set(Object.values(overrideByEmailId))];
+  const overrideMailboxes = {};
+  if (overrideMailboxIds.length) {
+    try {
+      const { data: mbs } = await supabase.from('user_emails')
+        .select('id,email_address,display_name,platform,daily_send_limit,is_active').in('id', overrideMailboxIds);
+      (mbs || []).forEach(m => { overrideMailboxes[m.id] = m; });
+    } catch (_) {}
+  }
+
+  const mailboxIds = [...new Set([
+    ...pendingEmails.map(e => e.job?.sending_email_id),
+    ...overrideMailboxIds
+  ].filter(Boolean))];
   const [mailboxSignatures, quotaState, mailboxDeliv, warmupStart, warmupStep] = await Promise.all([
     loadMailboxSignatures(mailboxIds, userId),
     loadMailboxQuotaState(mailboxIds),
@@ -1298,8 +1352,11 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
       break;
     }
     const leadTz = email.job?.timezone || 'EST';
-    const userEmailId = email.job?.sending_email_id;
-    const sendingEmail = email.job?.sending_email;
+    // Rotation: a per-email override mailbox wins over the job's default. All
+    // downstream logic (quota, warm-up, threading, delivery) keys off these two.
+    const overrideId = overrideByEmailId[email.id];
+    const userEmailId = overrideId || email.job?.sending_email_id;
+    const sendingEmail = (overrideId && overrideMailboxes[overrideId]) || email.job?.sending_email;
     const platform = (sendingEmail?.platform || 'Microsoft').toLowerCase();
 
     const progressBase = {
@@ -1364,10 +1421,14 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
       continue;
     }
 
-    if (platform === 'gmail' || platform === 'google') {
+    // Gmail sends now dispatch through the Gmail adapter in deliverOutboundEmail.
+    // Only hard-fail here when Gmail isn't configured on the server at all; a
+    // configured-but-not-connected mailbox falls through and surfaces a clear
+    // "reconnect" error from the provider via the normal catch below.
+    if ((platform === 'gmail' || platform === 'google') && !gmailProvider.isConfigured()) {
       sendAttempts++;
       failed++;
-      failDetails.push({ id: email.id, job_id: email.job_id, contact_id: email.contact_id, to: email.to_email, from: sendingEmail?.email_address || '—', error: 'Gmail sending not connected yet' });
+      failDetails.push({ id: email.id, job_id: email.job_id, contact_id: email.contact_id, to: email.to_email, from: sendingEmail?.email_address || '—', error: 'Gmail sending is not configured on the server yet' });
       try { await supabase.from('emails').update({ status: 'failed' }).eq('id', email.id); } catch (_) {}
       await setSendProgress(userId, { ...progressBase, current: email.to_email });
       continue;
@@ -1912,6 +1973,12 @@ function isNdrMessage(msg) {
     || subj.includes('returned mail');
 }
 
+// Warm-up pool traffic carries an X-Fute-Warmup header; the outreach reply and
+// bounce sweeps must never treat it as a prospect reply or a bounce.
+function isWarmupMessage(msg) {
+  return (msg.internetMessageHeaders || []).some(h => (h.name || '').toLowerCase() === WARMUP_HEADER.toLowerCase());
+}
+
 // Pull every email address out of NDR text, dropping our own mailboxes and the
 // postmaster/daemon senders — what remains is the failed recipient(s).
 function extractBounceRecipients(text, ownAddresses) {
@@ -1961,7 +2028,7 @@ async function sweepMailboxBounces(tokenRow, ownAddresses) {
 
   const filter = encodeURIComponent(`receivedDateTime ge ${since}`);
   const path = `/me/mailFolders/Inbox/messages?$top=50&$orderby=receivedDateTime desc`
-    + `&$select=id,subject,from,bodyPreview,body,receivedDateTime&$filter=${filter}`;
+    + `&$select=id,subject,from,bodyPreview,body,receivedDateTime,internetMessageHeaders&$filter=${filter}`;
   let data;
   try { data = await graphMailRequest(accessToken, path); }
   catch (e) { console.error(`[BounceSweep] list for ${tokenRow.email_address}: ${e.message}`); return 0; }
@@ -1970,6 +2037,7 @@ async function sweepMailboxBounces(tokenRow, ownAddresses) {
   let marked = 0, newest = since;
   for (const msg of messages) {
     if (msg.receivedDateTime && msg.receivedDateTime > newest) newest = msg.receivedDateTime;
+    if (isWarmupMessage(msg)) continue; // warm-up pool traffic — never a bounce
     if (!isNdrMessage(msg)) continue;
     const text = `${msg.body?.content || ''} ${msg.bodyPreview || ''}`;
     for (const addr of extractBounceRecipients(text, ownAddresses)) {
@@ -2031,7 +2099,7 @@ async function sweepMailboxReplies(tokenRow, ownAddresses) {
 
   const filter = encodeURIComponent(`receivedDateTime ge ${since}`);
   const path = `/me/mailFolders/Inbox/messages?$top=50&$orderby=receivedDateTime desc`
-    + `&$select=id,subject,from,bodyPreview,body,receivedDateTime&$filter=${filter}`;
+    + `&$select=id,subject,from,bodyPreview,body,receivedDateTime,internetMessageHeaders&$filter=${filter}`;
   let data;
   try { data = await graphMailRequest(accessToken, path); }
   catch (e) { console.error(`[ReplySweep] list for ${tokenRow.email_address}: ${e.message}`); return 0; }
@@ -2040,6 +2108,7 @@ async function sweepMailboxReplies(tokenRow, ownAddresses) {
   let detected = 0, newest = since;
   for (const msg of messages) {
     if (msg.receivedDateTime && msg.receivedDateTime > newest) newest = msg.receivedDateTime;
+    if (isWarmupMessage(msg)) continue; // warm-up pool traffic — never a prospect reply
     if (isNdrMessage(msg)) continue; // bounces are the bounce sweep's job
     const from = (msg.from?.emailAddress?.address || '').toLowerCase();
     if (!from || ownAddresses.has(from)) continue; // ignore internal / our own mail
@@ -2187,6 +2256,10 @@ const MS_CLIENT   = config.microsoft.clientId;
 const MS_SECRET   = config.microsoft.clientSecret;
 const MS_REDIRECT = config.microsoft.redirectUri;
 const MS_SCOPES   = config.microsoft.scopes;
+
+// Gmail / Google Workspace provider — inert until GOOGLE_CLIENT_ID/SECRET are
+// set (see config/env.js). Microsoft path is unaffected.
+const gmailProvider = createGmailProvider({ supabase, google: config.google });
 
 
 
@@ -2337,6 +2410,7 @@ const routeCtx = {
 };
 app.use(require('./routes/auth')(routeCtx));
 app.use(require('./routes/microsoft')(routeCtx));
+app.use(require('./routes/gmail')({ supabase, auth, hasRole, provider: gmailProvider }));
 app.use(require('./routes/workflows')(routeCtx));
 app.use(require('./routes/companies')(routeCtx));
 app.use(require('./routes/reminders')(routeCtx));
@@ -2395,11 +2469,22 @@ wfEngine.registerChannel('email', async ({ step, enrollment, context }) => {
   if (!job) return { outcome: 'skipped', detail: { reason: 'no_job_context' } };
   if (!contact?.email) return { outcome: 'skipped', detail: { reason: 'no_email' } };
   if (!isFollowupEligibleContact(contact)) return { outcome: 'skipped', detail: { reason: 'contact_status', status: contactEmailStatus(contact) } };
-  if (!cfg.any_stage && job.stage !== 'Assigned') return { outcome: 'skipped', detail: { reason: 'stage', stage: job.stage } };
+  // Stage guard: a hand-picked lead from any group is a deliberate act, so an
+  // enrollment created with any_stage bypasses the "must be Assigned" gate.
+  const meta = enrollment.metadata || {};
+  const allowAnyStage = cfg.any_stage || meta.any_stage;
+  if (!allowAnyStage && job.stage !== 'Assigned') return { outcome: 'skipped', detail: { reason: 'stage', stage: job.stage } };
   const suppressed = await loadSuppressedSet([contact.email]);
   if (suppressed.has(String(contact.email).toLowerCase())) return { outcome: 'skipped', detail: { reason: 'suppressed' } };
 
-  const mailbox = job.sending_email;
+  // Rotation: prefer this enrollment's assigned "from" mailbox over the job's
+  // default. Falls back to the job mailbox when none was chosen / it's gone.
+  let mailbox = job.sending_email;
+  if (meta.from_mailbox_id) {
+    const { data: mb } = await supabase.from('user_emails')
+      .select('id,email_address,display_name,platform,daily_send_limit,is_active').eq('id', meta.from_mailbox_id).maybeSingle();
+    if (mb) mailbox = mb;
+  }
   if (!mailbox?.id) return { outcome: 'skipped', detail: { reason: 'no_sending_mailbox' } };
   if (mailbox.is_active === false) return { outcome: 'defer', detail: { reason: 'mailbox_inactive' } };
   const delivState = await loadMailboxDelivState([mailbox.id]);
@@ -2436,12 +2521,24 @@ wfEngine.registerChannel('email', async ({ step, enrollment, context }) => {
 
   // fu1/fu2 thread as replies in the send path; anything else goes out fresh.
   const followupType = cfg.thread && (key === 'fu1' || key === 'fu2') ? key : (key === 'initial' ? null : 'reminder');
-  const { data: emailRow, error } = await supabase.from('emails').insert({
+  const row = {
     contact_id: contact.id, job_id: job.id, to_email: contact.email,
     from_email: mailbox.email_address || null,
     subject: fillTemplate(subjTmpl, vars), body: fillTemplate(bodyTmpl, vars),
     platform: 'Outlook', sent_by: bdId, status: 'pending', followup_type: followupType
-  }).select('id').single();
+  };
+  // Pin this send to the rotated mailbox so the live send loop authenticates
+  // with it (not the job default). Only set when a mailbox was chosen — leaves
+  // existing enrollments byte-identical and independent of migration 008.
+  const pinMailbox = meta.from_mailbox_id && mailbox.id === meta.from_mailbox_id;
+  if (pinMailbox) row.sending_email_id = mailbox.id;
+  let { data: emailRow, error } = await supabase.from('emails').insert(row).select('id').single();
+  if (error && pinMailbox && /sending_email_id/.test(error.message || '')) {
+    // migration 008 not applied yet — queue without the pin (sends from the
+    // job default) rather than failing the step.
+    delete row.sending_email_id;
+    ({ data: emailRow, error } = await supabase.from('emails').insert(row).select('id').single());
+  }
   if (error) return { outcome: 'failed', detail: { error: error.message } };
   if (bdId) emit(EVENTS.FOLLOWUP_QUEUED, { bdIds: [bdId] });
   return { outcome: 'done', detail: { email_id: emailRow.id, followup_type: followupType || 'initial' } };
@@ -2510,6 +2607,19 @@ async function recruiterSendingMailbox(recruiterId) {
   return mailboxes.find(m => connected.has(m.id) && m.is_active !== false) || null;
 }
 
+// A specific mailbox by id, but only if it's active AND connected — used by
+// sequence rotation so a chosen "from" mailbox that can't actually send is
+// rejected (caller falls back to the recruiter's primary).
+async function connectedMailboxById(id) {
+  if (!id) return null;
+  const { data: mb } = await supabase.from('user_emails')
+    .select('id,email_address,display_name,is_primary,is_active,daily_send_limit')
+    .eq('id', id).maybeSingle();
+  if (!mb || mb.is_active === false) return null;
+  const { data: tok } = await supabase.from('microsoft_tokens').select('user_email_id').eq('user_email_id', id).maybeSingle();
+  return tok ? mb : null;
+}
+
 function buildCandidateVars({ candidate, job_order }) {
   const first = (candidate?.full_name || '').trim().split(/\s+/)[0] || 'there';
   return {
@@ -2535,7 +2645,10 @@ wfEngine.registerChannel('candidate_email', async ({ step, enrollment, context }
   if (suppressed.has(String(candidate.email).toLowerCase())) return { outcome: 'skipped', detail: { reason: 'suppressed' } };
   const recruiterId = submission?.recruiter_id || enrollment.enrolled_by;
   if (isSendingPaused() || isManagerPaused(recruiterId)) return { outcome: 'defer', detail: { reason: 'paused' } };
-  const mailbox = await recruiterSendingMailbox(recruiterId);
+  // Rotation: prefer this enrollment's chosen "from" mailbox (if active +
+  // connected), else the recruiter's primary connected mailbox.
+  const cMeta = enrollment.metadata || {};
+  const mailbox = (cMeta.from_mailbox_id && await connectedMailboxById(cMeta.from_mailbox_id)) || await recruiterSendingMailbox(recruiterId);
   if (!mailbox) return { outcome: 'defer', detail: { reason: 'no_connected_mailbox' } };
   const { data: sendLog } = await supabase.from('email_send_log').select('id,emails_sent').eq('send_date', today()).eq('user_email_id', mailbox.id).maybeSingle();
   const cap = mailbox.daily_send_limit || 150;
@@ -2609,6 +2722,15 @@ app.use(require('./routes/wf')({ supabase, auth, hasRole, engine: wfEngine, logA
 // (offset from the bounce/reply sweeps so they don't stack).
 setInterval(() => { wfEngine.tick().catch(err => console.error('[wf] tick failed:', err.message)); }, 60 * 60 * 1000);
 setTimeout(() => { wfEngine.tick().catch(err => console.error('[wf] tick failed:', err.message)); }, 4 * 60 * 1000);
+
+// ── Warm-up pool engine — real Graph sends between our own connected mailboxes.
+// OFF by default: a mailbox only participates once an admin starts warm-up
+// (warmup_status='warming') or opts it in as a receiver. Spread across a couple
+// of ticks a day so the traffic looks organic; offset from the other sweeps.
+const warmupEngine = createWarmupEngine({ supabase, graphMailRequest, getMicrosoftToken, gmail: gmailProvider, emit, EVENTS });
+app.use(require('./routes/warmup')({ supabase, auth, hasRole, engine: warmupEngine, emit, EVENTS }));
+setInterval(() => { warmupEngine.tick().catch(err => console.error('[warmup] tick failed:', err.message)); }, 2 * 60 * 60 * 1000);
+setTimeout(() => { warmupEngine.tick().catch(err => console.error('[warmup] tick failed:', err.message)); }, 6 * 60 * 1000);
 
 // ── START ──────────────────────────────────────────────────────
 app.listen(PORT, () => console.log(`Fute Global LMS API v3.0.0 running on port ${PORT}`));

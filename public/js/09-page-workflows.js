@@ -82,25 +82,75 @@ window.wfSaveDefinition=function(){
   }).catch(function(e){ showToast('Save failed: '+(e&&e.message||e),'error'); });
 };
 // ── "Start sequence" on a selection (bulk enroll) ──
-window.wfStartSequence=function(entityType,items){
+// opts.anyStage = enrol leads regardless of their pipeline stage (used when the
+// selection was hand-picked across groups on the Leads page).
+window.wfStartSequence=function(entityType,items,opts){
   if(!items||!items.length){ showToast('Select at least one '+(entityType==='submission'?'candidate':'lead'),'warning'); return; }
-  STATE.wfStart={entity_type:entityType,items:items};
+  opts=opts||{};
+  STATE.wfStart={entity_type:entityType,items:items,anyStage:!!opts.anyStage,fromMailboxIds:[]};
   if(STATE.wf===undefined&&!STATE._wfLoading)loadWorkflows();
+  wfLoadMailboxes();
   renderWfStartModal();
 };
+// Connected/active sending mailboxes for the "from" picker (cached).
+function wfLoadMailboxes(){
+  if(STATE.wfMailboxes!==undefined&&STATE.wfMailboxes!=='loading')return;
+  if(STATE.wfMailboxes==='loading')return;
+  STATE.wfMailboxes='loading';
+  apiGet('/wf/sending-mailboxes').then(function(r){ STATE.wfMailboxes=r||[]; if(STATE.wfStart)renderWfStartModal(); }).catch(function(){ STATE.wfMailboxes=[]; if(STATE.wfStart)renderWfStartModal(); });
+}
+window.wfToggleMailbox=function(id){
+  var st=STATE.wfStart; if(!st)return;
+  st.fromMailboxIds=st.fromMailboxIds||[];
+  var i=st.fromMailboxIds.indexOf(id);
+  if(i>-1)st.fromMailboxIds.splice(i,1); else st.fromMailboxIds.push(id);
+  renderWfStartModal();
+};
+window.wfToggleAnyStage=function(v){ if(STATE.wfStart)STATE.wfStart.anyStage=!!v; renderWfStartModal(); };
 window.wfStartBuildNew=function(){ var st=STATE.wfStart; if(!st)return; wfOpenBuilder(null,st.entity_type,{entity_type:st.entity_type,items:st.items}); };
 window.wfEnrollSelectionInto=function(workflowId,entityType,items){
-  var et=entityType||(STATE.wfStart&&STATE.wfStart.entity_type)||'contact';
-  var its=items||(STATE.wfStart&&STATE.wfStart.items)||[];
+  var st=STATE.wfStart||{};
+  var et=entityType||st.entity_type||'contact';
+  var its=items||st.items||[];
   if(!its.length)return;
-  apiPost('/wf/enroll-bulk',{workflow_id:workflowId,entity_type:et,items:its.map(function(x){return {entity_id:x.entity_id,job_id:x.job_id||null,contact_id:x.contact_id||null};})})
+  apiPost('/wf/enroll-bulk',{
+    workflow_id:workflowId, entity_type:et,
+    from_mailbox_ids:st.fromMailboxIds||[],
+    any_stage:!!st.anyStage,
+    items:its.map(function(x){return {entity_id:x.entity_id,job_id:x.job_id||null,contact_id:x.contact_id||null};})
+  })
     .then(function(r){
       var msg='Enrolled '+(r.enrolled||0)+(r.skipped?', '+r.skipped+' already in it':'')+(r.errors&&r.errors.length?', '+r.errors.length+' failed':'');
+      if(r.rotation&&r.rotation.length)msg+=' · rotating across '+r.rotation.length+' mailbox'+(r.rotation.length>1?'es':'');
       showToast(msg,(r.enrolled?'success':'warning'));
-      STATE.wfStart=null; if(STATE.bd)STATE.bd.seqSel=[]; closeModal(); loadWorkflows();
+      STATE.wfStart=null; if(STATE.bd)STATE.bd.seqSel=[]; if(STATE.leadSeqSel)STATE.leadSeqSel={}; closeModal(); loadWorkflows();
     })
     .catch(function(e){ showToast('Enroll failed: '+(e&&e.message||e),'error'); });
 };
+function wfMailboxPicker(st){
+  var mb=STATE.wfMailboxes;
+  var sel=st.fromMailboxIds||[];
+  var body;
+  if(mb===undefined||mb==='loading')body='<div style="font-size:12px;color:var(--text3);padding:6px 2px">Loading mailboxes…</div>';
+  else if(!mb.length)body='<div style="font-size:12px;color:var(--text3);padding:6px 2px">No active sending mailboxes found.</div>';
+  else body=mb.map(function(m){
+    var on=sel.indexOf(m.id)>-1;
+    var conn=m.connected?'<span style="font-size:10px;color:var(--green);font-weight:600">✓ connected</span>':'<span style="font-size:10px;color:var(--amber);font-weight:600" title="Not connected — this mailbox can\'t send until it\'s connected under the user\'s Email IDs">⚠ not connected</span>';
+    return '<label style="display:flex;align-items:center;gap:9px;padding:7px 9px;border:1px solid '+(on?'var(--accent)':'var(--border)')+';border-radius:7px;margin-bottom:5px;cursor:pointer;background:'+(on?'var(--accent-l)':'transparent')+'">'+
+      '<input type="checkbox" '+(on?'checked':'')+' onchange="wfToggleMailbox(\''+m.id+'\')" style="width:14px;height:14px;flex-shrink:0"/>'+
+      '<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(m.email)+(m.is_primary?' <span style="font-size:9px;color:var(--amber)">★</span>':'')+'</div>'+
+        '<div style="font-size:10.5px;color:var(--text3)">'+(m.owner?htmlEsc(m.owner)+' · ':'')+htmlEsc(m.platform||'')+'</div></div>'+
+      conn+
+    '</label>';
+  }).join('');
+  var summary=sel.length
+    ?'<div style="font-size:11.5px;color:var(--accent);margin-top:2px">▶ Rotating across '+sel.length+' mailbox'+(sel.length>1?'es':'')+' (round-robin across the selection).</div>'
+    :'<div style="font-size:11.5px;color:var(--text3);margin-top:2px">None selected — each lead sends from its job\'s default mailbox.</div>';
+  return '<div style="margin:4px 0 12px">'+
+    '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Send from (rotate across selected)</div>'+
+    '<div style="max-height:180px;overflow-y:auto">'+body+'</div>'+summary+
+  '</div>';
+}
 function renderWfStartModal(){
   var st=STATE.wfStart; if(!st)return;
   var defs=((STATE.wf&&STATE.wf.defs)||[]).filter(function(d){return (d.entity_type||'contact')===st.entity_type&&d.status==='active';});
@@ -110,10 +160,16 @@ function renderWfStartModal(){
       '<button class="btn btn-sm btn-primary" onclick="wfEnrollSelectionInto(\''+d.id+'\')">Start</button>'+
     '</div>';
   }).join('')||'<div style="font-size:12.5px;color:var(--text3);padding:6px 2px 12px">No active '+(st.entity_type==='submission'?'recruiting':'sales')+' sequences yet — build one below.</div>';
+  var stageToggle=st.entity_type==='contact'
+    ?'<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);margin:2px 0 12px;cursor:pointer"><input type="checkbox" '+(st.anyStage?'checked':'')+' onchange="wfToggleAnyStage(this.checked)" style="width:14px;height:14px"/> Send regardless of lead stage <span style="color:var(--text3)">(needed for Connected / Future / Rejected leads)</span></label>'
+    :'';
   STATE.modal='<div class="modal modal-w480" style="max-height:88vh;overflow-y:auto">'+
     '<div class="mh"><div class="mt">Start sequence · '+st.items.length+' '+(st.entity_type==='submission'?'candidate(s)':'lead(s)')+'</div></div>'+
     '<div class="mb_">'+
       '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Pick an existing sequence to enroll the selection, or build and name a new one.</div>'+
+      wfMailboxPicker(st)+
+      stageToggle+
+      '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Sequence</div>'+
       rows+
       '<button onclick="wfStartBuildNew()" class="btn btn-outline btn-sm" style="width:100%;margin-top:4px">+ Build a new sequence</button>'+
     '</div>'+
@@ -247,7 +303,8 @@ function renderSequenceBody(){
     var def=(wf.defs||[]).find(function(d){return d.id===e.workflow_id;});
     var total=def&&def.steps?def.steps.length:'?';
     var name=e.contact?((e.contact.first_name||'')+' '+(e.contact.last_name||'')).trim()||e.contact.email:e.entity_id.slice(0,8);
-    var jobLbl=e.job?htmlEsc((e.job.position||'')+((e.job.company&&e.job.company.name)?' · '+e.job.company.name:'')):'—';
+    var fromMb=(e.metadata&&e.metadata.from_mailbox_email)?' · ✉ '+htmlEsc(e.metadata.from_mailbox_email):'';
+    var jobLbl=(e.job?htmlEsc((e.job.position||'')+((e.job.company&&e.job.company.name)?' · '+e.job.company.name:'')):'—')+fromMb;
     var acts='';
     if(e.status==='active')acts='<a onclick="wfEnrollmentAction(\''+e.id+'\',\'pause\')" style="cursor:pointer;color:var(--amber);font-size:11px">Pause</a> <a onclick="wfEnrollmentAction(\''+e.id+'\',\'exit\')" style="cursor:pointer;color:var(--red);font-size:11px">Exit</a>';
     else if(e.status==='paused')acts='<a onclick="wfEnrollmentAction(\''+e.id+'\',\'resume\')" style="cursor:pointer;color:var(--green);font-size:11px">Resume</a> <a onclick="wfEnrollmentAction(\''+e.id+'\',\'exit\')" style="cursor:pointer;color:var(--red);font-size:11px">Exit</a>';
@@ -528,7 +585,12 @@ function renderAdminUserDetail(userId){
   var emailRows=userEmails.map(function(e){
     var msConn=e.ms_connected;
     var platBadge='<span style="font-size:10px;padding:2px 7px;border-radius:6px;font-weight:600;background:'+(e.platform==='Microsoft'?'#e0f2fe':'#f0fdf4')+';color:'+(e.platform==='Microsoft'?'#0369a1':'#166534')+'">'+htmlEsc(e.platform)+'</span>';
-    var connBtn=e.platform==='Microsoft'&&!msConn?'<button onclick="connectMicrosoftUserEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:10px;padding:2px 8px;background:#0078d4;color:#fff;border:0;border-radius:6px;cursor:pointer">Connect</button>':(e.platform==='Microsoft'&&msConn?'<span style="font-size:10px;color:var(--green)">✓ Connected</span>':'');
+    var connBtn='';
+    if(e.platform==='Microsoft'){
+      connBtn=!msConn?'<button onclick="connectMicrosoftUserEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:10px;padding:2px 8px;background:#0078d4;color:#fff;border:0;border-radius:6px;cursor:pointer">Connect</button>':'<span style="font-size:10px;color:var(--green)">✓ Connected</span>';
+    } else if(e.platform==='Gmail'){
+      connBtn=!e.gmail_connected?'<button onclick="connectGmailUserEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:10px;padding:2px 8px;background:#16a34a;color:#fff;border:0;border-radius:6px;cursor:pointer">Connect</button>':'<span style="font-size:10px;color:var(--green)">✓ Connected</span>';
+    }
     return '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">'+
       '<div style="flex:1;min-width:160px"><div style="font-weight:500;font-size:13px">'+htmlEsc(e.display_name||e.email_address)+'</div>'+
         '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(e.email_address)+'</div></div>'+

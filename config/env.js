@@ -21,6 +21,17 @@ const DEFAULT_MICROSOFT_REDIRECT_URI = 'https://fute-lms-backend.onrender.com/au
 // Protocol constant, not a per-deployment secret — safe to keep in code.
 const MICROSOFT_SCOPES = 'Mail.Send Mail.ReadWrite offline_access User.Read';
 
+// Gmail / Google Workspace — same shape as Microsoft, fully OPTIONAL. Sending
+// stays unavailable for Gmail mailboxes until these are set + Google approves
+// the restricted scopes (gmail.send / gmail.modify). Never required at startup.
+const DEFAULT_GOOGLE_REDIRECT_URI = 'https://fute-lms-backend.onrender.com/auth/google/callback';
+const GOOGLE_SCOPES = [
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/gmail.modify', // read + label moves (spam rescue)
+  'https://www.googleapis.com/auth/userinfo.email',
+  'openid',
+].join(' ');
+
 function required(name) {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required environment variable: ${name}`);
@@ -47,6 +58,12 @@ function loadConfig() {
       redirectUri: process.env.MICROSOFT_REDIRECT_URI || DEFAULT_MICROSOFT_REDIRECT_URI,
       scopes: MICROSOFT_SCOPES,
     },
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      redirectUri: process.env.GOOGLE_REDIRECT_URI || DEFAULT_GOOGLE_REDIRECT_URI,
+      scopes: GOOGLE_SCOPES,
+    },
   };
 
   // Surface (but do not fail on) missing optional configuration so operators
@@ -61,9 +78,12 @@ function loadConfig() {
   if (!config.anthropicApiKey) {
     warnings.push('ANTHROPIC_API_KEY not set — AI generation endpoints will be unavailable.');
   }
+  if (!config.google.clientId || !config.google.clientSecret) {
+    warnings.push('Gmail not configured (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET) — Gmail connect + send will be unavailable (Microsoft is unaffected).');
+  }
   warnings.forEach((w) => console.warn('[config] ' + w));
 
   return config;
 }
 
-module.exports = { loadConfig, DEFAULT_MICROSOFT_REDIRECT_URI, MICROSOFT_SCOPES };
+module.exports = { loadConfig, DEFAULT_MICROSOFT_REDIRECT_URI, MICROSOFT_SCOPES, DEFAULT_GOOGLE_REDIRECT_URI, GOOGLE_SCOPES };

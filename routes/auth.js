@@ -133,13 +133,20 @@ router.get('/users/:id/emails', auth, async (req, res) => {
     const { data, error } = await supabase.from('user_emails')
       .select('*').eq('user_id', req.params.id).order('created_at');
     if (error) throw error;
-    // Attach ms_connected flag
+    // Attach ms_connected / gmail_connected flags
     const ids = (data || []).map(e => e.id);
     const { data: tokens } = ids.length
       ? await supabase.from('microsoft_tokens').select('user_email_id').in('user_email_id', ids)
       : { data: [] };
     const connectedSet = new Set((tokens || []).map(t => t.user_email_id));
-    res.json((data || []).map(e => ({ ...e, ms_connected: connectedSet.has(e.id) })));
+    let gmailSet = new Set();
+    if (ids.length) {
+      try {
+        const { data: gtok } = await supabase.from('gmail_tokens').select('user_email_id').in('user_email_id', ids);
+        gmailSet = new Set((gtok || []).map(t => t.user_email_id));
+      } catch (_) { /* gmail_tokens absent (migration 010 not applied) */ }
+    }
+    res.json((data || []).map(e => ({ ...e, ms_connected: connectedSet.has(e.id), gmail_connected: gmailSet.has(e.id) })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

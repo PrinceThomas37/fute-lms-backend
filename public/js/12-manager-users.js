@@ -100,6 +100,23 @@ window.connectMicrosoftUserEmail=function(userId,userEmailId){
   window.addEventListener('message',window._msOAuthHandler);
 };
 
+window.connectGmailUserEmail=function(userId,userEmailId){
+  var url=API_URL+'/auth/google/connect?userEmailId='+userEmailId+'&token='+STATE.token;
+  window.open(url,'google_oauth','width=600,height=700,scrollbars=yes');
+  showToast('Complete Google login in the popup','info');
+  window._googleOAuthHandler=function(event){
+    if(event.data&&event.data.type==='google_oauth_success'){
+      window.removeEventListener('message',window._googleOAuthHandler);
+      loadUserEmails(userId);
+      showToast('Connected: '+event.data.email,'success');
+    } else if(event.data&&event.data.type==='google_oauth_error'){
+      window.removeEventListener('message',window._googleOAuthHandler);
+      showToast('Failed: '+event.data.error,'error');
+    }
+  };
+  window.addEventListener('message',window._googleOAuthHandler);
+};
+
 window.toggleUserEmailActive=function(userId,emailId,active){
   apiPatch('/users/'+userId+'/emails/'+emailId,{is_active:active}).then(function(e){
     STATE.userEmailsCache[userId]=(STATE.userEmailsCache[userId]||[]).map(function(x){return x.id===emailId?e:x;});
