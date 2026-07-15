@@ -87,6 +87,99 @@ window.saveSystemSettings=function(){
   });
 };
 
+// ── Integrations & API Keys (admin) ──
+window.openIntegrationsModal=function(){
+  STATE._intgTest={}; STATE._emailVerifyResult=null;
+  STATE.modal='<div class="modal modal-w480"><div class="mh"><div class="mt">Integrations & API Keys</div></div><div class="mb_" style="padding:24px;text-align:center;color:var(--text3)">Loading…</div></div>';
+  render();
+  apiGet('/admin/integrations').then(function(r){ STATE.integrations=r; renderIntegrationsModal(); })
+    .catch(function(e){ closeModal(); showToast('Failed to load integrations: '+(e&&e.message||e),'error'); });
+};
+function intgFind(id){ var out=null; ((STATE.integrations&&STATE.integrations.categories)||[]).forEach(function(c){c.items.forEach(function(x){if(x.id===id)out=x;});}); return out; }
+function renderIntegrationsModal(){
+  var d=STATE.integrations; if(!d)return;
+  var tests=STATE._intgTest||{};
+  var cats=(d.categories||[]).map(function(cat){
+    var cards=cat.items.map(function(it){
+      var badge=it.configured
+        ?'<span style="font-size:10px;padding:2px 8px;border-radius:6px;font-weight:700;background:var(--green-l);color:var(--green)">Connected</span>'
+        :'<span style="font-size:10px;padding:2px 8px;border-radius:6px;font-weight:700;background:var(--bg3);color:var(--text3)">Not configured</span>';
+      var fields=it.fields.map(function(f){
+        return '<input class="inp" id="intg-'+it.id+'-'+f.key+'" type="password" autocomplete="new-password" placeholder="'+(f.configured?htmlEsc(f.hint||'configured'):htmlEsc(f.placeholder||f.label))+'" style="margin-bottom:6px"/>';
+      }).join('');
+      var t=tests[it.id]; var testHtml='';
+      if(t){ testHtml=t.pending
+        ?'<span style="font-size:11.5px;color:var(--text3);margin-left:6px">Testing…</span>'
+        :'<span style="font-size:11.5px;margin-left:6px;color:'+(t.ok?'var(--green)':'var(--red)')+'">'+(t.ok?'✓ '+htmlEsc(t.detail||'OK'):'✗ '+htmlEsc(t.error||'failed'))+'</span>'; }
+      var activeToggle=it.verifier
+        ?'<label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text2);cursor:pointer;margin-top:2px"><input type="checkbox" '+(it.active_verifier?'checked':'')+' onchange="setActiveVerifier(\''+it.id+'\',this.checked)"> Use this verifier for pre-send checks</label>'
+        :'';
+      return '<div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px"><div style="font-weight:600;font-size:13px">'+htmlEsc(it.label)+'</div>'+badge+'</div>'+
+        '<div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">'+htmlEsc(it.description)+(it.docs?' · <a href="'+htmlEsc(it.docs)+'" target="_blank" rel="noopener" style="color:var(--accent)">Get key ↗</a>':'')+'</div>'+
+        fields+activeToggle+
+        '<div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap">'+
+          '<button class="btn btn-sm btn-primary" onclick="saveIntegration(\''+it.id+'\')">Save</button>'+
+          (it.has_test?'<button class="btn btn-sm btn-outline" onclick="testIntegration(\''+it.id+'\')">Test</button>':'')+
+          (it.configured?'<button onclick="disconnectIntegration(\''+it.id+'\')" style="font-size:11px;color:var(--red);background:transparent;border:0;cursor:pointer">Disconnect</button>':'')+
+          testHtml+
+        '</div>'+
+      '</div>';
+    }).join('');
+    return '<div style="margin-bottom:16px">'+
+      '<div style="font-weight:700;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">'+htmlEsc(cat.category)+'</div>'+
+      cards+(cat.category==='Email verification'?emailVerifyTester():'')+
+    '</div>';
+  }).join('');
+  STATE.modal='<div class="modal modal-w480" style="max-height:88vh;overflow-y:auto">'+
+    '<div class="mh"><div><div class="mt">Integrations & API Keys</div><div style="font-size:12px;color:var(--text3);margin-top:2px">Paste a provider key and Save. Stored keys are never shown again — only a masked hint. The matching backend hook uses them automatically.</div></div>'+
+      '<button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
+    '<div class="mb_">'+cats+'</div>'+
+    '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Close</button></div>'+
+  '</div>';
+  render();
+}
+function emailVerifyTester(){
+  var r=STATE._emailVerifyResult;
+  var c=r?(r.result==='valid'?'var(--green)':r.result==='invalid'?'var(--red)':r.result==='risky'?'var(--amber)':'var(--text3)'):'var(--text3)';
+  var resHtml=r?'<div style="font-size:12px;margin-top:6px;color:'+c+'">Result: <b>'+htmlEsc(r.result)+'</b>'+(r.provider?' ('+htmlEsc(r.provider)+')':'')+(r.reason==='not_configured'?' — no verifier configured yet':'')+'</div>':'';
+  return '<div style="background:var(--bg3);border:1px dashed var(--border2);border-radius:8px;padding:10px 12px;margin-top:2px">'+
+    '<div style="font-size:11.5px;color:var(--text3);margin-bottom:6px">Test the active verifier against an address:</div>'+
+    '<div style="display:flex;gap:6px"><input class="inp" id="intg-verify-addr" placeholder="name@company.com" style="flex:1"/>'+
+      '<button class="btn btn-sm btn-primary" onclick="runEmailVerifyTest()">Verify</button></div>'+resHtml+
+  '</div>';
+}
+window.saveIntegration=function(id){
+  var it=intgFind(id); if(!it)return;
+  var values={};
+  it.fields.forEach(function(f){ var el=document.getElementById('intg-'+id+'-'+f.key); if(el&&el.value!=='')values[f.key]=el.value; });
+  if(!Object.keys(values).length){ showToast('Enter a key first','warning'); return; }
+  apiPost('/admin/integrations/'+id,{values:values}).then(function(r){ STATE.integrations=r; showToast('Saved','success'); renderIntegrationsModal(); })
+    .catch(function(e){ showToast('Save failed: '+(e&&e.message||e),'error'); });
+};
+window.testIntegration=function(id){
+  var el=document.getElementById('intg-'+id+'-api_key');
+  var body=(el&&el.value)?{api_key:el.value}:{};
+  STATE._intgTest=STATE._intgTest||{}; STATE._intgTest[id]={pending:true}; renderIntegrationsModal();
+  apiPost('/admin/integrations/'+id+'/test',body).then(function(r){ STATE._intgTest[id]=r; renderIntegrationsModal(); })
+    .catch(function(e){ STATE._intgTest[id]={ok:false,error:(e&&e.message||e)}; renderIntegrationsModal(); });
+};
+window.setActiveVerifier=function(id,on){
+  apiPost('/admin/integrations/'+id,{active:!!on}).then(function(r){ STATE.integrations=r; renderIntegrationsModal(); })
+    .catch(function(e){ showToast('Failed: '+(e&&e.message||e),'error'); });
+};
+window.disconnectIntegration=function(id){
+  if(!confirm('Remove the saved key for this integration?'))return;
+  apiDelete('/admin/integrations/'+id).then(function(r){ STATE.integrations=r; showToast('Disconnected','success'); renderIntegrationsModal(); })
+    .catch(function(e){ showToast('Failed: '+(e&&e.message||e),'error'); });
+};
+window.runEmailVerifyTest=function(){
+  var el=document.getElementById('intg-verify-addr'); var addr=el?el.value:'';
+  if(!addr){ showToast('Enter an address','warning'); return; }
+  apiPost('/admin/integrations/email-verify',{address:addr}).then(function(r){ STATE._emailVerifyResult=r; renderIntegrationsModal(); })
+    .catch(function(e){ showToast('Failed: '+(e&&e.message||e),'error'); });
+};
+
 function loadSendingStatus(){
   apiGet('/admin/sending/status').then(function(s){
     STATE.sendingPaused=!!(s&&s.paused);

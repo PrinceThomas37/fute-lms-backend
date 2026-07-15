@@ -2427,6 +2427,7 @@ app.use(require('./routes/companies')(routeCtx));
 app.use(require('./routes/reminders')(routeCtx));
 app.use(require('./routes/contacts')(routeCtx));
 app.use(require('./routes/settings')(routeCtx));
+app.use(require('./routes/integrations')(routeCtx));
 app.use(require('./routes/deliverability')(routeCtx));
 app.use(require('./routes/ai')(routeCtx));
 app.use(require('./routes/events')(routeCtx));

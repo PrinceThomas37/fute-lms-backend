@@ -427,6 +427,10 @@ function renderAdmin(){
     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>'+
     'System Settings'+
   '</button>';
+  var integrationsBtn='<button onclick="openIntegrationsModal()" style="display:flex;align-items:center;gap:7px;padding:7px 14px;background:var(--card);border:1px solid var(--border2);border-radius:8px;font-size:13px;color:var(--text2);cursor:pointer">'+
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>'+
+    'Integrations'+
+  '</button>';
 
   var paused=STATE.sendingPaused;
   var stopCard='<div style="background:'+(paused?'#fef2f2':'var(--card)')+';border:1px solid '+(paused?'#fca5a5':'var(--border)')+';border-radius:var(--r2);padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">'+
@@ -446,6 +450,7 @@ function renderAdmin(){
       '<div><div class="ptitle">Admin</div><div class="psub">'+allUsers.length+' users · Fute Global LLC</div></div>'+
       '<div style="display:flex;gap:8px;align-items:center">'+
         (canSeeEngine?engineBtn:'')+
+        (isAdmin?integrationsBtn:'')+
         (isAdmin?sysSettingsBtn:'')+
         (isAdmin?'<button class="btn btn-sm" onclick="openPurgePending(\'all\')" style="background:transparent;color:var(--red);border:1px solid #fca5a5">Delete pending (all managers)…</button>':'')+
         '<button class="btn btn-primary btn-sm" onclick="openAddUser()">'+ico('plus',13)+'Add user</button>'+

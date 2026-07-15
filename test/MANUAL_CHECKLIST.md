@@ -123,6 +123,22 @@ on a production inbox until confirmed. Reachable via: sidebar **Deliverability**
 - [ ] With only **one** connected mailbox, warm-up no-ops gracefully (nothing to
       exchange with) and says so.
 
+## Integrations & API Keys (Admin → Integrations)
+Admin-only. Keys stored in app_settings (int_<id>_<field>); reads are masked.
+- [ ] "Integrations" button shows on the Admin page for admins only; opens a modal
+      grouped by category (AI, Email verification, Contact database).
+- [ ] Pasting a key + Save shows "Connected"; re-opening shows only a masked hint
+      (••••1234), never the full key. Confirm the GET /admin/integrations payload
+      never contains the raw key.
+- [ ] "Test" validates the key against the provider (ZeroBounce credits, NeverBounce
+      account, Hunter account, Apollo health, Anthropic models) and shows ✓/✗.
+- [ ] "Disconnect" removes the stored key (status returns to Not configured).
+- [ ] For a verifier, "Use this verifier for pre-send checks" persists as the active
+      one; the email tester (enter an address → Verify) returns valid/invalid/risky
+      from that provider, or "no verifier configured yet" when none is set.
+- [ ] Anthropic shows "set via environment" (configured) when only ANTHROPIC_API_KEY
+      env is set — a UI key overrides it.
+
 ## Bounce detection — Junk scan + broader NDR patterns + pre-follow-up sweep
 - [ ] A bounce whose NDR lands in the mailbox's **Junk** folder now auto-marks the
       contact invalid (previously Inbox-only); the activity log entry records
