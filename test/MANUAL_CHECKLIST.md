@@ -123,6 +123,20 @@ on a production inbox until confirmed. Reachable via: sidebar **Deliverability**
 - [ ] With only **one** connected mailbox, warm-up no-ops gracefully (nothing to
       exchange with) and says so.
 
+## Bounce detection — Junk scan + broader NDR patterns + pre-follow-up sweep
+- [ ] A bounce whose NDR lands in the mailbox's **Junk** folder now auto-marks the
+      contact invalid (previously Inbox-only); the activity log entry records
+      `folder: JunkEmail`.
+- [ ] Broader NDR recognition still auto-marks on: Gmail "Delivery Status
+      Notification (Failure)", Exchange "Undeliverable:", and daemon senders
+      (postmaster / mailer-daemon / MicrosoftExchange… / "Mail Delivery Subsystem").
+- [ ] No false positives: a normal inbound email (e.g. subject mentioning
+      "delivery") does NOT mark any contact invalid — invalidation still requires a
+      real recipient address extracted from the NDR body that matches a contact.
+- [ ] The follow-up engine runs a bounce sweep first: a contact whose earlier
+      email bounced since the last 30-min sweep is marked invalid and **skipped**
+      by that same follow-up run (check the run log's skipped_contact_status).
+
 ## Gmail / Google Workspace provider (once GOOGLE_CLIENT_ID/SECRET are set)
 Inert until configured + Google approves the restricted scopes (gmail.send /
 gmail.modify). Requires migration `010_gmail_tokens.sql` (applied). The Microsoft

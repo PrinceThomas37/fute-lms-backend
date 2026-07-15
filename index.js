@@ -1755,6 +1755,10 @@ app.post('/follow-ups/run', auth, async (req, res) => {
 async function runFollowupEngine() {
   const todayDate = today();
   const log = { checked: 0, fu1_queued: 0, fu2_queued: 0, skipped_quota: 0, skipped_stage: 0, skipped_contact_status: 0, skipped_inactive_mailbox: 0, skipped_duplicate: 0 };
+  // Apply any bounces that arrived since the last 30-min sweep BEFORE deciding
+  // who to follow up — so a contact whose earlier email just bounced is already
+  // marked invalid and gets skipped here instead of receiving another send.
+  try { await runBounceSweep(); } catch (e) { console.error('[Followup] pre-run bounce sweep failed:', e.message); }
   try {
     const { data: dueFu, error: fuErr } = await supabase.from('follow_ups')
       .select(`*, contact:contacts(id,first_name,last_name,email,designation,email_status,ooo_until), job:jobs(id,position,location,salary_range,research,industry,stage,timezone,assigned_to_bd,company:companies(name,industry,location),sending_email:user_emails!sending_email_id(id,email_address,display_name,is_active))`)
@@ -1965,12 +1969,17 @@ setInterval(async () => {
 // ══════════════════════════════════════════════════════════════
 function isNdrMessage(msg) {
   const from = (msg.from?.emailAddress?.address || '').toLowerCase();
+  const fromName = (msg.from?.emailAddress?.name || '').toLowerCase();
   const subj = (msg.subject || '').toLowerCase();
-  return from.includes('postmaster') || from.includes('mailer-daemon')
-    || subj.startsWith('undeliverable')
-    || subj.includes('delivery has failed')
-    || subj.includes('delivery status notification')
-    || subj.includes('returned mail');
+  // Bounces always come from a mail-delivery daemon; match those senders across
+  // providers (Exchange postmaster / MicrosoftExchange…, Gmail mailer-daemon +
+  // "Mail Delivery Subsystem", generic postmaster).
+  const senderNdr = from.includes('postmaster') || from.includes('mailer-daemon')
+    || from.includes('mail-daemon') || from.includes('microsoftexchange')
+    || fromName.includes('mail delivery');
+  // Unambiguous NDR subject phrases (a backup for when sender parsing misses).
+  const subjectNdr = /undeliverable|delivery (has )?failed|delivery status notification|returned mail|delivery failure|failure notice|mail delivery failed|undelivered mail|message not delivered|couldn'?t be delivered|could not be delivered|delivery incomplete/i.test(subj);
+  return senderNdr || subjectNdr;
 }
 
 // Warm-up pool traffic carries an X-Fute-Warmup header; the outreach reply and
@@ -2025,33 +2034,35 @@ async function sweepMailboxBounces(tokenRow, ownAddresses) {
   const sinceKey = `bounce_sweep_since_${tokenRow.user_email_id}`;
   const { data: sinceRow } = await supabase.from('app_settings').select('value').eq('key', sinceKey).maybeSingle();
   const since = sinceRow?.value || new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
-
   const filter = encodeURIComponent(`receivedDateTime ge ${since}`);
-  const path = `/me/mailFolders/Inbox/messages?$top=50&$orderby=receivedDateTime desc`
-    + `&$select=id,subject,from,bodyPreview,body,receivedDateTime,internetMessageHeaders&$filter=${filter}`;
-  let data;
-  try { data = await graphMailRequest(accessToken, path); }
-  catch (e) { console.error(`[BounceSweep] list for ${tokenRow.email_address}: ${e.message}`); return 0; }
 
-  const messages = data.value || [];
   let marked = 0, newest = since;
-  for (const msg of messages) {
-    if (msg.receivedDateTime && msg.receivedDateTime > newest) newest = msg.receivedDateTime;
-    if (isWarmupMessage(msg)) continue; // warm-up pool traffic — never a bounce
-    if (!isNdrMessage(msg)) continue;
-    const text = `${msg.body?.content || ''} ${msg.bodyPreview || ''}`;
-    for (const addr of extractBounceRecipients(text, ownAddresses)) {
-      const { data: matches } = await supabase.from('contacts')
-        .select('id,email_status,job_id').ilike('email', addr).limit(10);
-      for (const c of (matches || [])) {
-        if (c.email_status === 'invalid' || c.email_status === 'deactivated') continue;
-        await supabase.from('contacts').update({ email_status: 'invalid', updated_at: new Date() }).eq('id', c.id);
-        emit(EVENTS.EMAIL_BOUNCED, { contactId: c.id, jobId: c.job_id, address: addr, mailbox: tokenRow.email_address });
-        emit(EVENTS.CONTACT_INVALIDATED, { contactId: c.id, jobId: c.job_id, reason: 'bounce' });
-        await logActivity(c.job_id, c.id, null, 'email_bounced',
-          `Auto-marked invalid — bounce/NDR received for ${addr}`, null,
-          { source: 'ndr', mailbox: tokenRow.email_address });
-        marked++;
+  // NDRs normally land in Inbox, but aggressive spam filtering can drop them in
+  // Junk — scan both so a bounce isn't missed just because it was filtered.
+  for (const folder of ['Inbox', 'JunkEmail']) {
+    const path = `/me/mailFolders/${folder}/messages?$top=50&$orderby=receivedDateTime desc`
+      + `&$select=id,subject,from,bodyPreview,body,receivedDateTime,internetMessageHeaders&$filter=${filter}`;
+    let data;
+    try { data = await graphMailRequest(accessToken, path); }
+    catch (e) { console.error(`[BounceSweep] ${folder} list for ${tokenRow.email_address}: ${e.message}`); continue; }
+    for (const msg of (data.value || [])) {
+      if (msg.receivedDateTime && msg.receivedDateTime > newest) newest = msg.receivedDateTime;
+      if (isWarmupMessage(msg)) continue; // warm-up pool traffic — never a bounce
+      if (!isNdrMessage(msg)) continue;
+      const text = `${msg.body?.content || ''} ${msg.bodyPreview || ''}`;
+      for (const addr of extractBounceRecipients(text, ownAddresses)) {
+        const { data: matches } = await supabase.from('contacts')
+          .select('id,email_status,job_id').ilike('email', addr).limit(10);
+        for (const c of (matches || [])) {
+          if (c.email_status === 'invalid' || c.email_status === 'deactivated') continue;
+          await supabase.from('contacts').update({ email_status: 'invalid', updated_at: new Date() }).eq('id', c.id);
+          emit(EVENTS.EMAIL_BOUNCED, { contactId: c.id, jobId: c.job_id, address: addr, mailbox: tokenRow.email_address });
+          emit(EVENTS.CONTACT_INVALIDATED, { contactId: c.id, jobId: c.job_id, reason: 'bounce' });
+          await logActivity(c.job_id, c.id, null, 'email_bounced',
+            `Auto-marked invalid — bounce/NDR received for ${addr}`, null,
+            { source: 'ndr', mailbox: tokenRow.email_address, folder });
+          marked++;
+        }
       }
     }
   }
