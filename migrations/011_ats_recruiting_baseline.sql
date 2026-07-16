@@ -4,11 +4,13 @@
 -- The recruiting spine (job_orders, candidates, submissions, submission_activity,
 -- recruiter_assignments) and the next_id() code generator were applied directly
 -- to the live Supabase by earlier sessions and never had committed DDL. This
--- migration captures them verbatim so a fresh database can be stood up from the
--- migrations folder alone.
+-- migration captures them so a fresh database can be stood up from the migrations
+-- folder alone.
 --
 -- Everything is IF NOT EXISTS / idempotent, so on the live database (where these
--- objects already exist) it is a no-op. See docs/ATS_RECRUITING_PLAN.md §2.
+-- objects already exist) it is a no-op. Foreign keys mirror the live schema,
+-- which uses ON DELETE NO ACTION throughout (the app soft-deletes via deleted_at,
+-- so cascade rules are intentionally not relied on). See docs/ATS_RECRUITING_PLAN.md §2.
 -- ============================================================================
 
 -- ── ID generator ────────────────────────────────────────────────────────────
@@ -49,9 +51,9 @@ $function$;
 CREATE TABLE IF NOT EXISTS job_orders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   job_code TEXT UNIQUE,
-  source_lead_id UUID REFERENCES jobs(id) ON DELETE SET NULL,
+  source_lead_id UUID REFERENCES jobs(id),
   lead_code TEXT,
-  company_id UUID REFERENCES companies(id) ON DELETE SET NULL,
+  company_id UUID REFERENCES companies(id),
   job_title TEXT NOT NULL,
   client TEXT,
   client_job_id TEXT,
@@ -88,8 +90,8 @@ CREATE TABLE IF NOT EXISTS job_orders (
   languages TEXT,
   job_category TEXT,
   comments TEXT,
-  bd_manager_id UUID REFERENCES users(id) ON DELETE SET NULL,
-  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  bd_manager_id UUID REFERENCES users(id),
+  created_by UUID REFERENCES users(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at TIMESTAMPTZ
@@ -105,9 +107,9 @@ CREATE INDEX IF NOT EXISTS job_orders_job_type_idx ON job_orders (job_type) WHER
 -- ── Recruiter assignments (recruiter ↔ job order) ────────────────────────────
 CREATE TABLE IF NOT EXISTS recruiter_assignments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  job_order_id UUID NOT NULL REFERENCES job_orders(id) ON DELETE CASCADE,
-  recruiter_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  assigned_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  job_order_id UUID NOT NULL REFERENCES job_orders(id),
+  recruiter_id UUID NOT NULL REFERENCES users(id),
+  assigned_by UUID REFERENCES users(id),
   assigned_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS recruiter_assignments_uidx ON recruiter_assignments (job_order_id, recruiter_id);
@@ -126,7 +128,7 @@ CREATE TABLE IF NOT EXISTS candidates (
   experience_years NUMERIC,
   resume_url TEXT,
   source TEXT,
-  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_by UUID REFERENCES users(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at TIMESTAMPTZ
@@ -137,14 +139,14 @@ CREATE INDEX IF NOT EXISTS candidates_email_idx ON candidates (lower(email)) WHE
 -- ── Submissions (candidate ↔ job order, pipeline stage + BDM gate) ───────────
 CREATE TABLE IF NOT EXISTS submissions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  candidate_id UUID NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
-  job_order_id UUID NOT NULL REFERENCES job_orders(id) ON DELETE CASCADE,
-  recruiter_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  candidate_id UUID NOT NULL REFERENCES candidates(id),
+  job_order_id UUID NOT NULL REFERENCES job_orders(id),
+  recruiter_id UUID REFERENCES users(id),
   stage TEXT NOT NULL DEFAULT 'Sourced',
   submitted_rate TEXT,
   notes TEXT,
   bdm_approved_at TIMESTAMPTZ,
-  bdm_approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  bdm_approved_by UUID REFERENCES users(id),
   stage_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at TIMESTAMPTZ
@@ -158,9 +160,9 @@ CREATE INDEX IF NOT EXISTS submissions_stage_idx ON submissions (stage) WHERE de
 -- ── Submission activity log ──────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS submission_activity (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  submission_id UUID REFERENCES submissions(id) ON DELETE CASCADE,
-  job_order_id UUID REFERENCES job_orders(id) ON DELETE CASCADE,
-  recruiter_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  submission_id UUID REFERENCES submissions(id),
+  job_order_id UUID REFERENCES job_orders(id),
+  recruiter_id UUID REFERENCES users(id),
   action TEXT,
   old_stage TEXT,
   new_stage TEXT,

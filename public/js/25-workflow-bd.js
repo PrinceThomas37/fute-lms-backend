@@ -495,7 +495,10 @@
             '<div style="font-size:19px;font-weight:700">'+esc(j.job_title||'')+'</div>'+
             '<div style="font-size:13px;color:var(--text3);margin-top:2px">'+esc(j.client||'')+' · '+esc(loc||'')+'</div>'+
           '</div>'+
-          '<button class="btn btn-sm btn-outline" onclick="bdOpenKanban(\''+j.id+'\')">View Pipeline</button>'+
+          '<div style="display:flex;gap:8px">'+
+            '<button class="btn btn-sm btn-outline" onclick="bdOpenPipeline(\''+j.id+'\')">Pipeline</button>'+
+            '<button class="btn btn-sm btn-outline" onclick="bdOpenKanban(\''+j.id+'\')">Board</button>'+
+          '</div>'+
         '</div>'+
         '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">'+
           dr('Pay Rate',pay)+dr('Job Type',j.job_type)+dr('Emp. Level',j.emp_level)+
@@ -619,7 +622,10 @@
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
         '<div><div style="display:flex;gap:8px;align-items:center">'+code(j.job_code)+'<span style="font-weight:700;font-size:16px">'+esc(j.job_title||'')+'</span></div>'+
         '<div style="font-size:12.5px;color:var(--text3)">'+esc(j.client||'')+'</div></div>'+
-        '<button class="btn btn-primary" onclick="bdOpenAddCandidate(\''+j.id+'\')">+ Add Candidate</button>'+
+        '<div style="display:flex;gap:8px">'+
+          '<button class="btn btn-outline" onclick="bdOpenPipeline(\''+j.id+'\')">Pipeline</button>'+
+          '<button class="btn btn-primary" onclick="bdOpenAddCandidate(\''+j.id+'\')">+ Add Candidate</button>'+
+        '</div>'+
       '</div>'+
       '<div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:8px">'+colHtml+'</div>'+
     '</div>';

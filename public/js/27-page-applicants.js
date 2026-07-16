@@ -315,7 +315,7 @@
             (jobs.length?
               '<label style="font-size:11.5px;color:var(--text2);display:block;margin-bottom:4px">Job order</label>'+
               '<select id="ats-job-pick" class="sel">'+opts+'</select>'+
-              '<div style="font-size:11.5px;color:var(--text3);margin-top:8px">Adds the candidate to the job pipeline at the "Sourced" stage.</div>'
+              '<div style="font-size:11.5px;color:var(--text3);margin-top:8px">Tags the candidate into the job pipeline. Promote to a submission from the job\'s Pipeline tab.</div>'
               :'<div style="color:var(--text3);font-size:13px">No job orders available to you yet.</div>')+
           '</div>'+
           '<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">'+
@@ -328,10 +328,10 @@
   };
   window.atsDoAddToJob = function(cid){
     var pick = document.getElementById('ats-job-pick'); if(!pick||!pick.value){ showToast('Pick a job','error'); return; }
-    apiPost('/submissions', { candidate_id:cid, job_order_id:pick.value }).then(function(){
-      showToast('Added to job pipeline','success'); closeModal();
+    apiPost('/pipeline', { candidate_id:cid, job_order_id:pick.value }).then(function(){
+      showToast('Tagged to job pipeline','success'); closeModal();
     }).catch(function(e){
-      if (/already/i.test(e.message)) showToast('Candidate already in that job','error');
+      if (/already tagged/i.test(e.message)) showToast('Candidate already in that pipeline','error');
       else showToast('Failed: '+e.message,'error');
     });
   };

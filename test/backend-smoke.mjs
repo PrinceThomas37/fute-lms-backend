@@ -114,6 +114,13 @@ try {
   check('POST /candidates → 401 (bd-recruiter, gated)', await req('POST', '/candidates'), 401);
   check('PUT /candidates/x → 401 (bd-recruiter, gated)', await req('PUT', '/candidates/x'), 401);
   check('DELETE /candidates/x → 401 (new, gated)', await req('DELETE', '/candidates/x'), 401);
+  // ATS pipeline / tagging layer (Slice 2) — mounted + auth-gated.
+  check('GET /job-orders/x/pipeline → 401 (new, gated)', await req('GET', '/job-orders/x/pipeline'), 401);
+  check('POST /pipeline → 401 (new, gated)', await req('POST', '/pipeline'), 401);
+  check('PATCH /pipeline/x/status → 401 (new, gated)', await req('PATCH', '/pipeline/x/status'), 401);
+  check('PATCH /pipeline/x → 401 (new, gated)', await req('PATCH', '/pipeline/x'), 401);
+  check('POST /pipeline/x/promote → 401 (new, gated)', await req('POST', '/pipeline/x/promote'), 401);
+  check('DELETE /pipeline/x → 401 (new, gated)', await req('DELETE', '/pipeline/x'), 401);
   check('GET /jobs/x/activity → 401 (still inline)', await req('GET', '/jobs/x/activity'), 401);
 
   // Dependency check: run the POST /jobs handler with a valid admin token and a
