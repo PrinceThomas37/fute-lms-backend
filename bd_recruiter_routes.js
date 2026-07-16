@@ -228,7 +228,19 @@ module.exports = function (app, deps) {
 
       const { data, error } = await query.order('created_at', { ascending: false });
       if (error) throw error;
-      res.json(data || []);
+      const list = data || [];
+      // Attach assigned recruiters to every job order (the single-get already
+      // does this; the list did not — which made the recruiter "My Jobs" filter
+      // return nothing and showed everyone as "Unassigned" on the BDM list).
+      if (list.length) {
+        const { data: assigns } = await supabase.from('recruiter_assignments')
+          .select('job_order_id, id, assigned_at, recruiter:users!recruiter_id(id,name,employee_id)')
+          .in('job_order_id', list.map(j => j.id));
+        const byJob = {};
+        (assigns || []).forEach(a => { (byJob[a.job_order_id] = byJob[a.job_order_id] || []).push(a); });
+        list.forEach(j => { j.recruiters = byJob[j.id] || []; });
+      }
+      res.json(list);
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
