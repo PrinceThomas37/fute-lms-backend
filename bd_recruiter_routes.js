@@ -340,17 +340,114 @@ module.exports = function (app, deps) {
   });
 
   // ==========================================================================
-  // CANDIDATES — shared pool
+  // CANDIDATES — shared pool (Ceipal-style Applicants database)
   // ==========================================================================
 
+  // Writable candidate fields (matches migration 012 + the Applicants form).
+  const CANDIDATE_FIELDS = [
+    'full_name','first_name','last_name','email','phone','alt_phone','linkedin_url',
+    'current_location','city','state','country','zip',
+    'current_title','headline','skills','experience_years',
+    'work_authorization','clearance','current_employer',
+    'availability','notice_period','current_ctc','expected_ctc',
+    'bill_rate','pay_rate','pay_type','pay_currency',
+    'applicant_status','source','resume_url','resume_filename'
+  ];
+  const CANDIDATE_SELECT =
+    'id,candidate_code,full_name,first_name,last_name,email,phone,alt_phone,linkedin_url,' +
+    'current_location,city,state,country,zip,current_title,headline,skills,experience_years,' +
+    'work_authorization,clearance,current_employer,availability,notice_period,current_ctc,expected_ctc,' +
+    'bill_rate,pay_rate,pay_type,pay_currency,applicant_status,source,resume_url,resume_filename,' +
+    'tags,owner_id,created_by,created_at,updated_at,' +
+    'owner:users!owner_id(id,name,employee_id),creator:users!created_by(id,name,employee_id)';
+
+  function pickCandidateFields(src) {
+    const out = {};
+    src = src || {};
+    CANDIDATE_FIELDS.forEach(function (k) {
+      if (src[k] === undefined) return;
+      const v = src[k];
+      if (k === 'experience_years') { out[k] = (v === '' || v === null) ? null : v; return; }
+      out[k] = (v === '') ? null : v;
+    });
+    return out;
+  }
+
+  // Normalizers — mirror the generated columns created in migration 012.
+  function normName(s) { return String(s || '').toLowerCase().trim().replace(/\s+/g, ' '); }
+  function normEmail(s) { return String(s || '').toLowerCase().trim(); }
+  function normPhone(s) { return (String(s || '').match(/\d/g) || []).join('').slice(-10); }
+
+  // Duplicate rule (owner's spec): same normalized full name AND (email OR phone
+  // matches). Returns the matching non-deleted candidates ([] = no duplicate).
+  async function findCandidateDuplicates({ full_name, email, phone, excludeId }) {
+    const n = normName(full_name), e = normEmail(email), p = normPhone(phone);
+    if (!n) return [];
+    if (!e && !p) return [];                 // need at least one of email / phone to match on
+    let q = supabase.from('candidates')
+      .select('id,candidate_code,full_name,email,phone,current_title,applicant_status,owner_id')
+      .is('deleted_at', null).eq('name_norm', n).limit(25);
+    if (excludeId) q = q.neq('id', excludeId);
+    const { data, error } = await q;
+    if (error) throw error;
+    return (data || []).filter(function (c) {
+      const ce = normEmail(c.email), cp = normPhone(c.phone);
+      return (e && ce && ce === e) || (p && cp && cp === p);
+    });
+  }
+
+  // GET /candidates
+  //  - legacy (no ?page): returns a plain array (used by the job-page add modal)
+  //  - paged  (?page=N):  returns { data, total, page, limit } for the Applicants grid
   app.get('/candidates', auth, async (req, res) => {
     try {
-      let query = supabase.from('candidates').select('*').is('deleted_at', null);
-      const q = (req.query.q || '').trim();
-      if (q) query = query.or(`full_name.ilike.%${q}%,email.ilike.%${q}%,candidate_code.ilike.%${q}%`);
-      const { data, error } = await query.order('created_at', { ascending: false }).limit(100);
+      const paged = req.query.page !== undefined;
+      const q = (req.query.q || '').trim().replace(/[,()]/g, ' ').trim();  // strip or()-structural chars
+      let query = supabase.from('candidates')
+        .select(CANDIDATE_SELECT, paged ? { count: 'exact' } : undefined)
+        .is('deleted_at', null);
+      if (q) query = query.or(
+        `full_name.ilike.%${q}%,email.ilike.%${q}%,candidate_code.ilike.%${q}%,phone.ilike.%${q}%,current_title.ilike.%${q}%`
+      );
+      if (req.query.applicant_status) query = query.eq('applicant_status', req.query.applicant_status);
+      if (req.query.source) query = query.eq('source', req.query.source);
+      if (req.query.state) query = query.eq('state', req.query.state);
+      if (req.query.work_authorization) query = query.eq('work_authorization', req.query.work_authorization);
+      if (req.query.owner_id) query = query.eq('owner_id', req.query.owner_id);
+      query = query.order('created_at', { ascending: false });
+
+      if (paged) {
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+        const from = (page - 1) * limit;
+        const { data, error, count } = await query.range(from, from + limit - 1);
+        if (error) throw error;
+        return res.json({ data: data || [], total: count || 0, page, limit });
+      }
+      const { data, error } = await query.limit(100);
       if (error) throw error;
       res.json(data || []);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // GET /candidates/check-duplicate?full_name=&email=&phone=
+  // Registered before /candidates/:id so the literal path wins the match.
+  app.get('/candidates/check-duplicate', auth, async (req, res) => {
+    try {
+      const dups = await findCandidateDuplicates({
+        full_name: req.query.full_name, email: req.query.email,
+        phone: req.query.phone, excludeId: req.query.exclude_id
+      });
+      res.json({ duplicate: dups.length > 0, duplicates: dups });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get('/candidates/:id', auth, async (req, res) => {
+    try {
+      const { data, error } = await supabase.from('candidates')
+        .select(CANDIDATE_SELECT).eq('id', req.params.id).is('deleted_at', null).single();
+      if (error || !data) return res.status(404).json({ error: 'Candidate not found' });
+      res.json(data);
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
@@ -359,16 +456,24 @@ module.exports = function (app, deps) {
       if (notGuest(req, res)) return;
       if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
       const b = req.body || {};
-      if (!b.full_name) return res.status(400).json({ error: 'full_name required' });
+      if (!b.full_name || !String(b.full_name).trim()) return res.status(400).json({ error: 'full_name required' });
+
+      // Duplicate catch — name + (email or phone). Warn-and-offer: unless `force`,
+      // return the matches (409) so the UI can offer "open existing" over a copy.
+      if (!b.force) {
+        const dups = await findCandidateDuplicates({ full_name: b.full_name, email: b.email, phone: b.phone });
+        if (dups.length) return res.status(409).json({ error: 'possible_duplicate', duplicates: dups });
+      }
+
       const code = await nextId('CN');
-      const { data, error } = await supabase.from('candidates').insert({
+      const row = Object.assign(pickCandidateFields(b), {
         candidate_code: code,
-        full_name: b.full_name, email: b.email || null, phone: b.phone || null,
-        current_location: b.current_location || null, current_title: b.current_title || null,
-        skills: b.skills || null, experience_years: b.experience_years || null,
-        resume_url: b.resume_url || null, source: b.source || null,
+        applicant_status: b.applicant_status || 'New lead',
+        owner_id: b.owner_id || req.user.id,
         created_by: req.user.id
-      }).select().single();
+      });
+      if (Array.isArray(b.tags)) row.tags = b.tags;
+      const { data, error } = await supabase.from('candidates').insert(row).select(CANDIDATE_SELECT).single();
       if (error) throw error;
       res.status(201).json(data);
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -379,14 +484,22 @@ module.exports = function (app, deps) {
       if (notGuest(req, res)) return;
       if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
       const b = req.body || {};
-      const allowed = ['full_name','email','phone','current_location','current_title',
-                       'skills','experience_years','resume_url','source'];
-      const updates = { updated_at: new Date() };
-      for (const k of allowed) if (b[k] !== undefined) updates[k] = b[k];
+      const updates = Object.assign(pickCandidateFields(b), { updated_at: new Date(), updated_by: req.user.id });
+      if (b.owner_id !== undefined) updates.owner_id = b.owner_id || null;
+      if (Array.isArray(b.tags)) updates.tags = b.tags;
       const { data, error } = await supabase.from('candidates')
-        .update(updates).eq('id', req.params.id).select().single();
+        .update(updates).eq('id', req.params.id).select(CANDIDATE_SELECT).single();
       if (error) throw error;
       res.json(data);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.delete('/candidates/:id', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      await supabase.from('candidates').update({ deleted_at: new Date() }).eq('id', req.params.id);
+      res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 

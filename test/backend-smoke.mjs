@@ -107,6 +107,13 @@ try {
   check('POST /parse-jd → 401 (extracted)', await req('POST', '/parse-jd'), 401);
   check('GET /jobs/x/contacts → 401 (extracted)', await req('GET', '/jobs/x/contacts'), 401);
   check('GET /users/x/job-orders → 401 (new, gated)', await req('GET', '/users/x/job-orders'), 401);
+  // ATS candidate database (Slice 1) — mounted + auth-gated.
+  check('GET /candidates → 401 (bd-recruiter, gated)', await req('GET', '/candidates'), 401);
+  check('GET /candidates/check-duplicate → 401 (new, gated)', await req('GET', '/candidates/check-duplicate'), 401);
+  check('GET /candidates/x → 401 (new, gated)', await req('GET', '/candidates/x'), 401);
+  check('POST /candidates → 401 (bd-recruiter, gated)', await req('POST', '/candidates'), 401);
+  check('PUT /candidates/x → 401 (bd-recruiter, gated)', await req('PUT', '/candidates/x'), 401);
+  check('DELETE /candidates/x → 401 (new, gated)', await req('DELETE', '/candidates/x'), 401);
   check('GET /jobs/x/activity → 401 (still inline)', await req('GET', '/jobs/x/activity'), 401);
 
   // Dependency check: run the POST /jobs handler with a valid admin token and a
