@@ -311,6 +311,22 @@ module.exports = function (app, deps) {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // Job orders a specific user is assigned to — lets an admin/BDM see a
+  // recruiter's assignments from that recruiter's profile (the recruiter's own
+  // /job-orders is scoped to themselves; this is the "view someone else" version).
+  app.get('/users/:id/job-orders', auth, async (req, res) => {
+    try {
+      if (!isBDM(req)) return res.status(403).json({ error: 'Admin or BD Manager only' });
+      const ids = await assignedJobOrderIds(req.params.id);
+      if (!ids.length) return res.json([]);
+      const { data, error } = await supabase.from('job_orders')
+        .select(JOB_ORDER_SELECT).in('id', ids).is('deleted_at', null)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json(data || []);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // ==========================================================================
   // CANDIDATES — shared pool
   // ==========================================================================
