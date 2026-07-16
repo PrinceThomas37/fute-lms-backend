@@ -483,6 +483,35 @@ window.refreshUserControlCenter=function(userId){
   loadWorkflows();
 };
 
+// Job orders a recruiter is assigned to — shown on their admin profile so
+// assignments made in the BD job-order view are verifiable here too.
+function loadUserJobOrders(userId){
+  STATE._userJobOrders=STATE._userJobOrders||{};
+  if(STATE._userJobOrders[userId]!==undefined)return;
+  STATE._userJobOrders[userId]='loading';
+  apiGet('/users/'+userId+'/job-orders').then(function(r){ STATE._userJobOrders[userId]=r||[]; scheduleRender(); })
+    .catch(function(){ STATE._userJobOrders[userId]=null; scheduleRender(); });
+}
+function recruiterJobOrdersCard(userId){
+  loadUserJobOrders(userId);
+  var jos=STATE._userJobOrders&&STATE._userJobOrders[userId];
+  var rows;
+  if(jos===undefined||jos==='loading')rows='<div style="padding:14px;color:var(--text3);font-size:12.5px">Loading…</div>';
+  else if(jos===null)rows='<div style="padding:14px;color:var(--text3);font-size:12.5px">Could not load assignments.</div>';
+  else if(!jos.length)rows='<div style="padding:14px;color:var(--text3);font-size:12.5px">No job orders assigned yet. Assign from a job order’s <b>Assigned Recruiters</b> panel in the BD workflow.</div>';
+  else rows=jos.map(function(j){
+    var client=j.client||(j.company&&j.company.name)||'';
+    return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border2)">'+
+      '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">'+htmlEsc(j.job_title||'—')+'</div>'+
+        '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(client)+(j.job_code?' · '+htmlEsc(j.job_code):'')+'</div></div>'+
+      '<span style="font-size:10px;padding:2px 8px;border-radius:6px;font-weight:600;background:var(--bg3);color:var(--text2)">'+htmlEsc(j.status||'')+'</span>'+
+    '</div>';
+  }).join('');
+  return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;margin-bottom:16px">'+
+    '<div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Assigned job orders'+((jos&&jos.length)?' ('+jos.length+')':'')+'</div>'+
+    rows+
+  '</div>';
+}
 function renderAdminUserDetail(userId){
   var usr=STATE.users.find(function(x){return x.id===userId;});
   if(!usr)return'';
@@ -644,6 +673,7 @@ function renderAdminUserDetail(userId){
       '</div>'+
 
       ccCard+
+      (userHasRole(usr,'recruiter')?recruiterJobOrdersCard(userId):'')+
 
       // Outreach Email IDs — BD and Admin only
       (showEmails?

@@ -106,6 +106,7 @@ try {
   check('POST /jobs/bulk → 401 (extracted)', await req('POST', '/jobs/bulk'), 401);
   check('POST /parse-jd → 401 (extracted)', await req('POST', '/parse-jd'), 401);
   check('GET /jobs/x/contacts → 401 (extracted)', await req('GET', '/jobs/x/contacts'), 401);
+  check('GET /users/x/job-orders → 401 (new, gated)', await req('GET', '/users/x/job-orders'), 401);
   check('GET /jobs/x/activity → 401 (still inline)', await req('GET', '/jobs/x/activity'), 401);
 
   // Dependency check: run the POST /jobs handler with a valid admin token and a

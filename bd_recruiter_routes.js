@@ -228,7 +228,19 @@ module.exports = function (app, deps) {
 
       const { data, error } = await query.order('created_at', { ascending: false });
       if (error) throw error;
-      res.json(data || []);
+      const list = data || [];
+      // Attach assigned recruiters to every job order (the single-get already
+      // does this; the list did not — which made the recruiter "My Jobs" filter
+      // return nothing and showed everyone as "Unassigned" on the BDM list).
+      if (list.length) {
+        const { data: assigns } = await supabase.from('recruiter_assignments')
+          .select('job_order_id, id, assigned_at, recruiter:users!recruiter_id(id,name,employee_id)')
+          .in('job_order_id', list.map(j => j.id));
+        const byJob = {};
+        (assigns || []).forEach(a => { (byJob[a.job_order_id] = byJob[a.job_order_id] || []).push(a); });
+        list.forEach(j => { j.recruiters = byJob[j.id] || []; });
+      }
+      res.json(list);
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
@@ -308,6 +320,22 @@ module.exports = function (app, deps) {
       await supabase.from('recruiter_assignments')
         .delete().eq('job_order_id', req.params.id).eq('recruiter_id', req.params.rid);
       res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Job orders a specific user is assigned to — lets an admin/BDM see a
+  // recruiter's assignments from that recruiter's profile (the recruiter's own
+  // /job-orders is scoped to themselves; this is the "view someone else" version).
+  app.get('/users/:id/job-orders', auth, async (req, res) => {
+    try {
+      if (!isBDM(req)) return res.status(403).json({ error: 'Admin or BD Manager only' });
+      const ids = await assignedJobOrderIds(req.params.id);
+      if (!ids.length) return res.json([]);
+      const { data, error } = await supabase.from('job_orders')
+        .select(JOB_ORDER_SELECT).in('id', ids).is('deleted_at', null)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json(data || []);
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
