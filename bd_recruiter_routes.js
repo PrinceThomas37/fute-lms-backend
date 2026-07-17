@@ -340,17 +340,114 @@ module.exports = function (app, deps) {
   });
 
   // ==========================================================================
-  // CANDIDATES — shared pool
+  // CANDIDATES — shared pool (Ceipal-style Applicants database)
   // ==========================================================================
 
+  // Writable candidate fields (matches migration 012 + the Applicants form).
+  const CANDIDATE_FIELDS = [
+    'full_name','first_name','last_name','email','phone','alt_phone','linkedin_url',
+    'current_location','city','state','country','zip',
+    'current_title','headline','skills','experience_years',
+    'work_authorization','clearance','current_employer',
+    'availability','notice_period','current_ctc','expected_ctc',
+    'bill_rate','pay_rate','pay_type','pay_currency',
+    'applicant_status','source','resume_url','resume_filename'
+  ];
+  const CANDIDATE_SELECT =
+    'id,candidate_code,full_name,first_name,last_name,email,phone,alt_phone,linkedin_url,' +
+    'current_location,city,state,country,zip,current_title,headline,skills,experience_years,' +
+    'work_authorization,clearance,current_employer,availability,notice_period,current_ctc,expected_ctc,' +
+    'bill_rate,pay_rate,pay_type,pay_currency,applicant_status,source,resume_url,resume_filename,' +
+    'tags,owner_id,created_by,created_at,updated_at,' +
+    'owner:users!owner_id(id,name,employee_id),creator:users!created_by(id,name,employee_id)';
+
+  function pickCandidateFields(src) {
+    const out = {};
+    src = src || {};
+    CANDIDATE_FIELDS.forEach(function (k) {
+      if (src[k] === undefined) return;
+      const v = src[k];
+      if (k === 'experience_years') { out[k] = (v === '' || v === null) ? null : v; return; }
+      out[k] = (v === '') ? null : v;
+    });
+    return out;
+  }
+
+  // Normalizers — mirror the generated columns created in migration 012.
+  function normName(s) { return String(s || '').toLowerCase().trim().replace(/\s+/g, ' '); }
+  function normEmail(s) { return String(s || '').toLowerCase().trim(); }
+  function normPhone(s) { return (String(s || '').match(/\d/g) || []).join('').slice(-10); }
+
+  // Duplicate rule (owner's spec): same normalized full name AND (email OR phone
+  // matches). Returns the matching non-deleted candidates ([] = no duplicate).
+  async function findCandidateDuplicates({ full_name, email, phone, excludeId }) {
+    const n = normName(full_name), e = normEmail(email), p = normPhone(phone);
+    if (!n) return [];
+    if (!e && !p) return [];                 // need at least one of email / phone to match on
+    let q = supabase.from('candidates')
+      .select('id,candidate_code,full_name,email,phone,current_title,applicant_status,owner_id')
+      .is('deleted_at', null).eq('name_norm', n).limit(25);
+    if (excludeId) q = q.neq('id', excludeId);
+    const { data, error } = await q;
+    if (error) throw error;
+    return (data || []).filter(function (c) {
+      const ce = normEmail(c.email), cp = normPhone(c.phone);
+      return (e && ce && ce === e) || (p && cp && cp === p);
+    });
+  }
+
+  // GET /candidates
+  //  - legacy (no ?page): returns a plain array (used by the job-page add modal)
+  //  - paged  (?page=N):  returns { data, total, page, limit } for the Applicants grid
   app.get('/candidates', auth, async (req, res) => {
     try {
-      let query = supabase.from('candidates').select('*').is('deleted_at', null);
-      const q = (req.query.q || '').trim();
-      if (q) query = query.or(`full_name.ilike.%${q}%,email.ilike.%${q}%,candidate_code.ilike.%${q}%`);
-      const { data, error } = await query.order('created_at', { ascending: false }).limit(100);
+      const paged = req.query.page !== undefined;
+      const q = (req.query.q || '').trim().replace(/[,()]/g, ' ').trim();  // strip or()-structural chars
+      let query = supabase.from('candidates')
+        .select(CANDIDATE_SELECT, paged ? { count: 'exact' } : undefined)
+        .is('deleted_at', null);
+      if (q) query = query.or(
+        `full_name.ilike.%${q}%,email.ilike.%${q}%,candidate_code.ilike.%${q}%,phone.ilike.%${q}%,current_title.ilike.%${q}%`
+      );
+      if (req.query.applicant_status) query = query.eq('applicant_status', req.query.applicant_status);
+      if (req.query.source) query = query.eq('source', req.query.source);
+      if (req.query.state) query = query.eq('state', req.query.state);
+      if (req.query.work_authorization) query = query.eq('work_authorization', req.query.work_authorization);
+      if (req.query.owner_id) query = query.eq('owner_id', req.query.owner_id);
+      query = query.order('created_at', { ascending: false });
+
+      if (paged) {
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+        const from = (page - 1) * limit;
+        const { data, error, count } = await query.range(from, from + limit - 1);
+        if (error) throw error;
+        return res.json({ data: data || [], total: count || 0, page, limit });
+      }
+      const { data, error } = await query.limit(100);
       if (error) throw error;
       res.json(data || []);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // GET /candidates/check-duplicate?full_name=&email=&phone=
+  // Registered before /candidates/:id so the literal path wins the match.
+  app.get('/candidates/check-duplicate', auth, async (req, res) => {
+    try {
+      const dups = await findCandidateDuplicates({
+        full_name: req.query.full_name, email: req.query.email,
+        phone: req.query.phone, excludeId: req.query.exclude_id
+      });
+      res.json({ duplicate: dups.length > 0, duplicates: dups });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get('/candidates/:id', auth, async (req, res) => {
+    try {
+      const { data, error } = await supabase.from('candidates')
+        .select(CANDIDATE_SELECT).eq('id', req.params.id).is('deleted_at', null).single();
+      if (error || !data) return res.status(404).json({ error: 'Candidate not found' });
+      res.json(data);
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
@@ -359,16 +456,24 @@ module.exports = function (app, deps) {
       if (notGuest(req, res)) return;
       if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
       const b = req.body || {};
-      if (!b.full_name) return res.status(400).json({ error: 'full_name required' });
+      if (!b.full_name || !String(b.full_name).trim()) return res.status(400).json({ error: 'full_name required' });
+
+      // Duplicate catch — name + (email or phone). Warn-and-offer: unless `force`,
+      // return the matches (409) so the UI can offer "open existing" over a copy.
+      if (!b.force) {
+        const dups = await findCandidateDuplicates({ full_name: b.full_name, email: b.email, phone: b.phone });
+        if (dups.length) return res.status(409).json({ error: 'possible_duplicate', duplicates: dups });
+      }
+
       const code = await nextId('CN');
-      const { data, error } = await supabase.from('candidates').insert({
+      const row = Object.assign(pickCandidateFields(b), {
         candidate_code: code,
-        full_name: b.full_name, email: b.email || null, phone: b.phone || null,
-        current_location: b.current_location || null, current_title: b.current_title || null,
-        skills: b.skills || null, experience_years: b.experience_years || null,
-        resume_url: b.resume_url || null, source: b.source || null,
+        applicant_status: b.applicant_status || 'New lead',
+        owner_id: b.owner_id || req.user.id,
         created_by: req.user.id
-      }).select().single();
+      });
+      if (Array.isArray(b.tags)) row.tags = b.tags;
+      const { data, error } = await supabase.from('candidates').insert(row).select(CANDIDATE_SELECT).single();
       if (error) throw error;
       res.status(201).json(data);
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -379,14 +484,22 @@ module.exports = function (app, deps) {
       if (notGuest(req, res)) return;
       if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
       const b = req.body || {};
-      const allowed = ['full_name','email','phone','current_location','current_title',
-                       'skills','experience_years','resume_url','source'];
-      const updates = { updated_at: new Date() };
-      for (const k of allowed) if (b[k] !== undefined) updates[k] = b[k];
+      const updates = Object.assign(pickCandidateFields(b), { updated_at: new Date(), updated_by: req.user.id });
+      if (b.owner_id !== undefined) updates.owner_id = b.owner_id || null;
+      if (Array.isArray(b.tags)) updates.tags = b.tags;
       const { data, error } = await supabase.from('candidates')
-        .update(updates).eq('id', req.params.id).select().single();
+        .update(updates).eq('id', req.params.id).select(CANDIDATE_SELECT).single();
       if (error) throw error;
       res.json(data);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.delete('/candidates/:id', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      await supabase.from('candidates').update({ deleted_at: new Date() }).eq('id', req.params.id);
+      res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
@@ -493,6 +606,165 @@ module.exports = function (app, deps) {
   });
 
   // ==========================================================================
+  // PIPELINE — candidate tagging layer (Ceipal "Pipeline" tab)
+  // A candidate is TAGGED into a job order, then PROMOTED to a submission.
+  // ==========================================================================
+
+  const PIPELINE_STATUSES = ['Tagged','Contacted','Interested','Screening','Shortlisted','Moved to Submission','Not Interested','Rejected'];
+  const PIPELINE_SELECT =
+    '*, candidate:candidates(id,candidate_code,full_name,email,phone,work_authorization,' +
+    'city,state,country,current_location,experience_years,source,resume_url), ' +
+    'tagger:users!tagged_by(id,name,employee_id)';
+
+  // recruiter may only touch a job order they are assigned to
+  async function recruiterCanTouchJob(req, jobOrderId) {
+    if (!(isRecruiter(req) && !isBDM(req))) return true;
+    const ids = await assignedJobOrderIds(req.user.id);
+    return ids.includes(jobOrderId);
+  }
+
+  // list the pipeline (tagged candidates) for a job order — the Pipeline-tab grid
+  app.get('/job-orders/:id/pipeline', auth, async (req, res) => {
+    try {
+      if (!(await recruiterCanTouchJob(req, req.params.id))) return res.status(403).json({ error: 'Not assigned to this job order.' });
+      const { data, error } = await supabase.from('candidate_pipeline')
+        .select(PIPELINE_SELECT).eq('job_order_id', req.params.id).is('deleted_at', null)
+        .order('tagged_at', { ascending: false });
+      if (error) throw error;
+      res.json(data || []);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // tag a candidate (from the pool) into a job order's pipeline
+  app.post('/pipeline', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      const b = req.body || {};
+      if (!b.candidate_id || !b.job_order_id) return res.status(400).json({ error: 'candidate_id and job_order_id required' });
+      if (!(await recruiterCanTouchJob(req, b.job_order_id))) return res.status(403).json({ error: 'Not assigned to this job order.' });
+
+      // snapshot rate/availability/employer from the candidate (overridable via body)
+      const { data: cand } = await supabase.from('candidates')
+        .select('work_authorization,bill_rate,pay_rate,current_employer,availability,notice_period,current_ctc,source')
+        .eq('id', b.candidate_id).single();
+      const c = cand || {};
+      const pick = (k, fallback) => (b[k] !== undefined ? b[k] : (fallback || null));
+      const row = {
+        pipeline_code: await nextId('PL'),
+        candidate_id: b.candidate_id, job_order_id: b.job_order_id,
+        pipeline_status: b.pipeline_status || 'Tagged',
+        work_auth_snap: pick('work_auth_snap', c.work_authorization),
+        bill_rate: pick('bill_rate', c.bill_rate),
+        pay_rate: pick('pay_rate', c.pay_rate),
+        employer_name: pick('employer_name', c.current_employer),
+        availability: pick('availability', c.availability),
+        notice_period: pick('notice_period', c.notice_period),
+        current_ctc: pick('current_ctc', c.current_ctc),
+        source: pick('source', c.source),
+        notes: b.notes || null,
+        tagged_by: req.user.id
+      };
+      const { data, error } = await supabase.from('candidate_pipeline').insert(row).select(PIPELINE_SELECT).single();
+      if (error) {
+        if (error.code === '23505') return res.status(409).json({ error: 'This candidate is already tagged to this job.' });
+        throw error;
+      }
+      await logSubmissionActivity(null, b.job_order_id, req.user.id, 'tagged', null, 'Tagged', null);
+      res.status(201).json(data);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // change a pipeline entry's status
+  app.patch('/pipeline/:id/status', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      const st = req.body.status;
+      if (!PIPELINE_STATUSES.includes(st)) return res.status(400).json({ error: `Invalid pipeline status. Allowed: ${PIPELINE_STATUSES.join(', ')}` });
+      const { data: row, error: e0 } = await supabase.from('candidate_pipeline')
+        .select('job_order_id').eq('id', req.params.id).is('deleted_at', null).single();
+      if (e0 || !row) return res.status(404).json({ error: 'Pipeline entry not found' });
+      if (!(await recruiterCanTouchJob(req, row.job_order_id))) return res.status(403).json({ error: 'Not assigned to this job order.' });
+      const { data, error } = await supabase.from('candidate_pipeline')
+        .update({ pipeline_status: st, updated_at: new Date() }).eq('id', req.params.id).select(PIPELINE_SELECT).single();
+      if (error) throw error;
+      res.json(data);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // edit a pipeline entry's snapshot fields (rate / availability / employer …)
+  app.patch('/pipeline/:id', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      const { data: row, error: e0 } = await supabase.from('candidate_pipeline')
+        .select('job_order_id').eq('id', req.params.id).is('deleted_at', null).single();
+      if (e0 || !row) return res.status(404).json({ error: 'Pipeline entry not found' });
+      if (!(await recruiterCanTouchJob(req, row.job_order_id))) return res.status(403).json({ error: 'Not assigned to this job order.' });
+      const allowed = ['work_auth_snap','bill_rate','pay_rate','employer_name','availability','notice_period','current_ctc','source','notes','pipeline_status'];
+      const b = req.body || {};
+      const updates = { updated_at: new Date() };
+      allowed.forEach(k => { if (b[k] !== undefined) updates[k] = (b[k] === '' ? null : b[k]); });
+      const { data, error } = await supabase.from('candidate_pipeline')
+        .update(updates).eq('id', req.params.id).select(PIPELINE_SELECT).single();
+      if (error) throw error;
+      res.json(data);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // promote a pipeline entry into a formal submission
+  app.post('/pipeline/:id/promote', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      const { data: pl, error: e0 } = await supabase.from('candidate_pipeline')
+        .select('*').eq('id', req.params.id).is('deleted_at', null).single();
+      if (e0 || !pl) return res.status(404).json({ error: 'Pipeline entry not found' });
+      if (!(await recruiterCanTouchJob(req, pl.job_order_id))) return res.status(403).json({ error: 'Not assigned to this job order.' });
+
+      // already promoted → return the linked submission
+      if (pl.submission_id) {
+        const { data: existing } = await supabase.from('submissions').select(SUBMISSION_SELECT).eq('id', pl.submission_id).single();
+        return res.json({ pipeline_id: pl.id, submission: existing, already: true });
+      }
+
+      const targetStage = req.body.stage || 'Submitted to BDM';
+      let submission;
+      const { data: sub, error } = await supabase.from('submissions').insert({
+        candidate_id: pl.candidate_id, job_order_id: pl.job_order_id,
+        recruiter_id: req.user.id, stage: targetStage,
+        submitted_rate: pl.pay_rate || null, notes: pl.notes || null
+      }).select(SUBMISSION_SELECT).single();
+      if (error) {
+        if (error.code === '23505') {
+          // a submission already exists for this candidate+job — link to it
+          const { data: existing } = await supabase.from('submissions').select(SUBMISSION_SELECT)
+            .eq('candidate_id', pl.candidate_id).eq('job_order_id', pl.job_order_id).is('deleted_at', null).single();
+          submission = existing;
+        } else throw error;
+      } else submission = sub;
+      if (!submission) return res.status(500).json({ error: 'Could not create or find the submission.' });
+
+      await supabase.from('candidate_pipeline')
+        .update({ submission_id: submission.id, pipeline_status: 'Moved to Submission', updated_at: new Date() })
+        .eq('id', pl.id);
+      await logSubmissionActivity(submission.id, pl.job_order_id, req.user.id, 'promoted', 'Tagged', targetStage, null);
+      emit(EVENTS.SUBMISSION_ADVANCED, { submissionId: submission.id, jobOrderId: pl.job_order_id, fromStage: null, toStage: targetStage, actorUserId: req.user.id });
+      res.status(201).json({ pipeline_id: pl.id, submission });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.delete('/pipeline/:id', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      await supabase.from('candidate_pipeline').update({ deleted_at: new Date() }).eq('id', req.params.id);
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ==========================================================================
   // BD MANAGER ANALYTICS
   // ==========================================================================
 
@@ -544,5 +816,5 @@ module.exports = function (app, deps) {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
-  console.log('[BD-Recruiter] Routes mounted (job-orders, candidates, submissions, recruiter assignment, analytics)');
+  console.log('[BD-Recruiter] Routes mounted (job-orders, candidates, pipeline, submissions, recruiter assignment, analytics)');
 };

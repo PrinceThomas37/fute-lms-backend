@@ -50,6 +50,8 @@ explicit. `26-boot.js` must always load last — it starts the app.
 | `23-auth-guest.js` | Auth + guest/demo simulation layer |
 | `24-jobs-wired.js` | Jobs actions wired to the backend |
 | `25-workflow-bd.js` | BD Manager / recruiter workflow module (IIFE) |
+| `27-page-applicants.js` | Applicants / candidate database (ATS Slice 1) — loads after 25, before boot |
+| `28-page-pipeline.js` | Job pipeline / tagging tab (ATS Slice 2) — loads after 27, before boot |
 | `26-boot.js` | Boot entry point (must load last) |
 
 ## Verifying
