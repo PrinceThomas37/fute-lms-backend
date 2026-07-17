@@ -23,9 +23,9 @@
     };
   }
 
-  var BD_STAGES=["Sourced","Screening","Submitted to BDM","Submitted to Client","Interview Scheduled","Offer","Placed","Rejected","On Hold"];
+  var BD_STAGES=["Sourced","Screening","Submitted to BDM","Submitted to Client","Interview Scheduled","Interview Completed","Offer","Confirmation","Placement","Rejected","Not Joined","On Hold"];
   var BDM_GATED="Submitted to Client";
-  var STAGE_COLORS={"Sourced":"var(--text3)","Screening":"#6b7280","Submitted to BDM":"var(--amber)","Submitted to Client":"var(--accent)","Interview Scheduled":"#2563eb","Offer":"#7c3aed","Placed":"var(--green)","Rejected":"var(--red)","On Hold":"#9ca3af"};
+  var STAGE_COLORS={"Sourced":"var(--text3)","Screening":"#6b7280","Submitted to BDM":"var(--amber)","Submitted to Client":"var(--accent)","Interview Scheduled":"#2563eb","Interview Completed":"#1d4ed8","Offer":"#7c3aed","Confirmation":"#0891b2","Placement":"var(--green)","Rejected":"var(--red)","Not Joined":"#b91c1c","On Hold":"#9ca3af"};
   var JOB_TYPES=["Contract","Full-time","Contract-to-Hire","Part-time","1099","W2"];
   var EMP_LEVELS=["Entry","Associate","Mid-Senior","Director","Executive"];
   var WORK_AUTH=["US Citizen","Green Card","H1B","OPT/CPT","TN","Any"];
@@ -497,6 +497,7 @@
           '</div>'+
           '<div style="display:flex;gap:8px">'+
             '<button class="btn btn-sm btn-outline" onclick="bdOpenPipeline(\''+j.id+'\')">Pipeline</button>'+
+            '<button class="btn btn-sm btn-outline" onclick="bdOpenSubmissions(\''+j.id+'\')">Submissions</button>'+
             '<button class="btn btn-sm btn-outline" onclick="bdOpenKanban(\''+j.id+'\')">Board</button>'+
           '</div>'+
         '</div>'+
@@ -588,7 +589,7 @@
     var u=STATE.user,recruiterScoped=isRec(u)&&!isBDM(u);
     var subs=STATE.bd.submissions||[];
     var jobSubs=subs.filter(function(s){return s.job_order_id===j.id;});
-    var cols=["Sourced","Screening","Submitted to BDM","Submitted to Client","Interview Scheduled","Offer","Placed"];
+    var cols=["Sourced","Screening","Submitted to BDM","Submitted to Client","Interview Scheduled","Interview Completed","Offer","Confirmation","Placement"];
     var backLink=isBDM(u)?'bd_jodetail':'bd_myjobs';
     var colHtml=cols.map(function(st){
       var items=jobSubs.filter(function(s){return s.stage===st;});
@@ -624,6 +625,7 @@
         '<div style="font-size:12.5px;color:var(--text3)">'+esc(j.client||'')+'</div></div>'+
         '<div style="display:flex;gap:8px">'+
           '<button class="btn btn-outline" onclick="bdOpenPipeline(\''+j.id+'\')">Pipeline</button>'+
+          '<button class="btn btn-outline" onclick="bdOpenSubmissions(\''+j.id+'\')">Submissions</button>'+
           '<button class="btn btn-primary" onclick="bdOpenAddCandidate(\''+j.id+'\')">+ Add Candidate</button>'+
         '</div>'+
       '</div>'+
