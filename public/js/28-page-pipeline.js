@@ -13,7 +13,8 @@
   if (STATE.bd) { STATE.bd.pipeline = STATE.bd.pipeline || []; STATE.bd.view = STATE.bd.view || {}; }
 
   function esc(s){ return String(s==null?'':s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-  function code(t){ return '<span style="font-family:var(--mono);font-size:11px;color:var(--accent);font-weight:700">'+esc(t)+'</span>'; }
+  function code(t){ return '<span style="font-family:var(--mono);font-size:10.5px;color:var(--text3);font-weight:600">'+esc(t)+'</span>'; }
+  var SUBSTAGE_COLORS={"Sourced":"var(--text3)","Screening":"#6b7280","Submitted to BDM":"var(--amber)","Submitted to Client":"var(--accent)","Interview Scheduled":"#2563eb","Interview Completed":"#1d4ed8","Offer":"#7c3aed","Confirmation":"#0891b2","Placement":"var(--green)","Rejected":"var(--red)","Not Joined":"#b91c1c","On Hold":"#9ca3af"};
   function isBDM(u){ return userHasAnyRole(u,'admin','bd','bd_lead'); }
   function isRec(u){ return userHasRole(u,'recruiter'); }
   function joById(id){ return (STATE.bd.jobOrders||[]).find(function(j){ return j.id===id; }); }
@@ -68,13 +69,18 @@
         (isBDM(u)?'<div style="padding:8px 16px;font-size:13px;font-weight:600;color:var(--text3);cursor:pointer" onclick="bdOpenJobOrder(\''+j.id+'\')">Job details</div>':'')+
       '</div>';
 
-    var head = ['Pipeline ID','Applicant Name','Pipeline Status','Work Auth','Mobile','Location','Country','Exp','Source','Resume',
+    var head = ['Pipeline ID','Candidate Name','Pipeline Status','Work Auth','Mobile','Location','Country','Exp','Source','Resume',
       'Bill Rate','Pay Rate','Employer','Availability','Notice','Current CTC','Tagged By','Tagged On','']
       .map(function(h){ return '<th style="text-align:left;padding:8px 9px;font-size:11px;color:var(--text3);font-weight:700;white-space:nowrap">'+h+'</th>'; }).join('');
 
     var body = rows.map(function(p){
       var c = p.candidate || {};
-      var statusSel = '<select class="sel" style="font-size:11px;padding:3px 6px;min-width:120px;color:'+(PSTATUS_COLORS[p.pipeline_status]||'var(--text2)')+';font-weight:600" onchange="plSetStatus(\''+p.id+'\',this.value)">'+
+      // Promoted rows show the LIVE submission stage (the candidate's real
+      // status); unpromoted rows keep the editable pipeline-status dropdown.
+      var statusSel = p.submission
+        ? '<span style="font-size:11.5px;font-weight:700;color:'+(SUBSTAGE_COLORS[p.submission.stage]||'var(--text2)')+'">'+esc(p.submission.stage||'')+'</span>'+
+          (p.submission.sub_stage?'<div style="font-size:10px;color:var(--text3)">'+esc(p.submission.sub_stage)+'</div>':'')
+        : '<select class="sel" style="font-size:11px;padding:3px 6px;min-width:120px;color:'+(PSTATUS_COLORS[p.pipeline_status]||'var(--text2)')+';font-weight:600" onchange="plSetStatus(\''+p.id+'\',this.value)">'+
         PIPELINE_STATUSES.map(function(s){ return '<option value="'+esc(s)+'"'+(p.pipeline_status===s?' selected':'')+'>'+esc(s)+'</option>'; }).join('')+'</select>';
       var resume = c.resume_url ? '<a href="'+esc(c.resume_url)+'" target="_blank" rel="noopener" style="color:var(--accent)">↗</a>' : '—';
       var promoted = !!p.submission_id;
@@ -221,10 +227,16 @@
           '<div style="border-top:1px solid var(--border);margin-top:12px;padding-top:12px">'+
             '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">OR CREATE NEW</div>'+
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+
-              '<input id="pl_name" class="sel" placeholder="Full name">'+
+              '<input id="pl_name" class="sel" placeholder="Full name *">'+
               '<input id="pl_email" class="sel" placeholder="Email">'+
-              '<input id="pl_phone" class="sel" placeholder="Mobile">'+
+              '<input id="pl_phone" class="sel" placeholder="Phone number">'+
               '<input id="pl_title" class="sel" placeholder="Current title">'+
+              '<input id="pl_city" class="sel" placeholder="City">'+
+              '<input id="pl_state" class="sel" placeholder="State">'+
+            '</div>'+
+            '<div style="display:flex;align-items:center;gap:10px;margin-top:8px">'+
+              '<label style="font-size:11.5px;color:var(--text2);white-space:nowrap">Resume:</label>'+
+              '<input id="pl_resume" type="file" accept=".pdf,.doc,.docx,.rtf,.txt" style="font-size:11.5px">'+
             '</div>'+
             '<button class="btn btn-primary btn-sm" style="margin-top:9px" onclick="plQuickCreate(\''+jid+'\',false)">Create & Tag</button>'+
           '</div>'+
@@ -244,17 +256,21 @@
     });
   };
   window.plQuickCreate = function(jid, force){
-    var name=(document.getElementById('pl_name')||{}).value||STATE.bd._plNewName||'';
-    var email=(document.getElementById('pl_email')||{}).value||STATE.bd._plNewEmail||'';
-    var phone=(document.getElementById('pl_phone')||{}).value||STATE.bd._plNewPhone||'';
-    var title=(document.getElementById('pl_title')||{}).value||'';
+    var g=function(id){return (document.getElementById(id)||{}).value||'';};
+    var name=g('pl_name')||STATE.bd._plNewName||'';
+    var email=g('pl_email')||STATE.bd._plNewEmail||'';
+    var phone=g('pl_phone')||STATE.bd._plNewPhone||'';
+    var title=g('pl_title');
     if (!name.trim()){ showToast('Name required','error'); return; }
     STATE.bd._plNewName=name; STATE.bd._plNewEmail=email; STATE.bd._plNewPhone=phone;   // preserve across dup re-render
-    var payload = { full_name:name, email:email, phone:phone, current_title:title, source:'Manual' };
+    var resumeEl=document.getElementById('pl_resume');
+    var payload = { full_name:name, email:email, phone:phone, current_title:title,
+      city:g('pl_city'), state:g('pl_state'), source:'Manual' };
     if (force) payload.force = true;
     apiPost('/candidates', payload).then(function(c){
       STATE.bd._plDup=[]; STATE.bd._plNewName=STATE.bd._plNewEmail=STATE.bd._plNewPhone='';
-      plTag(jid, c.id);
+      var attach=(window.atsUploadResumeFile?atsUploadResumeFile(c.id,resumeEl):Promise.resolve(false));
+      attach.then(function(){ plTag(jid, c.id); });
     }).catch(function(e){
       if (/possible_duplicate/i.test(e.message)){
         apiGet('/candidates/check-duplicate?full_name='+encodeURIComponent(name)+'&email='+encodeURIComponent(email)+'&phone='+encodeURIComponent(phone))

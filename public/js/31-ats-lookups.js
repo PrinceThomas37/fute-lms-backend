@@ -12,7 +12,7 @@
   var CATS = [
     { key:'work_authorization', label:'Work Authorization' },
     { key:'source',             label:'Source' },
-    { key:'applicant_status',   label:'Applicant Status' },
+    { key:'applicant_status',   label:'Candidate Status' },
     { key:'availability',       label:'Availability' },
     { key:'pay_type',           label:'Pay Type' }
   ];

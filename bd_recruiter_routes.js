@@ -11,6 +11,7 @@
 // ============================================================================
 
 const { EVENTS, emit } = require('./events');
+const { PROVIDER_IDS, providerList } = require('./config/sourcing');
 
 module.exports = function (app, deps) {
   const { supabase, auth, hasRole, notGuest, today } = deps;
@@ -669,7 +670,7 @@ module.exports = function (app, deps) {
     'submitter:users!submitted_by(id,name,employee_id)';
 
   // editable submission display fields (the Submissions grid)
-  const SUBMISSION_FIELDS = ['revision_status','bill_rate','pay_rate','employer_name','availability','notice_period','submitted_rate','notes'];
+  const SUBMISSION_FIELDS = ['revision_status','bill_rate','pay_rate','employer_name','availability','notice_period','submitted_rate','notes','sub_stage','interview_at','interview_location'];
 
   // list submissions for a job order (the kanban data)
   app.get('/job-orders/:id/submissions', auth, async (req, res) => {
@@ -723,6 +724,21 @@ module.exports = function (app, deps) {
         if (error.code === '23505') return res.status(409).json({ error: 'This candidate is already in this job order.' });
         throw error;
       }
+      // Keep the Pipeline tab a full roster: a direct submission add also
+      // creates (or links) the candidate's pipeline row for this job.
+      try {
+        const { data: pl } = await supabase.from('candidate_pipeline').select('id')
+          .eq('candidate_id', b.candidate_id).eq('job_order_id', b.job_order_id).is('deleted_at', null).maybeSingle();
+        if (pl) {
+          await supabase.from('candidate_pipeline')
+            .update({ submission_id: data.id, pipeline_status: 'Moved to Submission', updated_at: new Date() }).eq('id', pl.id);
+        } else {
+          await supabase.from('candidate_pipeline').insert({
+            pipeline_code: await nextId('PL'), candidate_id: b.candidate_id, job_order_id: b.job_order_id,
+            pipeline_status: 'Moved to Submission', submission_id: data.id, tagged_by: req.user.id
+          });
+        }
+      } catch (_) { /* non-fatal */ }
       await logSubmissionActivity(data.id, b.job_order_id, data.recruiter_id, 'created', null, 'Sourced', null);
       res.status(201).json(data);
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -752,7 +768,11 @@ module.exports = function (app, deps) {
         return res.status(403).json({ error: 'Only a BD Manager can approve "Submitted to BDM" candidates through to the client.' });
       }
 
-      const updates = { stage: newStage, stage_updated_at: new Date() };
+      const bb = req.body || {};
+      // A new stage resets the sub-stage unless one is supplied with the move.
+      const updates = { stage: newStage, stage_updated_at: new Date(), sub_stage: bb.sub_stage || null };
+      if (bb.interview_at !== undefined) updates.interview_at = bb.interview_at || null;
+      if (bb.interview_location !== undefined) updates.interview_location = bb.interview_location || null;
       let action = 'stage_change';
       if (newStage === BDM_GATED_STAGE && isBDM(req)) {
         updates.bdm_approved_at = new Date();
@@ -764,7 +784,21 @@ module.exports = function (app, deps) {
         .update(updates).eq('id', req.params.id).select(SUBMISSION_SELECT).single();
       if (error) throw error;
 
-      await logSubmissionActivity(data.id, sub.job_order_id, sub.recruiter_id, action, sub.stage, newStage, req.body.note || null);
+      // Optional reminder-to-call, riding the existing reminders plumbing.
+      if (bb.reminder_date) {
+        try {
+          const cand = (data.candidate || {});
+          await supabase.from('reminders').insert({
+            user_id: req.user.id, contact_name: cand.full_name || null, email: cand.email || null,
+            return_date: bb.reminder_date,
+            note: bb.reminder_note || ('Follow up with ' + (cand.full_name || 'candidate') + ' — ' + newStage),
+            status: 'pending'
+          });
+        } catch (_) { /* non-fatal */ }
+      }
+
+      await logSubmissionActivity(data.id, sub.job_order_id, sub.recruiter_id, action, sub.stage, newStage,
+        [bb.sub_stage ? ('[' + bb.sub_stage + ']') : '', bb.note || ''].filter(Boolean).join(' ') || null);
       emit(EVENTS.SUBMISSION_ADVANCED, { submissionId: data.id, jobOrderId: sub.job_order_id, fromStage: sub.stage, toStage: newStage, actorUserId: req.user.id });
       res.json(data);
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -807,10 +841,14 @@ module.exports = function (app, deps) {
   // ==========================================================================
 
   const PIPELINE_STATUSES = ['Tagged','Contacted','Interested','Screening','Shortlisted','Moved to Submission','Not Interested','Rejected'];
+  // The Pipeline tab is the FULL roster for a job: promoted rows join their
+  // submission so the grid can show the live submission stage instead of the
+  // static "Moved to Submission".
   const PIPELINE_SELECT =
     '*, candidate:candidates(id,candidate_code,full_name,email,phone,work_authorization,' +
     'city,state,country,current_location,experience_years,source,resume_url), ' +
-    'tagger:users!tagged_by(id,name,employee_id)';
+    'tagger:users!tagged_by(id,name,employee_id), ' +
+    'submission:submissions!candidate_pipeline_submission_id_fkey(id,submission_code,stage,sub_stage)';
 
   // recruiter may only touch a job order they are assigned to
   async function recruiterCanTouchJob(req, jobOrderId) {
@@ -1033,6 +1071,225 @@ module.exports = function (app, deps) {
       if (!isLookupAdmin(req)) return res.status(403).json({ error: 'Admin or BD Lead only.' });
       await supabase.from('recruiting_lookups').delete().eq('id', req.params.id);
       res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ==========================================================================
+  // SOURCING CONNECTORS — pull candidates from a source into the database
+  // (Slice A: framework + CSV/file import + staging + dedup import.)
+  // ==========================================================================
+
+  app.get('/sourcing/providers', auth, async (req, res) => { res.json(providerList()); });
+
+  // stage rows parsed client-side (CSV/XLSX) with a batch duplicate check
+  app.post('/sourcing/import-file', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      const b = req.body || {};
+      const provider = PROVIDER_IDS.includes(b.provider) ? b.provider : 'csv';
+      const rows = Array.isArray(b.rows) ? b.rows : [];
+      if (!rows.length) return res.status(400).json({ error: 'No rows to import.' });
+      if (rows.length > 2000) return res.status(413).json({ error: 'Too many rows in one import (max 2000). Split the file.' });
+
+      // batch dedup against existing candidates (2 queries, matched in JS)
+      const emails = [...new Set(rows.map(r => normEmail(r.email)).filter(Boolean))];
+      const phones = [...new Set(rows.map(r => normPhone(r.phone)).filter(Boolean))];
+      const dupSel = 'id,candidate_code,full_name,name_norm,email_norm,phone_norm';
+      let cands = [];
+      if (emails.length) { const { data } = await supabase.from('candidates').select(dupSel).is('deleted_at', null).in('email_norm', emails); cands = cands.concat(data || []); }
+      if (phones.length) { const { data } = await supabase.from('candidates').select(dupSel).is('deleted_at', null).in('phone_norm', phones); cands = cands.concat(data || []); }
+      const byId = {}; cands.forEach(c => { byId[c.id] = c; }); cands = Object.values(byId);
+      const findDup = (r) => {
+        const n = normName(r.full_name), e = normEmail(r.email), p = normPhone(r.phone);
+        if (!n || (!e && !p)) return null;
+        return cands.find(c => c.name_norm === n && ((e && c.email_norm === e) || (p && c.phone_norm === p))) || null;
+      };
+
+      const toInsert = rows.map(r => {
+        const dup = findDup(r);
+        const exp = parseFloat(r.experience_years);
+        return {
+          provider, external_id: r.external_id || null,
+          full_name: r.full_name || null, first_name: r.first_name || null, last_name: r.last_name || null,
+          email: r.email || null, phone: r.phone || null,
+          current_title: r.current_title || null, current_employer: r.current_employer || null,
+          location: r.location || null, city: r.city || null, state: r.state || null, country: r.country || null,
+          work_authorization: r.work_authorization || null,
+          experience_years: isFinite(exp) ? exp : null,
+          skills: r.skills || null, source_url: r.source_url || null, resume_url: r.resume_url || null,
+          raw: r.raw || null, status: 'new', dup_candidate_id: dup ? dup.id : null, created_by: req.user.id
+        };
+      });
+      const { data, error } = await supabase.from('sourcing_candidates').insert(toInsert).select('id,dup_candidate_id');
+      if (error) throw error;
+      const dupCount = (data || []).filter(x => x.dup_candidate_id).length;
+      res.status(201).json({ staged: (data || []).length, duplicates: dupCount });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // the review queue
+  app.get('/sourcing/staged', auth, async (req, res) => {
+    try {
+      let q = supabase.from('sourcing_candidates')
+        .select('*, dup:candidates!dup_candidate_id(id,candidate_code,full_name), imported:candidates!imported_candidate_id(id,candidate_code,full_name)')
+        .order('created_at', { ascending: false }).limit(500);
+      q = q.eq('status', req.query.status || 'new');
+      if (req.query.provider) q = q.eq('provider', req.query.provider);
+      const { data, error } = await q;
+      if (error) throw error;
+      res.json(data || []);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // import one staged row into `candidates` (honours dedup; optional tag to a job)
+  async function importStagedCandidate(staged, opts, userId) {
+    const provider = staged.provider;
+    const payload = pickCandidateFields({
+      full_name: staged.full_name, first_name: staged.first_name, last_name: staged.last_name,
+      email: staged.email, phone: staged.phone, current_title: staged.current_title,
+      current_employer: staged.current_employer, current_location: staged.location,
+      city: staged.city, state: staged.state, country: staged.country,
+      work_authorization: staged.work_authorization, experience_years: staged.experience_years,
+      skills: staged.skills, resume_url: staged.resume_url, source: provider
+    });
+    if (!payload.full_name) throw new Error('Staged row has no name.');
+    if (!opts.force) {
+      const dups = await findCandidateDuplicates({ full_name: staged.full_name, email: staged.email, phone: staged.phone });
+      if (dups.length) return { duplicate: true, matches: dups };
+    }
+    const row = Object.assign(payload, {
+      candidate_code: await nextId('CN'), applicant_status: 'New lead', owner_id: userId, created_by: userId
+    });
+    const { data: cand, error } = await supabase.from('candidates').insert(row).select(CANDIDATE_SELECT).single();
+    if (error) throw error;
+    await supabase.from('sourcing_candidates')
+      .update({ status: 'imported', imported_candidate_id: cand.id, imported_at: new Date() }).eq('id', staged.id);
+    if (opts.job_order_id) {
+      try {
+        await supabase.from('candidate_pipeline').insert({
+          pipeline_code: await nextId('PL'), candidate_id: cand.id, job_order_id: opts.job_order_id,
+          pipeline_status: 'Tagged', work_auth_snap: cand.work_authorization || null, source: provider, tagged_by: userId
+        });
+      } catch (_) { /* already tagged / non-fatal */ }
+    }
+    return { candidate: cand };
+  }
+
+  app.post('/sourcing/staged/:id/import', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      const { data: staged, error: e0 } = await supabase.from('sourcing_candidates').select('*').eq('id', req.params.id).single();
+      if (e0 || !staged) return res.status(404).json({ error: 'Staged candidate not found' });
+      if (staged.status === 'imported') return res.status(409).json({ error: 'Already imported.' });
+      const b = req.body || {};
+      if (b.job_order_id && !(await recruiterCanTouchJob(req, b.job_order_id))) return res.status(403).json({ error: 'Not assigned to this job order.' });
+      const result = await importStagedCandidate(staged, { force: !!b.force, job_order_id: b.job_order_id || null }, req.user.id);
+      if (result.duplicate) return res.status(409).json({ error: 'possible_duplicate', duplicates: result.matches });
+      res.status(201).json(result.candidate);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post('/sourcing/import-selected', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      const b = req.body || {};
+      const ids = Array.isArray(b.ids) ? b.ids : [];
+      if (!ids.length) return res.status(400).json({ error: 'ids required' });
+      if (b.job_order_id && !(await recruiterCanTouchJob(req, b.job_order_id))) return res.status(403).json({ error: 'Not assigned to this job order.' });
+      const { data: staged } = await supabase.from('sourcing_candidates').select('*').in('id', ids).eq('status', 'new');
+      let imported = 0, skipped = 0;
+      for (const s of (staged || [])) {
+        try {
+          const r = await importStagedCandidate(s, { force: !!b.force, job_order_id: b.job_order_id || null }, req.user.id);
+          if (r.duplicate) skipped++; else imported++;
+        } catch (_) { skipped++; }
+      }
+      res.json({ imported, skipped, total: (staged || []).length });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.delete('/sourcing/staged/:id', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      await supabase.from('sourcing_candidates').update({ status: 'discarded' }).eq('id', req.params.id);
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // people-search for API providers — scaffolded; honest not-configured response
+  app.post('/sourcing/search', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      const provider = (req.body && req.body.provider) || '';
+      if (!PROVIDER_IDS.includes(provider)) return res.status(400).json({ error: 'Unknown provider.' });
+      if (provider === 'csv') return res.status(400).json({ error: 'Use file import for CSV.' });
+      return res.status(501).json({ error: 'needs_credentials', provider,
+        message: 'This provider is scaffolded. Add credentials and enable its connector to search.' });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ==========================================================================
+  // ROLE-AWARE RECRUITING DASHBOARD
+  // ==========================================================================
+
+  // One payload, scoped by role: a recruiter sees THEIR jobs/submissions;
+  // BDM/admin see the whole desk. Powers the dashboard recruiting cards.
+  app.get('/recruiting-dashboard', auth, async (req, res) => {
+    try {
+      const recruiterView = isRecruiter(req) && !isBDM(req);
+      const uid = req.user.id;
+
+      let jobIds = null;
+      if (recruiterView) {
+        jobIds = await assignedJobOrderIds(uid);
+        if (!jobIds.length) return res.json({ role: 'recruiter', jobs: { total: 0, active: 0 }, by_stage: {}, submissions_week: 0, submissions_month: 0, upcoming_interviews: [], awaiting_approval: 0 });
+      }
+
+      let jq = supabase.from('job_orders').select('id,status').is('deleted_at', null);
+      if (recruiterView) jq = jq.in('id', jobIds);
+      const { data: jobs } = await jq;
+
+      let sq = supabase.from('submissions')
+        .select('id,stage,sub_stage,created_at,submitted_at,interview_at,interview_location,job_order_id,recruiter_id,candidate:candidates(id,full_name)')
+        .is('deleted_at', null);
+      if (recruiterView) sq = sq.eq('recruiter_id', uid);
+      const { data: subs } = await sq;
+
+      const now = new Date();
+      const weekAgo = new Date(now.getTime() - 7 * 86400000);
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const byStage = {};
+      STAGES.forEach(s => { byStage[s] = 0; });
+      let week = 0, month = 0;
+      const upcoming = [];
+      (subs || []).forEach(s => {
+        if (byStage[s.stage] !== undefined) byStage[s.stage]++;
+        const t = new Date(s.submitted_at || s.created_at);
+        if (t >= weekAgo) week++;
+        if (t >= monthStart) month++;
+        if (s.interview_at && new Date(s.interview_at) >= now) {
+          upcoming.push({ submission_id: s.id, candidate: (s.candidate && s.candidate.full_name) || '', job_order_id: s.job_order_id, interview_at: s.interview_at, interview_location: s.interview_location || null });
+        }
+      });
+      upcoming.sort((a, b) => new Date(a.interview_at) - new Date(b.interview_at));
+
+      res.json({
+        role: recruiterView ? 'recruiter' : 'manager',
+        jobs: {
+          total: (jobs || []).length,
+          active: (jobs || []).filter(j => j.status === 'Active').length
+        },
+        by_stage: byStage,
+        submissions_week: week,
+        submissions_month: month,
+        upcoming_interviews: upcoming.slice(0, 8),
+        awaiting_approval: byStage['Submitted to BDM'] || 0
+      });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 

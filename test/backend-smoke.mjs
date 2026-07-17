@@ -122,6 +122,15 @@ try {
   check('POST /admin/recruiting-lookups → 401 (Slice 6, gated)', await req('POST', '/admin/recruiting-lookups'), 401);
   check('PATCH /admin/recruiting-lookups/x → 401 (Slice 6, gated)', await req('PATCH', '/admin/recruiting-lookups/x'), 401);
   check('DELETE /admin/recruiting-lookups/x → 401 (Slice 6, gated)', await req('DELETE', '/admin/recruiting-lookups/x'), 401);
+  // Sourcing connectors (framework) — mounted + auth-gated.
+  check('GET /sourcing/providers → 401 (sourcing, gated)', await req('GET', '/sourcing/providers'), 401);
+  check('POST /sourcing/import-file → 401 (sourcing, gated)', await req('POST', '/sourcing/import-file'), 401);
+  check('GET /sourcing/staged → 401 (sourcing, gated)', await req('GET', '/sourcing/staged'), 401);
+  check('POST /sourcing/staged/x/import → 401 (sourcing, gated)', await req('POST', '/sourcing/staged/x/import'), 401);
+  check('POST /sourcing/import-selected → 401 (sourcing, gated)', await req('POST', '/sourcing/import-selected'), 401);
+  check('DELETE /sourcing/staged/x → 401 (sourcing, gated)', await req('DELETE', '/sourcing/staged/x'), 401);
+  check('POST /sourcing/search → 401 (sourcing, gated)', await req('POST', '/sourcing/search'), 401);
+  check('GET /recruiting-dashboard → 401 (role-aware, gated)', await req('GET', '/recruiting-dashboard'), 401);
   check('POST /candidates → 401 (bd-recruiter, gated)', await req('POST', '/candidates'), 401);
   check('PUT /candidates/x → 401 (bd-recruiter, gated)', await req('PUT', '/candidates/x'), 401);
   check('DELETE /candidates/x → 401 (new, gated)', await req('DELETE', '/candidates/x'), 401);

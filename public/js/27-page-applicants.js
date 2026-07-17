@@ -20,16 +20,36 @@
       loading:false, rows:[], total:0, page:1, limit:25,
       q:'', filters:{ applicant_status:'', source:'', state:'', work_authorization:'',
         availability:'', experience_min:'', experience_max:'', created_from:'', created_to:'', has_resume:'' },
-      advOpen:false, form:{}, editId:null, dupMatches:[]
+      advOpen:false, form:{}, editId:null, dupMatches:[], sel:{}
     };
   }
+  if (!STATE.ats.sel) STATE.ats.sel = {};
 
   // resolve a taxonomy from the managed lookups (Slice 6), falling back to the
   // built-in defaults if the lookups aren't loaded / are empty.
   function lk(cat, fb){ return (window.atsLookup ? window.atsLookup(cat, fb) : fb); }
 
+  // Shared: attach a resume file to a candidate (used by every quick-create
+  // modal). Resolves true/false, never rejects — creation must not fail on a
+  // bad attachment.
+  window.atsUploadResumeFile = function(candId, fileEl){
+    return new Promise(function(resolve){
+      var f = fileEl && fileEl.files && fileEl.files[0];
+      if (!f || !candId){ resolve(false); return; }
+      if (f.size > 4.5*1024*1024){ showToast('Resume too large (max ~4.5 MB) — not attached','error'); resolve(false); return; }
+      var r = new FileReader();
+      r.onload = function(){
+        apiPost('/candidates/'+candId+'/documents', { filename:f.name, content_type:f.type||'application/octet-stream', doc_type:'resume', data_base64:String(r.result) })
+          .then(function(){ resolve(true); })
+          .catch(function(){ showToast('Resume upload failed','error'); resolve(false); });
+      };
+      r.onerror = function(){ resolve(false); };
+      r.readAsDataURL(f);
+    });
+  };
+
   function esc(s){ return String(s==null?'':s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-  function code(t){ return '<span style="font-family:var(--mono);font-size:11px;color:var(--accent);font-weight:700">'+esc(t)+'</span>'; }
+  function code(t){ return '<span style="font-family:var(--mono);font-size:10.5px;color:var(--text3);font-weight:600">'+esc(t)+'</span>'; }
   function canUse(u){ return userHasAnyRole(u,'admin','bd','bd_lead','recruiter'); }
   function isBDMlike(u){ return userHasAnyRole(u,'admin','bd','bd_lead'); }
   function fmtDate(s){ if(!s)return '—'; try{ var d=new Date(s); return (d.getMonth()+1)+'/'+d.getDate()+'/'+String(d.getFullYear()).slice(2); }catch(e){ return '—'; } }
@@ -46,7 +66,7 @@
     Object.keys(a.filters).forEach(function(k){ if(a.filters[k]) p.push(k+'='+encodeURIComponent(a.filters[k])); });
     return apiGet('/candidates?'+p.join('&')).then(function(r){
       STATE.ats.rows = (r&&r.data)||[]; STATE.ats.total = (r&&r.total)||0; STATE.ats.loading = false; paintATSPage();
-    }).catch(function(e){ STATE.ats.loading=false; showToast('Failed to load applicants: '+e.message,'error'); paintATSPage(); });
+    }).catch(function(e){ STATE.ats.loading=false; showToast('Failed to load candidates: '+e.message,'error'); paintATSPage(); });
   }
 
   // ── nav + routing (wrap, like the BD module) ─────────────────────────────────
@@ -64,13 +84,13 @@
     var d = document.createElement('div');
     d.className = 'nav-item' + (STATE.page==='applicants' ? ' active' : '');
     d.setAttribute('data-atsnav','1');
-    d.innerHTML = '<span class="nav-icon">'+icon('profile')+'</span>Applicants';
+    d.innerHTML = '<span class="nav-icon">'+icon('profile')+'</span>Candidates';
     d.onclick = function(){ goPage('applicants'); };
     // place after any BD nav item, else at the end
     var bd = navWrap.querySelector('[data-bdnav]');
     if (bd && bd.parentNode) bd.parentNode.insertBefore(d, bd.nextSibling);
     else navWrap.appendChild(d);
-    if (STATE.page==='applicants'){ var t=document.querySelector('.tb-title'); if(t) t.textContent='Applicants'; }
+    if (STATE.page==='applicants'){ var t=document.querySelector('.tb-title'); if(t) t.textContent='Candidates'; }
   }
 
   var _prevGoPage = window.goPage;
@@ -122,11 +142,11 @@
       '</div>') : '';
     var toolbar =
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">'+
-        '<div><div style="font-size:18px;font-weight:700">Applicants</div>'+
+        '<div><div style="font-size:18px;font-weight:700">Candidates</div>'+
         '<div style="font-size:12.5px;color:var(--text3)">'+(a.total||0)+' candidate'+(a.total===1?'':'s')+' in the database</div></div>'+
         '<div style="display:flex;gap:8px">'+
           (canManage?'<button class="btn btn-outline" onclick="atsOpenLookupsManager()">Manage lists</button>':'')+
-          '<button class="btn btn-primary" onclick="atsOpenNew()">+ New Applicant</button>'+
+          '<button class="btn btn-primary" onclick="atsOpenNew()">+ New Candidate</button>'+
         '</div>'+
       '</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'+
@@ -141,13 +161,23 @@
         (anyActive?'<button class="btn btn-sm btn-outline" onclick="atsClearFilters()">Clear</button>':'')+
       '</div>'+advPanel;
 
-    if (a.loading) return '<div class="page">'+toolbar+'<div style="text-align:center;padding:50px;color:var(--text3)">Loading applicants…</div></div>';
+    if (a.loading) return '<div class="page">'+toolbar+'<div style="text-align:center;padding:50px;color:var(--text3)">Loading candidates…</div></div>';
 
-    var head = ['Applicant ID','Name','Email','Mobile','City','State','Source','Status','Job Title','Ownership','Work Auth','Created By','Created','']
+    var selIds = Object.keys(a.sel).filter(function(k){ return a.sel[k]; });
+    var allOn = a.rows.length && a.rows.every(function(c){ return a.sel[c.id]; });
+    var bulkBar = selIds.length ?
+      '<div class="card" style="padding:9px 14px;margin-bottom:10px;display:flex;align-items:center;gap:12px">'+
+        '<span style="font-size:12.5px;color:var(--text2)"><b>'+selIds.length+'</b> selected</span>'+
+        '<button class="btn btn-sm btn-primary" onclick="atsSequenceSelected()">▶ Add to email sequence</button>'+
+        '<button class="btn btn-sm btn-outline" onclick="atsClearSel()">Clear</button>'+
+      '</div>' : '';
+
+    var head = ['<input type="checkbox" '+(allOn?'checked':'')+' onclick="atsToggleSelAll()">','Candidate ID','Name','Email','Mobile','City','State','Source','Status','Job Title','Ownership','Work Auth','Created By','Created','']
       .map(function(h){ return '<th style="text-align:left;padding:9px 10px;font-size:11px;color:var(--text3);font-weight:700;white-space:nowrap">'+h+'</th>'; }).join('');
 
     var body = a.rows.map(function(c){
       return '<tr style="border-top:1px solid var(--border)">'+
+        '<td style="padding:9px 10px"><input type="checkbox" '+(a.sel[c.id]?'checked':'')+' onclick="atsToggleSel(\''+c.id+'\')"></td>'+
         '<td style="padding:9px 10px;white-space:nowrap">'+code(c.candidate_code||'—')+'</td>'+
         '<td style="padding:9px 10px;white-space:nowrap"><span style="font-weight:600;font-size:13px;cursor:pointer;color:var(--accent)" onclick="bdOpenCandidate(\''+c.id+'\')">'+esc(c.full_name||'—')+'</span></td>'+
         '<td style="padding:9px 10px;font-size:12.5px">'+esc(c.email||'—')+'</td>'+
@@ -167,7 +197,7 @@
       '</tr>';
     }).join('');
 
-    if (!a.rows.length) body = '<tr><td colspan="14" style="padding:40px;text-align:center;color:var(--text3)">No applicants match. '+
+    if (!a.rows.length) body = '<tr><td colspan="15" style="padding:40px;text-align:center;color:var(--text3)">No candidates match. '+
       '<span style="color:var(--accent);cursor:pointer" onclick="atsOpenNew()">Add the first one →</span></td></tr>';
 
     var totalPages = Math.max(1, Math.ceil((a.total||0)/a.limit));
@@ -182,12 +212,29 @@
         '</div>'+
       '</div>';
 
-    return '<div class="page">'+toolbar+
+    return '<div class="page">'+toolbar+bulkBar+
       '<div class="card" style="padding:0;overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:1100px">'+
         '<thead><tr style="background:var(--bg)">'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>'+
       pager+
     '</div>';
   }
+
+  // ── multi-select → email sequence ───────────────────────────────────────────
+  window.atsToggleSel = function(id){ STATE.ats.sel[id]=!STATE.ats.sel[id]; render(); };
+  window.atsToggleSelAll = function(){
+    var a=STATE.ats, allOn=a.rows.length&&a.rows.every(function(c){return a.sel[c.id];});
+    a.rows.forEach(function(c){ a.sel[c.id]=!allOn; });
+    render();
+  };
+  window.atsClearSel = function(){ STATE.ats.sel={}; render(); };
+  window.atsSequenceSelected = function(){
+    var a=STATE.ats;
+    var items=a.rows.filter(function(c){return a.sel[c.id];})
+      .map(function(c){ return { entity_id:c.id, label:c.full_name||'Candidate' }; });
+    if(!items.length){ showToast('Select candidates first','error'); return; }
+    if(typeof wfStartSequence!=='function'){ showToast('Sequencing module not loaded','error'); return; }
+    wfStartSequence('candidate', items, { anyStage:true });
+  };
 
   function statusBadge(s){
     var col = { 'New lead':'var(--text3)','Active':'var(--green)','Submitted':'var(--accent)','Interviewing':'#2563eb',
@@ -259,7 +306,7 @@
     STATE.modal =
       '<div class="modal modal-w720" onclick="event.stopPropagation()">'+
         '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'+
-          '<div style="font-weight:700;font-size:16px">'+(editing?'Edit Applicant':'New Applicant')+(editing&&f.candidate_code?' '+code(f.candidate_code):'')+'</div>'+
+          '<div style="font-weight:700;font-size:16px">'+(editing?'Edit Candidate':'New Candidate')+(editing&&f.candidate_code?' '+code(f.candidate_code):'')+'</div>'+
           '<span style="cursor:pointer;color:var(--text3)" onclick="closeModal()">✕</span>'+
         '</div>'+
         '<div style="padding:18px 20px;max-height:66vh;overflow-y:auto">'+
@@ -270,7 +317,7 @@
             fld('Mobile', inp('phone','(555) 123-4567'))+
             fld('Work Authorization', sel('work_authorization', lk('work_authorization',WORK_AUTH), true))+
             fld('Source', sel('source', lk('source',SOURCES), true))+
-            fld('Applicant Status', sel('applicant_status', lk('applicant_status',APPLICANT_STATUSES)))+
+            fld('Candidate Status', sel('applicant_status', lk('applicant_status',APPLICANT_STATUSES)))+
             fld('City', inp('city'))+
             fld('State', sel('state', US_STATES, true))+
             fld('Country', inp('country','United States'))+
@@ -288,6 +335,7 @@
             fld('Pay Rate', inp('pay_rate'))+
             fld('Pay Type', sel('pay_type', lk('pay_type',PAY_TYPES), true))+
             fld('Resume URL', inp('resume_url'))+
+            fld('Attach Resume', '<input type="file" id="ats_resume_file" accept=".pdf,.doc,.docx,.rtf,.txt" style="font-size:11.5px;width:100%">')+
             ownerSel+
           '</div>'+
           '<div style="margin-top:12px">'+fld('Skills', '<textarea class="sel" style="min-height:60px;resize:vertical" placeholder="Comma-separated skills" oninput="atsFormSet(\'skills\',this.value)">'+esc(f.skills||'')+'</textarea>')+'</div>'+
@@ -296,7 +344,7 @@
           (editing?'<button class="btn btn-sm btn-outline" style="color:var(--red)" onclick="atsDeleteApplicant(\''+STATE.ats.editId+'\')">Delete</button>':'')+
           '<div style="display:flex;gap:8px">'+
             '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
-            '<button class="btn btn-primary" onclick="atsSaveApplicant(false)">'+(editing?'Save changes':'Create applicant')+'</button>'+
+            '<button class="btn btn-primary" onclick="atsSaveApplicant(false)">'+(editing?'Save changes':'Create candidate')+'</button>'+
           '</div>'+
         '</div>'+
       '</div>';
@@ -308,16 +356,22 @@
     if (!f.full_name || !f.full_name.trim()){ showToast('Full name is required','error'); return; }
     var payload = Object.assign({}, f); if (force) payload.force = true;
 
+    var resumeEl = document.getElementById('ats_resume_file');
     if (STATE.ats.editId){
-      apiPut('/candidates/'+STATE.ats.editId, payload).then(function(){
-        showToast('Applicant updated','success'); closeModal();
+      var editId = STATE.ats.editId;
+      apiPut('/candidates/'+editId, payload).then(function(){
+        return atsUploadResumeFile(editId, resumeEl);
+      }).then(function(){
+        showToast('Candidate updated','success'); closeModal();
         if (window.bdReloadCandidateProfile) window.bdReloadCandidateProfile();
         loadApplicants();
       }).catch(function(e){ showToast('Failed: '+e.message,'error'); });
       return;
     }
-    apiPost('/candidates', payload).then(function(){
-      showToast('Applicant created','success'); STATE.ats.dupMatches=[]; closeModal(); STATE.ats.page=1; loadApplicants();
+    apiPost('/candidates', payload).then(function(c){
+      return atsUploadResumeFile(c.id, resumeEl);
+    }).then(function(){
+      showToast('Candidate created','success'); STATE.ats.dupMatches=[]; closeModal(); STATE.ats.page=1; loadApplicants();
     }).catch(function(e){
       // 409 possible_duplicate → surface matches, keep the form open (warn-and-offer)
       if (/possible_duplicate/i.test(e.message)){
@@ -329,39 +383,52 @@
   };
 
   window.atsDeleteApplicant = function(id){
-    if (!confirm('Remove this applicant from the database?')) return;
-    apiDelete('/candidates/'+id).then(function(){ showToast('Applicant removed','info'); closeModal(); loadApplicants(); })
+    if (!confirm('Remove this candidate from the database?')) return;
+    apiDelete('/candidates/'+id).then(function(){ showToast('Candidate removed','info'); closeModal(); loadApplicants(); })
       .catch(function(e){ showToast('Failed: '+e.message,'error'); });
   };
 
-  // ── add a candidate to a job (creates a submission via the existing endpoint) ─
+  // ── add a candidate to a job — type-to-search the job by id / title / client ─
   window.atsAddToJob = function(cid){
     var c = STATE.ats.rows.find(function(x){ return x.id===cid; }) || {};
     apiGet('/job-orders').then(function(jobs){
-      jobs = jobs || [];
-      var opts = jobs.map(function(j){ return '<option value="'+j.id+'">'+esc((j.job_code?j.job_code+' · ':'')+(j.job_title||'')+(j.client?' — '+j.client:''))+'</option>'; }).join('');
-      STATE.modal =
-        '<div class="modal modal-w480" onclick="event.stopPropagation()">'+
-          '<div style="padding:16px 20px;border-bottom:1px solid var(--border);font-weight:700;font-size:16px">Add '+esc(c.full_name||'candidate')+' to a Job</div>'+
-          '<div style="padding:18px 20px">'+
-            (jobs.length?
-              '<label style="font-size:11.5px;color:var(--text2);display:block;margin-bottom:4px">Job order</label>'+
-              '<select id="ats-job-pick" class="sel">'+opts+'</select>'+
-              '<div style="font-size:11.5px;color:var(--text3);margin-top:8px">Tags the candidate into the job pipeline. Promote to a submission from the job\'s Pipeline tab.</div>'
-              :'<div style="color:var(--text3);font-size:13px">No job orders available to you yet.</div>')+
-          '</div>'+
-          '<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">'+
-            '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
-            (jobs.length?'<button class="btn btn-primary" onclick="atsDoAddToJob(\''+cid+'\')">Add to Job</button>':'')+
-          '</div>'+
-        '</div>';
-      render();
+      STATE.ats._jobPick = { cid:cid, name:c.full_name||'candidate', jobs:jobs||[], q:'' };
+      atsRenderJobPick();
     }).catch(function(e){ showToast('Failed to load jobs: '+e.message,'error'); });
   };
-  window.atsDoAddToJob = function(cid){
-    var pick = document.getElementById('ats-job-pick'); if(!pick||!pick.value){ showToast('Pick a job','error'); return; }
-    apiPost('/pipeline', { candidate_id:cid, job_order_id:pick.value }).then(function(){
-      showToast('Tagged to job pipeline','success'); closeModal();
+  window.atsJobPickSearch = function(q){ if(STATE.ats._jobPick){ STATE.ats._jobPick.q=q; atsRenderJobPick(); } };
+  function atsRenderJobPick(){
+    var jp = STATE.ats._jobPick; if(!jp) return;
+    var q = (jp.q||'').toLowerCase();
+    var list = jp.jobs.filter(function(j){
+      if(!q) return true;
+      return [j.job_code,j.job_title,j.client].some(function(v){ return String(v||'').toLowerCase().indexOf(q)>-1; });
+    }).slice(0,30);
+    var rows = list.map(function(j){
+      return '<div style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:8px;padding:8px 11px;margin-bottom:6px;cursor:pointer" onclick="atsDoAddToJob(\''+jp.cid+'\',\''+j.id+'\')">'+
+        '<div><div style="font-weight:600;font-size:13px">'+esc(j.job_title||'')+' '+code(j.job_code||'')+'</div>'+
+        '<div style="font-size:11px;color:var(--text3)">'+esc(j.client||'')+(j.status?' · '+esc(j.status):'')+'</div></div>'+
+        '<span class="btn btn-sm btn-primary">Tag</span>'+
+      '</div>';
+    }).join('') || '<div style="color:var(--text3);font-size:12.5px;padding:8px">No jobs match.</div>';
+    STATE.modal =
+      '<div class="modal modal-w560" onclick="event.stopPropagation()">'+
+        '<div style="padding:16px 20px;border-bottom:1px solid var(--border);font-weight:700;font-size:16px">Add '+esc(jp.name)+' to a Job</div>'+
+        '<div style="padding:18px 20px">'+
+          '<input class="sel" placeholder="Search by job ID, title, or client…" value="'+esc(jp.q)+'" oninput="atsJobPickSearch(this.value)" style="margin-bottom:10px">'+
+          '<div style="max-height:40vh;overflow-y:auto">'+rows+'</div>'+
+          '<div style="font-size:11.5px;color:var(--text3);margin-top:8px">Tags the candidate into the job pipeline. Promote to a submission from the job\'s Pipeline tab.</div>'+
+        '</div>'+
+        '<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">'+
+          '<button class="btn btn-outline" onclick="closeModal()">Close</button>'+
+        '</div>'+
+      '</div>';
+    render();
+  }
+  window.atsDoAddToJob = function(cid, jid){
+    if(!jid){ showToast('Pick a job','error'); return; }
+    apiPost('/pipeline', { candidate_id:cid, job_order_id:jid }).then(function(){
+      showToast('Tagged to job pipeline','success'); STATE.ats._jobPick=null; closeModal();
     }).catch(function(e){
       if (/already tagged/i.test(e.message)) showToast('Candidate already in that pipeline','error');
       else showToast('Failed: '+e.message,'error');
