@@ -30,11 +30,13 @@
   function loc(c){ return [c.city,c.state,c.country].filter(Boolean).join(', ') || c.current_location || '—'; }
 
   // ── data ─────────────────────────────────────────────────────────────────────
+  function emptyArr(){ return []; }
   window.bdOpenCandidate = function(id){
     if(!id) return;
-    Promise.all([ apiGet('/candidates/'+id), apiGet('/candidates/'+id+'/history') ]).then(function(r){
+    Promise.all([ apiGet('/candidates/'+id), apiGet('/candidates/'+id+'/history'),
+      apiGet('/candidates/'+id+'/notes').catch(emptyArr), apiGet('/candidates/'+id+'/documents').catch(emptyArr) ]).then(function(r){
       var hist = r[1] || { pipeline:[], submissions:[], activity:[] };
-      STATE.bd.profile = { id:id, candidate:r[0]||{}, history:hist, selJob:null };
+      STATE.bd.profile = { id:id, candidate:r[0]||{}, history:hist, notes:r[2]||[], documents:r[3]||[], selJob:null, noteTab:'applicant_reference' };
       // make sure jobs referenced by the history are navigable
       STATE.bd = STATE.bd || {}; STATE.bd.jobOrders = STATE.bd.jobOrders || [];
       (hist.pipeline||[]).concat(hist.submissions||[]).forEach(function(x){
@@ -52,6 +54,8 @@
       render();
     }).catch(function(){});
   };
+  window.cpReloadNotes = function(){ var p=STATE.bd.profile; if(!p)return; apiGet('/candidates/'+p.id+'/notes').then(function(d){ p.notes=d||[]; render(); }).catch(function(){}); };
+  window.cpReloadDocs  = function(){ var p=STATE.bd.profile; if(!p)return; apiGet('/candidates/'+p.id+'/documents').then(function(d){ p.documents=d||[]; render(); }).catch(function(){}); };
 
   // ── routing wrap ──────────────────────────────────────────────────────────
   var _prevRender = window.render;
@@ -189,10 +193,87 @@
     }).join('') || '<div style="padding:12px 4px;color:var(--text3);font-size:12.5px">No activity yet.</div>';
     var actCard = '<div class="card" style="padding:16px"><div style="font-weight:600;font-size:14px;margin-bottom:8px">Activity</div>'+actHtml+'</div>';
 
+    // Notes (Job Posting / Applicant Reference tabs)
+    var noteTab = pr.noteTab || 'applicant_reference';
+    var allNotes = pr.notes || [];
+    var notes = allNotes.filter(function(n){ return n.note_type===noteTab; });
+    function tabBtn(key,label){ var on=noteTab===key; return '<div onclick="cpNoteTab(\''+key+'\')" style="padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;'+(on?'background:var(--accent);color:#fff':'color:var(--text3)')+'">'+label+' ('+allNotes.filter(function(n){return n.note_type===key;}).length+')</div>'; }
+    var noteRows = notes.map(function(n){
+      return '<div style="padding:9px 4px;border-bottom:1px solid var(--border)">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center">'+
+          '<div style="font-size:11px;color:var(--text3)">'+esc((n.author&&n.author.name)||'—')+' · '+esc(fmtDT(n.created_at))+'</div>'+
+          '<span style="cursor:pointer;color:var(--text3);font-size:12px" onclick="cpDeleteNote(\''+n.id+'\')">✕</span>'+
+        '</div>'+
+        '<div style="font-size:13px;margin-top:3px;white-space:pre-wrap">'+esc(n.body)+'</div>'+
+      '</div>';
+    }).join('') || '<div style="padding:10px 4px;color:var(--text3);font-size:12.5px">No notes in this tab yet.</div>';
+    var notesCard =
+      '<div class="card" style="padding:16px;margin-bottom:16px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+          '<div style="font-weight:600;font-size:14px">Notes</div>'+
+          '<div style="display:flex;gap:4px;background:var(--bg);padding:3px;border-radius:10px">'+tabBtn('job_posting','Job Posting')+tabBtn('applicant_reference','Applicant Reference')+'</div>'+
+        '</div>'+
+        '<textarea id="cp-note-body" class="sel" style="min-height:52px;resize:vertical;margin-bottom:8px" placeholder="Add a note…"></textarea>'+
+        '<div style="text-align:right;margin-bottom:10px"><button class="btn btn-sm btn-primary" onclick="cpAddNote()">Add note</button></div>'+
+        noteRows+
+      '</div>';
+
+    // Documents
+    var docs = pr.documents || [];
+    var docRows = docs.map(function(d){
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 4px;border-bottom:1px solid var(--border)">'+
+        '<div style="min-width:0">'+
+          '<div style="font-size:13px;font-weight:600">'+(d.url?'<a href="'+esc(d.url)+'" target="_blank" rel="noopener" style="color:var(--accent)">'+esc(d.filename)+'</a>':esc(d.filename))+'</div>'+
+          '<div style="font-size:11px;color:var(--text3)">'+esc(d.doc_type||'')+' · '+esc((d.uploader&&d.uploader.name)||'—')+' · '+esc(fmtDT(d.uploaded_at))+'</div>'+
+        '</div>'+
+        '<span style="cursor:pointer;color:var(--text3);font-size:12px" onclick="cpDeleteDoc(\''+d.id+'\')">✕</span>'+
+      '</div>';
+    }).join('') || '<div style="padding:10px 4px;color:var(--text3);font-size:12.5px">No documents yet.</div>';
+    var docsCard =
+      '<div class="card" style="padding:16px;margin-bottom:16px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+          '<div style="font-weight:600;font-size:14px">Documents</div>'+
+          '<label class="btn btn-sm btn-primary" style="cursor:pointer;margin:0">+ Upload<input type="file" id="cp-doc-file" style="display:none" onchange="cpUploadDoc(this)"></label>'+
+        '</div>'+
+        docRows+
+      '</div>';
+
     return '<div class="page">'+
       '<div style="margin-bottom:6px"><span onclick="goPage(\'applicants\')" style="cursor:pointer;font-size:12.5px;color:var(--accent)">← Applicants</span></div>'+
-      header + lifecycle + jobsCard + actCard +
+      header + lifecycle + jobsCard + notesCard + docsCard + actCard +
     '</div>';
+  };
+
+  // ── notes & documents handlers ───────────────────────────────────────────
+  window.cpNoteTab = function(t){ if(STATE.bd.profile) STATE.bd.profile.noteTab=t; render(); };
+  window.cpAddNote = function(){
+    var p=STATE.bd.profile; if(!p) return;
+    var el=document.getElementById('cp-note-body'); var body=el?el.value:'';
+    if(!body.trim()){ showToast('Note is empty','error'); return; }
+    apiPost('/candidates/'+p.id+'/notes', { note_type:p.noteTab||'applicant_reference', body:body })
+      .then(function(){ showToast('Note added','success'); cpReloadNotes(); })
+      .catch(function(e){ showToast('Failed: '+e.message,'error'); });
+  };
+  window.cpDeleteNote = function(nid){
+    var p=STATE.bd.profile; if(!p) return; if(!confirm('Delete this note?')) return;
+    apiDelete('/candidates/'+p.id+'/notes/'+nid).then(function(){ cpReloadNotes(); }).catch(function(e){ showToast('Failed: '+e.message,'error'); });
+  };
+  window.cpUploadDoc = function(input){
+    var p=STATE.bd.profile; if(!p || !input.files || !input.files[0]) return;
+    var file=input.files[0];
+    if(file.size > 4.5*1024*1024){ showToast('File too large (max ~4.5 MB)','error'); input.value=''; return; }
+    var reader=new FileReader();
+    reader.onload=function(){
+      apiPost('/candidates/'+p.id+'/documents', { filename:file.name, content_type:file.type||'application/octet-stream', doc_type:'resume', data_base64:String(reader.result) })
+        .then(function(){ showToast('Uploaded','success'); cpReloadDocs(); })
+        .catch(function(e){ showToast('Upload failed: '+e.message,'error'); });
+    };
+    reader.onerror=function(){ showToast('Could not read file','error'); };
+    reader.readAsDataURL(file);
+  };
+  window.cpDeleteDoc = function(did){
+    var p=STATE.bd.profile; if(!p) return; if(!confirm('Delete this document?')) return;
+    apiDelete('/candidates/'+p.id+'/documents/'+did).then(function(){ cpReloadDocs(); }).catch(function(e){ showToast('Failed: '+e.message,'error'); });
   };
 
 })();
