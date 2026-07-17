@@ -18,10 +18,15 @@
   if (!STATE.ats) {
     STATE.ats = {
       loading:false, rows:[], total:0, page:1, limit:25,
-      q:'', filters:{ applicant_status:'', source:'', state:'', work_authorization:'' },
-      form:{}, editId:null, dupMatches:[]
+      q:'', filters:{ applicant_status:'', source:'', state:'', work_authorization:'',
+        availability:'', experience_min:'', experience_max:'', created_from:'', created_to:'', has_resume:'' },
+      advOpen:false, form:{}, editId:null, dupMatches:[]
     };
   }
+
+  // resolve a taxonomy from the managed lookups (Slice 6), falling back to the
+  // built-in defaults if the lookups aren't loaded / are empty.
+  function lk(cat, fb){ return (window.atsLookup ? window.atsLookup(cat, fb) : fb); }
 
   function esc(s){ return String(s==null?'':s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
   function code(t){ return '<span style="font-family:var(--mono);font-size:11px;color:var(--accent);font-weight:700">'+esc(t)+'</span>'; }
@@ -73,6 +78,7 @@
     if (p === 'applicants'){
       STATE.page = 'applicants'; STATE.modal = null;
       render();
+      if (window.atsLoadLookups) atsLoadLookups();
       loadApplicants();
       return;
     }
@@ -94,23 +100,46 @@
         list.map(function(s){ return '<option value="'+esc(s)+'"'+(a.filters[key]===s?' selected':'')+'>'+esc(s)+'</option>'; }).join('')+
       '</select>';
     };
+    var u = STATE.user, canManage = userHasAnyRole(u,'admin','bd_lead');
+    var owners = (STATE.users||[]).filter(function(x){ return userHasAnyRole(x,'admin','bd','bd_lead','recruiter'); });
+    var f = a.filters;
+    var advActive = f.availability||f.experience_min||f.experience_max||f.created_from||f.created_to||f.has_resume||f.owner_id;
+    var anyActive = a.q||f.applicant_status||f.source||f.work_authorization||f.state||advActive;
+    var advPanel = a.advOpen ? (
+      '<div class="card" style="padding:12px 14px;margin-bottom:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">'+
+        '<div><label style="font-size:11px;color:var(--text2)">Availability</label>'+
+          '<select class="sel" onchange="atsSetFilter(\'availability\',this.value)"><option value="">Any</option>'+
+          lk('availability',AVAILABILITY).map(function(s){ return '<option value="'+esc(s)+'"'+(f.availability===s?' selected':'')+'>'+esc(s)+'</option>'; }).join('')+'</select></div>'+
+        '<div><label style="font-size:11px;color:var(--text2)">Ownership</label>'+
+          '<select class="sel" onchange="atsSetFilter(\'owner_id\',this.value)"><option value="">Anyone</option>'+
+          owners.map(function(o){ return '<option value="'+o.id+'"'+(f.owner_id===o.id?' selected':'')+'>'+esc(o.name)+'</option>'; }).join('')+'</select></div>'+
+        '<div><label style="font-size:11px;color:var(--text2)">Experience (yrs)</label>'+
+          '<div style="display:flex;gap:6px"><input class="sel" type="number" placeholder="min" value="'+esc(f.experience_min)+'" onchange="atsSetFilter(\'experience_min\',this.value)">'+
+          '<input class="sel" type="number" placeholder="max" value="'+esc(f.experience_max)+'" onchange="atsSetFilter(\'experience_max\',this.value)"></div></div>'+
+        '<div><label style="font-size:11px;color:var(--text2)">Created from</label><input class="sel" type="date" value="'+esc(f.created_from)+'" onchange="atsSetFilter(\'created_from\',this.value)"></div>'+
+        '<div><label style="font-size:11px;color:var(--text2)">Created to</label><input class="sel" type="date" value="'+esc(f.created_to)+'" onchange="atsSetFilter(\'created_to\',this.value)"></div>'+
+        '<div style="display:flex;align-items:end"><label style="font-size:12.5px;color:var(--text2);display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox"'+(f.has_resume==='1'?' checked':'')+' onchange="atsSetFilter(\'has_resume\',this.checked?\'1\':\'\')"> Has résumé</label></div>'+
+      '</div>') : '';
     var toolbar =
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">'+
         '<div><div style="font-size:18px;font-weight:700">Applicants</div>'+
         '<div style="font-size:12.5px;color:var(--text3)">'+(a.total||0)+' candidate'+(a.total===1?'':'s')+' in the database</div></div>'+
-        '<button class="btn btn-primary" onclick="atsOpenNew()">+ New Applicant</button>'+
+        '<div style="display:flex;gap:8px">'+
+          (canManage?'<button class="btn btn-outline" onclick="atsOpenLookupsManager()">Manage lists</button>':'')+
+          '<button class="btn btn-primary" onclick="atsOpenNew()">+ New Applicant</button>'+
+        '</div>'+
       '</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'+
         '<input class="sel" style="max-width:280px" placeholder="Search name, email, phone, CN- code…" value="'+esc(a.q)+'" '+
           'oninput="atsSetSearch(this.value)" onkeydown="if(event.key===\'Enter\')atsApplySearch()">'+
         '<button class="btn btn-sm btn-outline" onclick="atsApplySearch()">Search</button>'+
-        fopt('applicant_status','All statuses',APPLICANT_STATUSES)+
-        fopt('source','All sources',SOURCES)+
-        fopt('work_authorization','All work auth',WORK_AUTH)+
+        fopt('applicant_status','All statuses',lk('applicant_status',APPLICANT_STATUSES))+
+        fopt('source','All sources',lk('source',SOURCES))+
+        fopt('work_authorization','All work auth',lk('work_authorization',WORK_AUTH))+
         fopt('state','All states',US_STATES)+
-        ((a.q||a.filters.applicant_status||a.filters.source||a.filters.work_authorization||a.filters.state)?
-          '<button class="btn btn-sm btn-outline" onclick="atsClearFilters()">Clear</button>':'')+
-      '</div>';
+        '<button class="btn btn-sm '+(a.advOpen?'btn-primary':'btn-outline')+'" onclick="atsToggleAdvanced()">Advanced '+(a.advOpen?'▴':'▾')+(advActive?' •':'')+'</button>'+
+        (anyActive?'<button class="btn btn-sm btn-outline" onclick="atsClearFilters()">Clear</button>':'')+
+      '</div>'+advPanel;
 
     if (a.loading) return '<div class="page">'+toolbar+'<div style="text-align:center;padding:50px;color:var(--text3)">Loading applicants…</div></div>';
 
@@ -170,7 +199,8 @@
   window.atsSetSearch = function(v){ STATE.ats.q = v; };
   window.atsApplySearch = function(){ STATE.ats.page = 1; loadApplicants(); };
   window.atsSetFilter = function(k,v){ STATE.ats.filters[k]=v; STATE.ats.page=1; loadApplicants(); };
-  window.atsClearFilters = function(){ STATE.ats.q=''; STATE.ats.filters={applicant_status:'',source:'',state:'',work_authorization:''}; STATE.ats.page=1; loadApplicants(); };
+  window.atsClearFilters = function(){ STATE.ats.q=''; STATE.ats.filters={ applicant_status:'', source:'', state:'', work_authorization:'', availability:'', experience_min:'', experience_max:'', created_from:'', created_to:'', has_resume:'', owner_id:'' }; STATE.ats.page=1; loadApplicants(); };
+  window.atsToggleAdvanced = function(){ STATE.ats.advOpen = !STATE.ats.advOpen; render(); };
   window.atsGoPage = function(p){ if(p<1)return; STATE.ats.page=p; loadApplicants(); };
 
   // ── add / edit modal ─────────────────────────────────────────────────────────
@@ -238,9 +268,9 @@
             fld('Full Name', inp('full_name','Jane Doe'), true)+
             fld('Email', inp('email','jane@example.com'))+
             fld('Mobile', inp('phone','(555) 123-4567'))+
-            fld('Work Authorization', sel('work_authorization', WORK_AUTH, true))+
-            fld('Source', sel('source', SOURCES, true))+
-            fld('Applicant Status', sel('applicant_status', APPLICANT_STATUSES))+
+            fld('Work Authorization', sel('work_authorization', lk('work_authorization',WORK_AUTH), true))+
+            fld('Source', sel('source', lk('source',SOURCES), true))+
+            fld('Applicant Status', sel('applicant_status', lk('applicant_status',APPLICANT_STATUSES)))+
             fld('City', inp('city'))+
             fld('State', sel('state', US_STATES, true))+
             fld('Country', inp('country','United States'))+
@@ -250,13 +280,13 @@
             fld('Current Employer', inp('current_employer'))+
             fld('Experience (years)', inp('experience_years','e.g. 8'))+
             fld('LinkedIn', inp('linkedin_url'))+
-            fld('Availability', sel('availability', AVAILABILITY, true))+
+            fld('Availability', sel('availability', lk('availability',AVAILABILITY), true))+
             fld('Notice Period', inp('notice_period'))+
             fld('Current CTC', inp('current_ctc'))+
             fld('Expected CTC', inp('expected_ctc'))+
             fld('Bill Rate', inp('bill_rate'))+
             fld('Pay Rate', inp('pay_rate'))+
-            fld('Pay Type', sel('pay_type', PAY_TYPES, true))+
+            fld('Pay Type', sel('pay_type', lk('pay_type',PAY_TYPES), true))+
             fld('Resume URL', inp('resume_url'))+
             ownerSel+
           '</div>'+

@@ -54,6 +54,7 @@ explicit. `26-boot.js` must always load last — it starts the app.
 | `28-page-pipeline.js` | Job pipeline / tagging tab (ATS Slice 2) — loads after 27, before boot |
 | `29-page-submissions.js` | Job submissions grid + lifecycle (ATS Slice 3) — loads after 28, before boot |
 | `30-page-candidate.js` | Candidate profile: lifecycle bar + per-job history (ATS Slice 4), notes & documents (Slice 5) — loads after 29, before boot |
+| `31-ats-lookups.js` | Managed ATS taxonomies + admin list manager (ATS Slice 6) — loads after 30, before boot |
 | `26-boot.js` | Boot entry point (must load last) |
 
 ## Verifying
