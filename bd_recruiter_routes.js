@@ -533,6 +533,126 @@ module.exports = function (app, deps) {
   });
 
   // ==========================================================================
+  // CANDIDATE NOTES & DOCUMENTS (Slice 5)
+  // ==========================================================================
+
+  const NOTE_TYPES = ['job_posting', 'applicant_reference'];
+  const DOC_BUCKET = 'candidate-docs';
+  const MAX_DOC_BYTES = 4.5 * 1024 * 1024;   // fits the 5mb express json limit after base64
+  let _bucketEnsured = false;
+  async function ensureDocBucket() {
+    if (_bucketEnsured) return;
+    try { await supabase.storage.createBucket(DOC_BUCKET, { public: false }); } catch (_) { /* exists */ }
+    _bucketEnsured = true;
+  }
+
+  // ── notes ────────────────────────────────────────────────────────────────
+  app.get('/candidates/:id/notes', auth, async (req, res) => {
+    try {
+      const { data, error } = await supabase.from('candidate_notes')
+        .select('*, author:users!created_by(id,name,employee_id)')
+        .eq('candidate_id', req.params.id).is('deleted_at', null)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json(data || []);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post('/candidates/:id/notes', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      const b = req.body || {};
+      if (!b.body || !String(b.body).trim()) return res.status(400).json({ error: 'body required' });
+      const noteType = NOTE_TYPES.includes(b.note_type) ? b.note_type : 'applicant_reference';
+      const { data, error } = await supabase.from('candidate_notes').insert({
+        candidate_id: req.params.id, job_order_id: b.job_order_id || null,
+        note_type: noteType, body: String(b.body), created_by: req.user.id
+      }).select('*, author:users!created_by(id,name,employee_id)').single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.delete('/candidates/:id/notes/:noteId', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      await supabase.from('candidate_notes').update({ deleted_at: new Date() })
+        .eq('id', req.params.noteId).eq('candidate_id', req.params.id);
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ── documents (stored in the private candidate-docs bucket) ────────────────
+  app.get('/candidates/:id/documents', auth, async (req, res) => {
+    try {
+      const { data, error } = await supabase.from('candidate_documents')
+        .select('*, uploader:users!uploaded_by(id,name,employee_id)')
+        .eq('candidate_id', req.params.id).is('deleted_at', null)
+        .order('uploaded_at', { ascending: false });
+      if (error) throw error;
+      // attach a short-lived signed URL for each (private bucket)
+      const rows = await Promise.all((data || []).map(async (d) => {
+        let url = null;
+        try {
+          const { data: s } = await supabase.storage.from(DOC_BUCKET).createSignedUrl(d.storage_path, 3600);
+          url = s ? s.signedUrl : null;
+        } catch (_) { /* leave null */ }
+        return Object.assign({}, d, { url });
+      }));
+      res.json(rows);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post('/candidates/:id/documents', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      const b = req.body || {};
+      if (!b.filename || !b.data_base64) return res.status(400).json({ error: 'filename and data_base64 required' });
+      const raw = String(b.data_base64).replace(/^data:.*;base64,/, '');
+      const buffer = Buffer.from(raw, 'base64');
+      if (!buffer.length) return res.status(400).json({ error: 'empty file' });
+      if (buffer.length > MAX_DOC_BYTES) return res.status(413).json({ error: 'File too large (max ~4.5 MB).' });
+
+      await ensureDocBucket();
+      const safe = String(b.filename).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120);
+      const path = req.params.id + '/' + Date.now() + '-' + safe;
+      const { error: upErr } = await supabase.storage.from(DOC_BUCKET)
+        .upload(path, buffer, { contentType: b.content_type || 'application/octet-stream', upsert: false });
+      if (upErr) throw upErr;
+
+      const docType = ['resume', 'cover_letter', 'other'].includes(b.doc_type) ? b.doc_type : 'resume';
+      const { data, error } = await supabase.from('candidate_documents').insert({
+        candidate_id: req.params.id, doc_type: docType, filename: String(b.filename),
+        storage_path: path, content_type: b.content_type || null, size_bytes: buffer.length,
+        uploaded_by: req.user.id
+      }).select('*, uploader:users!uploaded_by(id,name,employee_id)').single();
+      if (error) throw error;
+
+      // convenience: if this is the first résumé, backfill candidate.resume_url metadata
+      if (docType === 'resume') {
+        try { await supabase.from('candidates').update({ resume_filename: String(b.filename) }).eq('id', req.params.id); } catch (_) {}
+      }
+      res.status(201).json(data);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.delete('/candidates/:id/documents/:docId', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      const { data: doc } = await supabase.from('candidate_documents')
+        .select('storage_path').eq('id', req.params.docId).eq('candidate_id', req.params.id).single();
+      await supabase.from('candidate_documents').update({ deleted_at: new Date() })
+        .eq('id', req.params.docId).eq('candidate_id', req.params.id);
+      if (doc && doc.storage_path) { try { await supabase.storage.from(DOC_BUCKET).remove([doc.storage_path]); } catch (_) {} }
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ==========================================================================
   // SUBMISSIONS — pipeline (per-candidate stage, with BDM approval gate)
   // ==========================================================================
 

@@ -112,6 +112,11 @@ try {
   check('GET /candidates/check-duplicate → 401 (new, gated)', await req('GET', '/candidates/check-duplicate'), 401);
   check('GET /candidates/x → 401 (new, gated)', await req('GET', '/candidates/x'), 401);
   check('GET /candidates/x/history → 401 (Slice 4, gated)', await req('GET', '/candidates/x/history'), 401);
+  // ATS notes & documents (Slice 5) — mounted + auth-gated.
+  check('GET /candidates/x/notes → 401 (Slice 5, gated)', await req('GET', '/candidates/x/notes'), 401);
+  check('POST /candidates/x/notes → 401 (Slice 5, gated)', await req('POST', '/candidates/x/notes'), 401);
+  check('GET /candidates/x/documents → 401 (Slice 5, gated)', await req('GET', '/candidates/x/documents'), 401);
+  check('POST /candidates/x/documents → 401 (Slice 5, gated)', await req('POST', '/candidates/x/documents'), 401);
   check('POST /candidates → 401 (bd-recruiter, gated)', await req('POST', '/candidates'), 401);
   check('PUT /candidates/x → 401 (bd-recruiter, gated)', await req('PUT', '/candidates/x'), 401);
   check('DELETE /candidates/x → 401 (new, gated)', await req('DELETE', '/candidates/x'), 401);
