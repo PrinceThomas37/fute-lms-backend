@@ -120,7 +120,7 @@
     var body = a.rows.map(function(c){
       return '<tr style="border-top:1px solid var(--border)">'+
         '<td style="padding:9px 10px;white-space:nowrap">'+code(c.candidate_code||'—')+'</td>'+
-        '<td style="padding:9px 10px;white-space:nowrap"><span style="font-weight:600;font-size:13px;cursor:pointer;color:var(--accent)" onclick="atsOpenEdit(\''+c.id+'\')">'+esc(c.full_name||'—')+'</span></td>'+
+        '<td style="padding:9px 10px;white-space:nowrap"><span style="font-weight:600;font-size:13px;cursor:pointer;color:var(--accent)" onclick="bdOpenCandidate(\''+c.id+'\')">'+esc(c.full_name||'—')+'</span></td>'+
         '<td style="padding:9px 10px;font-size:12.5px">'+esc(c.email||'—')+'</td>'+
         '<td style="padding:9px 10px;font-size:12.5px;white-space:nowrap">'+esc(c.phone||'—')+'</td>'+
         '<td style="padding:9px 10px;font-size:12.5px">'+esc(c.city||'—')+'</td>'+
@@ -280,7 +280,9 @@
 
     if (STATE.ats.editId){
       apiPut('/candidates/'+STATE.ats.editId, payload).then(function(){
-        showToast('Applicant updated','success'); closeModal(); loadApplicants();
+        showToast('Applicant updated','success'); closeModal();
+        if (window.bdReloadCandidateProfile) window.bdReloadCandidateProfile();
+        loadApplicants();
       }).catch(function(e){ showToast('Failed: '+e.message,'error'); });
       return;
     }
