@@ -10,7 +10,7 @@
   if (!STATE.sourcing) STATE.sourcing = { providers:[], staged:[], sel:{}, loading:false, tagJob:'', force:false, jobs:null };
 
   function esc(s){ return String(s==null?'':s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-  function code(t){ return '<span style="font-family:var(--mono);font-size:11px;color:var(--accent);font-weight:700">'+esc(t)+'</span>'; }
+  function code(t){ return '<span style="font-family:var(--mono);font-size:10.5px;color:var(--text3);font-weight:600">'+esc(t)+'</span>'; }
   function canUse(u){ return userHasAnyRole(u,'admin','bd','bd_lead','recruiter'); }
 
   // ── CSV parser (quote-aware) + header mapping ───────────────────────────────

@@ -25,7 +25,7 @@
   if (STATE.bd) STATE.bd.profile = STATE.bd.profile || null;
 
   function esc(s){ return String(s==null?'':s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-  function code(t){ return '<span style="font-family:var(--mono);font-size:11px;color:var(--accent);font-weight:700">'+esc(t)+'</span>'; }
+  function code(t){ return '<span style="font-family:var(--mono);font-size:10.5px;color:var(--text3);font-weight:600">'+esc(t)+'</span>'; }
   function fmtDT(s){ if(!s)return ''; try{ var d=new Date(s); return (d.getMonth()+1)+'/'+d.getDate()+'/'+String(d.getFullYear()).slice(2)+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }catch(e){ return ''; } }
   function loc(c){ return [c.city,c.state,c.country].filter(Boolean).join(', ') || c.current_location || '—'; }
 
@@ -33,10 +33,18 @@
   function emptyArr(){ return []; }
   window.bdOpenCandidate = function(id){
     if(!id) return;
+    // Remember where the profile was opened FROM so Back returns to that job
+    // view (with its state) instead of dumping onto a refreshed Candidates tab.
+    var back = { page: STATE.page };
+    var v = (STATE.bd && STATE.bd.view) || {};
+    if (STATE.page==='bd_submissions') back.joId = v.submissionsJoId;
+    else if (STATE.page==='bd_pipeline') back.joId = v.pipelineJoId;
+    else if (STATE.page==='bd_kanban') back.joId = v.kanbanJoId;
+    else if (STATE.page==='bd_jodetail') back.joId = v.joId;
     Promise.all([ apiGet('/candidates/'+id), apiGet('/candidates/'+id+'/history'),
       apiGet('/candidates/'+id+'/notes').catch(emptyArr), apiGet('/candidates/'+id+'/documents').catch(emptyArr) ]).then(function(r){
       var hist = r[1] || { pipeline:[], submissions:[], activity:[] };
-      STATE.bd.profile = { id:id, candidate:r[0]||{}, history:hist, notes:r[2]||[], documents:r[3]||[], selJob:null, noteTab:'applicant_reference' };
+      STATE.bd.profile = { id:id, candidate:r[0]||{}, history:hist, notes:r[2]||[], documents:r[3]||[], selJob:null, noteTab:'applicant_reference', back:back };
       // make sure jobs referenced by the history are navigable
       STATE.bd = STATE.bd || {}; STATE.bd.jobOrders = STATE.bd.jobOrders || [];
       (hist.pipeline||[]).concat(hist.submissions||[]).forEach(function(x){
@@ -71,6 +79,23 @@
   function paintProfile(){ var c=document.getElementById('content'); if(!c) return; c.innerHTML = renderProfile(); }
 
   window.bdProfileSelectJob = function(jid){ if(STATE.bd.profile) STATE.bd.profile.selJob = jid; render(); };
+
+  // ── back-navigation: return to wherever the profile was opened from ────────
+  function backLabel(back){
+    var labels = { bd_submissions:'Submissions', bd_pipeline:'Pipeline', bd_kanban:'Board', bd_jodetail:'Job', bd_myjobs:'My Jobs', applicants:'Candidates' };
+    return labels[(back&&back.page)||''] || 'Candidates';
+  }
+  window.cpGoBack = function(){
+    var back = (STATE.bd.profile && STATE.bd.profile.back) || {};
+    if (back.joId){
+      if (back.page==='bd_submissions') return bdOpenSubmissions(back.joId);
+      if (back.page==='bd_pipeline') return bdOpenPipeline(back.joId);
+      if (back.page==='bd_kanban') return bdOpenKanban(back.joId);
+      if (back.page==='bd_jodetail') return bdOpenJobOrder(back.joId);
+    }
+    if (back.page==='bd_myjobs') return goPage('bd_myjobs');
+    goPage('applicants');
+  };
 
   // ── lifecycle computation ──────────────────────────────────────────────────
   function computeMilestones(jobId){
@@ -239,7 +264,7 @@
       '</div>';
 
     return '<div class="page">'+
-      '<div style="margin-bottom:6px"><span onclick="goPage(\'applicants\')" style="cursor:pointer;font-size:12.5px;color:var(--accent)">← Applicants</span></div>'+
+      '<div style="margin-bottom:6px"><span onclick="cpGoBack()" style="cursor:pointer;font-size:12.5px;color:var(--accent)">← '+esc(backLabel(pr.back))+'</span></div>'+
       header + lifecycle + jobsCard + notesCard + docsCard + actCard +
     '</div>';
   };

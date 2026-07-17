@@ -56,6 +56,8 @@ explicit. `26-boot.js` must always load last — it starts the app.
 | `30-page-candidate.js` | Candidate profile: lifecycle bar + per-job history (ATS Slice 4), notes & documents (Slice 5) — loads after 29, before boot |
 | `31-ats-lookups.js` | Managed ATS taxonomies + admin list manager (ATS Slice 6) — loads after 30, before boot |
 | `32-page-sourcing.js` | Sourcing connectors: CSV/XLSX import → staging → dedup → import — loads after 31, before boot |
+| `33-stage-modal.js` | Shared stage-change modal: sub-stages, note, interview date/location, reminder — loads after 32, before boot |
+| `34-recruiting-dashboard.js` | Role-aware recruiting dashboard cards — loads after 33, before boot |
 | `26-boot.js` | Boot entry point (must load last) |
 
 ## Verifying
