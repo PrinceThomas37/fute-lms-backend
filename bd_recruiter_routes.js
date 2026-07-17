@@ -456,6 +456,30 @@ module.exports = function (app, deps) {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // A candidate's recruiting history across every job — pipelines, submissions,
+  // and the stage-change activity that drives the profile lifecycle bar.
+  app.get('/candidates/:id/history', auth, async (req, res) => {
+    try {
+      const cid = req.params.id;
+      const JOB = 'job:job_orders(id,job_code,job_title,client)';
+      const { data: pipeline } = await supabase.from('candidate_pipeline')
+        .select('id,pipeline_code,pipeline_status,job_order_id,tagged_at,submission_id,' + JOB)
+        .eq('candidate_id', cid).is('deleted_at', null).order('tagged_at', { ascending: false });
+      const { data: submissions } = await supabase.from('submissions')
+        .select('id,submission_code,stage,job_order_id,submitted_at,created_at,bdm_approved_at,pipeline_id,revision_status,' + JOB)
+        .eq('candidate_id', cid).is('deleted_at', null).order('created_at', { ascending: false });
+      let activity = [];
+      const subIds = (submissions || []).map(s => s.id);
+      if (subIds.length) {
+        const { data: act } = await supabase.from('submission_activity')
+          .select('id,submission_id,job_order_id,action,old_stage,new_stage,note,created_at')
+          .in('submission_id', subIds).order('created_at', { ascending: true });
+        activity = act || [];
+      }
+      res.json({ pipeline: pipeline || [], submissions: submissions || [], activity });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   app.post('/candidates', auth, async (req, res) => {
     try {
       if (notGuest(req, res)) return;
