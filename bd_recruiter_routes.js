@@ -16,15 +16,20 @@ module.exports = function (app, deps) {
   const { supabase, auth, hasRole, notGuest, today } = deps;
 
   // ── pipeline stage definitions ───────────────────────────────────────────
+  // Canonical submission lifecycle = the Ceipal application status. `stage` holds
+  // it; the grid labels it "Application Status". The BDM gate is on Submitted to Client.
   const STAGES = [
     'Sourced',
     'Screening',
     'Submitted to BDM',
     'Submitted to Client',
     'Interview Scheduled',
+    'Interview Completed',
     'Offer',
-    'Placed',
+    'Confirmation',
+    'Placement',
     'Rejected',
+    'Not Joined',
     'On Hold'
   ];
   // Stage a recruiter may NOT move INTO without BD Manager approval.
@@ -508,8 +513,13 @@ module.exports = function (app, deps) {
   // ==========================================================================
 
   const SUBMISSION_SELECT =
-    '*, candidate:candidates(id,candidate_code,full_name,email,phone,current_title), ' +
-    'recruiter:users!recruiter_id(id,name,employee_id)';
+    '*, candidate:candidates(id,candidate_code,full_name,email,phone,work_authorization,' +
+    'city,state,country,current_location,experience_years,source,resume_url,current_title), ' +
+    'recruiter:users!recruiter_id(id,name,employee_id), ' +
+    'submitter:users!submitted_by(id,name,employee_id)';
+
+  // editable submission display fields (the Submissions grid)
+  const SUBMISSION_FIELDS = ['revision_status','bill_rate','pay_rate','employer_name','availability','notice_period','submitted_rate','notes'];
 
   // list submissions for a job order (the kanban data)
   app.get('/job-orders/:id/submissions', auth, async (req, res) => {
@@ -540,10 +550,24 @@ module.exports = function (app, deps) {
         const ids = await assignedJobOrderIds(req.user.id);
         if (!ids.includes(b.job_order_id)) return res.status(403).json({ error: 'Not assigned to this job order.' });
       }
+      // snapshot rate/availability/employer from the candidate (overridable via body)
+      const { data: cand } = await supabase.from('candidates')
+        .select('bill_rate,pay_rate,current_employer,availability,notice_period')
+        .eq('id', b.candidate_id).single();
+      const c = cand || {};
+      const pick = (k, fb) => (b[k] !== undefined ? b[k] : (fb || null));
       const { data, error } = await supabase.from('submissions').insert({
+        submission_code: await nextId('SB'),
         candidate_id: b.candidate_id, job_order_id: b.job_order_id,
         recruiter_id: b.recruiter_id || req.user.id,
-        stage: 'Sourced', submitted_rate: b.submitted_rate || null, notes: b.notes || null
+        stage: 'Sourced', submitted_rate: b.submitted_rate || null, notes: b.notes || null,
+        revision_status: b.revision_status || 'N/A',
+        bill_rate: pick('bill_rate', c.bill_rate),
+        pay_rate: pick('pay_rate', c.pay_rate),
+        employer_name: pick('employer_name', c.current_employer),
+        availability: pick('availability', c.availability),
+        notice_period: pick('notice_period', c.notice_period),
+        submitted_by: req.user.id, submitted_at: new Date()
       }).select(SUBMISSION_SELECT).single();
       if (error) {
         if (error.code === '23505') return res.status(409).json({ error: 'This candidate is already in this job order.' });
@@ -592,6 +616,28 @@ module.exports = function (app, deps) {
 
       await logSubmissionActivity(data.id, sub.job_order_id, sub.recruiter_id, action, sub.stage, newStage, req.body.note || null);
       emit(EVENTS.SUBMISSION_ADVANCED, { submissionId: data.id, jobOrderId: sub.job_order_id, fromStage: sub.stage, toStage: newStage, actorUserId: req.user.id });
+      res.json(data);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // edit a submission's display fields (revision status / rate / employer …)
+  app.patch('/submissions/:id', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      const { data: sub, error: e0 } = await supabase.from('submissions')
+        .select('job_order_id').eq('id', req.params.id).is('deleted_at', null).single();
+      if (e0 || !sub) return res.status(404).json({ error: 'Submission not found' });
+      if (isRecruiter(req) && !isBDM(req)) {
+        const ids = await assignedJobOrderIds(req.user.id);
+        if (!ids.includes(sub.job_order_id)) return res.status(403).json({ error: 'Not assigned to this job order.' });
+      }
+      const b = req.body || {};
+      const updates = {};
+      SUBMISSION_FIELDS.forEach(k => { if (b[k] !== undefined) updates[k] = (b[k] === '' ? null : b[k]); });
+      const { data, error } = await supabase.from('submissions')
+        .update(updates).eq('id', req.params.id).select(SUBMISSION_SELECT).single();
+      if (error) throw error;
       res.json(data);
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
@@ -732,9 +778,15 @@ module.exports = function (app, deps) {
       const targetStage = req.body.stage || 'Submitted to BDM';
       let submission;
       const { data: sub, error } = await supabase.from('submissions').insert({
+        submission_code: await nextId('SB'),
         candidate_id: pl.candidate_id, job_order_id: pl.job_order_id,
         recruiter_id: req.user.id, stage: targetStage,
-        submitted_rate: pl.pay_rate || null, notes: pl.notes || null
+        pipeline_id: pl.id, revision_status: 'N/A',
+        bill_rate: pl.bill_rate || null, pay_rate: pl.pay_rate || null,
+        employer_name: pl.employer_name || null, availability: pl.availability || null,
+        notice_period: pl.notice_period || null,
+        submitted_rate: pl.pay_rate || null, notes: pl.notes || null,
+        submitted_by: req.user.id, submitted_at: new Date()
       }).select(SUBMISSION_SELECT).single();
       if (error) {
         if (error.code === '23505') {
@@ -792,7 +844,7 @@ module.exports = function (app, deps) {
         else if (s.stage === 'Submitted to Client') r.submitted_to_client++;
         else if (s.stage === 'Interview Scheduled') r.interview++;
         else if (s.stage === 'Offer') r.offer++;
-        else if (s.stage === 'Placed') r.placed++;
+        else if (s.stage === 'Placement') r.placed++;
         else if (s.stage === 'Rejected') r.rejected++;
       });
       const rows = Object.values(recMap).map(r => ({

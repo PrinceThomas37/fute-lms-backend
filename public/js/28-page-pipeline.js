@@ -63,6 +63,7 @@
     var tabs =
       '<div style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:14px">'+
         '<div style="padding:8px 16px;font-size:13px;font-weight:700;color:var(--accent);border-bottom:2px solid var(--accent)">Pipeline ('+rows.length+')</div>'+
+        '<div style="padding:8px 16px;font-size:13px;font-weight:600;color:var(--text3);cursor:pointer" onclick="bdOpenSubmissions(\''+j.id+'\')">Submissions</div>'+
         '<div style="padding:8px 16px;font-size:13px;font-weight:600;color:var(--text3);cursor:pointer" onclick="bdOpenKanban(\''+j.id+'\')">Board</div>'+
         (isBDM(u)?'<div style="padding:8px 16px;font-size:13px;font-weight:600;color:var(--text3);cursor:pointer" onclick="bdOpenJobOrder(\''+j.id+'\')">Job details</div>':'')+
       '</div>';

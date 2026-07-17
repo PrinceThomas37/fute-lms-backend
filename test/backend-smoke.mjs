@@ -121,6 +121,10 @@ try {
   check('PATCH /pipeline/x → 401 (new, gated)', await req('PATCH', '/pipeline/x'), 401);
   check('POST /pipeline/x/promote → 401 (new, gated)', await req('POST', '/pipeline/x/promote'), 401);
   check('DELETE /pipeline/x → 401 (new, gated)', await req('DELETE', '/pipeline/x'), 401);
+  // ATS submissions lifecycle (Slice 3) — mounted + auth-gated.
+  check('GET /job-orders/x/submissions → 401 (gated)', await req('GET', '/job-orders/x/submissions'), 401);
+  check('PATCH /submissions/x/stage → 401 (gated)', await req('PATCH', '/submissions/x/stage'), 401);
+  check('PATCH /submissions/x → 401 (new, gated)', await req('PATCH', '/submissions/x'), 401);
   check('GET /jobs/x/activity → 401 (still inline)', await req('GET', '/jobs/x/activity'), 401);
 
   // Dependency check: run the POST /jobs handler with a valid admin token and a
