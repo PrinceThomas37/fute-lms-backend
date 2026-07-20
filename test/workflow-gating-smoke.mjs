@@ -119,10 +119,25 @@ try {
   await page.waitForTimeout(150);
   const rejectHtml = await page.evaluate(() => STATE.modal || '');
   step('Rejected stage shows a required reason field', rejectHtml.includes('Reason for rejection'));
+  step('Stage modal header shows current → target confirmation', /Submitted to Client[\s\S]*→[\s\S]*Rejected/.test(rejectHtml), 'header did not show current→target');
+
+  // Note is required on EVERY stage change: with a reason but no note, blocked on the note.
+  const noteGuard = await page.evaluate(() => {
+    window.__toastMsgs = [];
+    const _orig = window.showToast; window.showToast = (m) => { window.__toastMsgs.push(m); };
+    document.getElementById('stg-reject').value = 'Client passed';
+    document.getElementById('stg-note').value = '';
+    stgApply();
+    window.showToast = _orig;
+    return window.__toastMsgs.some(m => /add a note/i.test(m));
+  });
+  step('Moving stage without a note is blocked (notes required)', noteGuard);
+
+  // With a note but no reason, blocked on the reason.
   const rejectGuard = await page.evaluate(() => {
     window.__toastMsgs = [];
-    const _orig = window.showToast;
-    window.showToast = (m) => { window.__toastMsgs.push(m); };
+    const _orig = window.showToast; window.showToast = (m) => { window.__toastMsgs.push(m); };
+    document.getElementById('stg-note').value = 'Sharing client feedback';
     document.getElementById('stg-reject').value = '';
     stgApply();
     window.showToast = _orig;

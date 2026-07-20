@@ -69,21 +69,27 @@
         (isBDM(u)?'<div style="padding:8px 16px;font-size:13px;font-weight:600;color:var(--text3);cursor:pointer" onclick="bdOpenJobOrder(\''+j.id+'\')">Job details</div>':'')+
       '</div>';
 
-    var head = ['Pipeline ID','Candidate Name','Pipeline Status','Work Auth','Mobile','Location','Country','Exp','Source','Resume',
+    var head = ['Pipeline ID','Candidate Name','Stage','Work Auth','Mobile','Location','Country','Exp','Source','Resume',
       'Bill Rate','Pay Rate','Employer','Availability','Notice','Current CTC','Tagged By','Tagged On','']
       .map(function(h){ return '<th style="text-align:left;padding:8px 9px;font-size:11px;color:var(--text3);font-weight:700;white-space:nowrap">'+h+'</th>'; }).join('');
 
     var body = rows.map(function(p){
       var c = p.candidate || {};
-      // Promoted rows show the LIVE submission stage (the candidate's real
-      // status); unpromoted rows keep the editable pipeline-status dropdown.
-      var statusSel = p.submission
-        ? '<span style="font-size:11.5px;font-weight:700;color:'+(SUBSTAGE_COLORS[p.submission.stage]||'var(--text2)')+'">'+esc(p.submission.stage||'')+'</span>'+
-          (p.submission.sub_stage?'<div style="font-size:10px;color:var(--text3)">'+esc(p.submission.sub_stage)+'</div>':'')
-        : '<select class="sel" style="font-size:11px;padding:3px 6px;min-width:120px;color:'+(PSTATUS_COLORS[p.pipeline_status]||'var(--text2)')+';font-weight:600" onchange="plSetStatus(\''+p.id+'\',this.value)">'+
-        PIPELINE_STATUSES.map(function(s){ return '<option value="'+esc(s)+'"'+(p.pipeline_status===s?' selected':'')+'>'+esc(s)+'</option>'; }).join('')+'</select>';
-      var resume = c.resume_url ? '<a href="'+esc(c.resume_url)+'" target="_blank" rel="noopener" style="color:var(--accent)">↗</a>' : '—';
+      // ONE stage control everywhere: the same submission-stage dropdown the
+      // Submissions grid and Board use, routed through the shared stage modal.
+      // Un-promoted rows show "Not submitted"; picking a stage promotes the
+      // candidate (materializes the submission) and opens the notes modal.
       var promoted = !!p.submission_id;
+      var curStage = p.submission ? (p.submission.stage||'') : '';
+      var stageOpts = (window.ATS_STAGE_LIST||[]).map(function(x){
+        return '<option value="'+esc(x)+'"'+(curStage===x?' selected':'')+'>'+esc(x)+'</option>'; }).join('');
+      var statusSel =
+        '<select class="sel" style="font-size:11px;padding:3px 6px;min-width:150px;color:'+(SUBSTAGE_COLORS[curStage]||'var(--text2)')+';font-weight:600" onchange="plMove(\''+p.id+'\',\''+(p.submission_id||'')+'\',this.value)">'+
+          (promoted?'':'<option value="">Not submitted</option>')+
+          stageOpts+
+        '</select>'+
+        (p.submission&&p.submission.sub_stage?'<div style="font-size:10px;color:var(--text3);margin-top:2px">'+esc(p.submission.sub_stage)+'</div>':'');
+      var resume = c.resume_url ? '<a href="'+esc(c.resume_url)+'" target="_blank" rel="noopener" style="color:var(--accent)">↗</a>' : '—';
       return '<tr style="border-top:1px solid var(--border)">'+
         '<td style="padding:8px 9px;white-space:nowrap">'+code(p.pipeline_code||'—')+'</td>'+
         '<td style="padding:8px 9px;white-space:nowrap;font-size:12.5px"><span style="font-weight:600;cursor:pointer;color:var(--accent)" onclick="bdOpenCandidate(\''+c.id+'\')">'+esc(c.full_name||'—')+'</span> '+(c.candidate_code?'<span style="font-size:10px;color:var(--text3)">'+esc(c.candidate_code)+'</span>':'')+'</td>'+
@@ -104,10 +110,8 @@
         '<td style="padding:8px 9px;font-size:12px;white-space:nowrap">'+esc((p.tagger&&p.tagger.name)||'—')+'</td>'+
         '<td style="padding:8px 9px;font-size:12px;color:var(--text3);white-space:nowrap">'+fmtDate(p.tagged_at)+'</td>'+
         '<td style="padding:8px 9px;white-space:nowrap">'+
-          (promoted
-            ? '<span style="font-size:11px;color:var(--green);font-weight:700">✓ Submitted</span>'
-            : '<button class="btn btn-sm btn-primary" onclick="plPromote(\''+p.id+'\')">Promote</button>')+
-          ' <button class="btn btn-sm btn-outline" onclick="plOpenEdit(\''+p.id+'\')">Edit</button>'+
+          (promoted?'<span style="font-size:11px;color:var(--green);font-weight:700;margin-right:4px">✓ Submitted</span>':'')+
+          '<button class="btn btn-sm btn-outline" onclick="plOpenEdit(\''+p.id+'\')">Edit</button>'+
           ' <button class="btn btn-sm btn-outline" style="color:var(--red)" onclick="plRemove(\''+p.id+'\')">✕</button>'+
         '</td>'+
       '</tr>';
@@ -128,17 +132,27 @@
     '</div>';
   };
 
-  // ── inline status / promote / remove ────────────────────────────────────────
-  window.plSetStatus = function(id, status){
-    apiPatch('/pipeline/'+id+'/status', { status:status }).then(function(p){
-      STATE.bd.pipeline = (STATE.bd.pipeline||[]).map(function(x){ return x.id===id?p:x; });
-      showToast('Status → '+status,'success'); render();
-    }).catch(function(e){ showToast('Failed: '+e.message,'error'); render(); });
-  };
-  window.plPromote = function(id){
-    apiPost('/pipeline/'+id+'/promote', {}).then(function(r){
-      if (r && r.already) showToast('Already submitted','info'); else showToast('Promoted to submission','success');
-      bdReloadPipeline();
+  // ── unified stage move (the ONE way to change a candidate's stage) ──────────
+  // Promoted rows go straight through the shared stage modal. Un-promoted rows
+  // are materialized as a submission first (silent promote to the entry stage),
+  // then the SAME modal captures the note and moves to the chosen stage — so
+  // there's no separate "Promote" step and no divergent pipeline vocabulary.
+  window.plMove = function(pipelineId, submissionId, stage){
+    if (!stage) return;
+    if (submissionId){
+      openStageModal(submissionId, stage, function(){ bdReloadPipeline(); });
+      return;
+    }
+    var u = STATE.user, recruiterScoped = isRec(u) && !isBDM(u);
+    if (recruiterScoped && ['Sourced','Screening','Submitted to BDM'].indexOf(stage) < 0){
+      showToast('You can take a candidate up to "Submitted to BDM" — the BD team owns the later stages','error'); render(); return;
+    }
+    apiPost('/pipeline/'+pipelineId+'/promote', { stage:'Sourced' }).then(function(r){
+      var sub = r && r.submission; if(!sub){ showToast('Could not promote candidate','error'); return; }
+      STATE.bd.submissions = STATE.bd.submissions || [];
+      if(!STATE.bd.submissions.some(function(x){ return x.id===sub.id; })) STATE.bd.submissions.push(sub);
+      if (stage === sub.stage){ showToast('Promoted to submission','success'); bdReloadPipeline(); return; }
+      openStageModal(sub.id, stage, function(){ bdReloadPipeline(); });
     }).catch(function(e){ showToast('Failed: '+e.message,'error'); });
   };
   window.plRemove = function(id){
