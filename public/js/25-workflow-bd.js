@@ -523,6 +523,7 @@
             '<button class="btn btn-sm btn-outline" onclick="bdOpenPipeline(\''+j.id+'\')">Pipeline</button>'+
             '<button class="btn btn-sm btn-outline" onclick="bdOpenSubmissions(\''+j.id+'\')">Submissions</button>'+
             '<button class="btn btn-sm btn-outline" onclick="bdOpenKanban(\''+j.id+'\')">Board</button>'+
+            '<button class="btn btn-sm btn-outline" onclick="bdOpenPostingJD(\''+j.id+'\')">'+(j.posting_description?'Posting JD ✓':'Posting JD')+'</button>'+
           '</div>'+
         '</div>'+
         '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">'+
@@ -693,6 +694,58 @@
       STATE.bd.submissions=subs;
       goPage('bd_kanban');
     });
+  };
+
+  // ── anonymized posting JD ─────────────────────────────────────────────────
+  // Rewrite the internal job description with the client identity removed so it
+  // can go on job boards. Generate (AI when configured, rule-based otherwise),
+  // edit, save onto the job, copy to clipboard.
+  window.bdOpenPostingJD=function(jid){
+    var j=joById(jid)||{};
+    STATE.bd._pjdJob=jid;
+    STATE.modal=
+      '<div class="modal modal-w720" onclick="event.stopPropagation()">'+
+        '<div style="padding:16px 20px;border-bottom:1px solid var(--border)">'+
+          '<div style="font-weight:700;font-size:15px">Posting JD — '+esc(j.job_title||'')+'</div>'+
+          '<div style="font-size:11.5px;color:var(--text3);margin-top:2px">A public version of the job description with the company name and identifying details removed. Generate, review, edit, then save or copy for posting.</div>'+
+        '</div>'+
+        '<div style="padding:16px 20px">'+
+          '<textarea id="pjd-text" class="sel" style="min-height:290px;resize:vertical;font-size:12.5px;line-height:1.45" placeholder="Click “Generate” to create an anonymized version from the internal JD, or paste/write one here.">'+esc(j.posting_description||'')+'</textarea>'+
+        '</div>'+
+        '<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">'+
+          '<button class="btn btn-outline" onclick="bdGeneratePostingJD(\''+jid+'\')">✨ Generate from internal JD</button>'+
+          '<div style="display:flex;gap:8px">'+
+            '<button class="btn btn-outline" onclick="bdCopyPostingJD()">Copy</button>'+
+            '<button class="btn btn-outline" onclick="closeModal()">Close</button>'+
+            '<button class="btn btn-primary" onclick="bdSavePostingJD(\''+jid+'\')">Save</button>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+    render();
+  };
+  window.bdGeneratePostingJD=function(jid){
+    showToast('Rewriting…','info');
+    apiPost('/job-orders/'+jid+'/posting-jd',{}).then(function(r){
+      var ta=document.getElementById('pjd-text');
+      if(ta)ta.value=r.posting||'';
+      showToast(r.used_ai?'AI rewrite ready — review before posting':'Sanitized (rule-based, no AI key) — review carefully before posting','success');
+    }).catch(function(e){showToast('Failed: '+e.message,'error');});
+  };
+  window.bdSavePostingJD=function(jid){
+    var ta=document.getElementById('pjd-text');
+    var text=ta?ta.value:'';
+    apiPut('/job-orders/'+jid,{posting_description:text}).then(function(jo){
+      var idx=STATE.bd.jobOrders.findIndex(function(x){return x.id===jid;});
+      if(idx>-1)STATE.bd.jobOrders[idx]=jo;
+      showToast('Posting JD saved','success');closeModal();
+    }).catch(function(e){showToast('Failed: '+e.message,'error');});
+  };
+  window.bdCopyPostingJD=function(){
+    var ta=document.getElementById('pjd-text');
+    if(!ta||!ta.value.trim()){showToast('Nothing to copy','error');return;}
+    (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(ta.value):Promise.reject())
+      .then(function(){showToast('Copied to clipboard','success');})
+      .catch(function(){ta.select();document.execCommand('copy');showToast('Copied','success');});
   };
 
   // ── recruiter assignment ───────────────────────────────────────────────────
