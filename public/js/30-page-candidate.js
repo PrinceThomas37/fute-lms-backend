@@ -37,8 +37,7 @@
     // view (with its state) instead of dumping onto a refreshed Candidates tab.
     var back = { page: STATE.page };
     var v = (STATE.bd && STATE.bd.view) || {};
-    if (STATE.page==='bd_submissions') back.joId = v.submissionsJoId;
-    else if (STATE.page==='bd_pipeline') back.joId = v.pipelineJoId;
+    if (STATE.page==='bd_pipeline') back.joId = v.pipelineJoId;
     else if (STATE.page==='bd_kanban') back.joId = v.kanbanJoId;
     else if (STATE.page==='bd_jodetail') back.joId = v.joId;
     Promise.all([ apiGet('/candidates/'+id), apiGet('/candidates/'+id+'/history'),
@@ -82,13 +81,12 @@
 
   // ── back-navigation: return to wherever the profile was opened from ────────
   function backLabel(back){
-    var labels = { bd_submissions:'Candidates', bd_pipeline:'Candidates', bd_kanban:'Board', bd_jodetail:'Job', bd_myjobs:'My Jobs', applicants:'Candidates' };
+    var labels = { bd_pipeline:'Candidates', bd_kanban:'Board', bd_jodetail:'Job', bd_myjobs:'My Jobs', applicants:'Candidates' };
     return labels[(back&&back.page)||''] || 'Candidates';
   }
   window.cpGoBack = function(){
     var back = (STATE.bd.profile && STATE.bd.profile.back) || {};
     if (back.joId){
-      if (back.page==='bd_submissions') return bdOpenSubmissions(back.joId);
       if (back.page==='bd_pipeline') return bdOpenPipeline(back.joId);
       if (back.page==='bd_kanban') return bdOpenKanban(back.joId);
       if (back.page==='bd_jodetail') return bdOpenJobOrder(back.joId);

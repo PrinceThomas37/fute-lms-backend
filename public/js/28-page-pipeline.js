@@ -50,6 +50,11 @@
     STATE.bd.view = STATE.bd.view || {}; STATE.bd.view.pipelineJoId = jid;
     loadPipeline(jid).then(function(){ goPage('bd_pipeline'); });
   };
+  // The standalone "Submissions" tab (29-page-submissions.js) was merged into
+  // this "Candidates" tab and removed. Kept as a thin alias so every existing
+  // caller (dashboard top-jobs, job board, My Jobs cards, candidate profile,
+  // board/job-detail buttons) keeps working unchanged.
+  window.bdOpenSubmissions = function(jid){ bdOpenPipeline(jid); };
   window.bdReloadPipeline = function(){
     var jid = STATE.bd.view && STATE.bd.view.pipelineJoId; if(!jid) return;
     loadPipeline(jid).then(function(){ render(); });
