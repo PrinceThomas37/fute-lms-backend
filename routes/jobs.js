@@ -17,6 +17,28 @@ const { parseJobDescription, buildResearchFromLeadData, normalizeJobTitle, title
 const { annotateContactEmailStatus } = require('../email-validation');
 const { getSetting } = require('../config/settings');
 
+// Lead stage permission matrix for PUT /jobs/:id — pulled out to a pure
+// function (no supabase/Express dependency) so it's directly unit-testable.
+// BD / BD Lead own the forward classification of a lead (Connected, Rejected,
+// Future, In Discussion) and must also be able to undo it — move it back to
+// "Assigned" — without needing an RA Lead/Admin. Ownership of the assignment
+// itself (assigned_to_bd) is untouched here; "Unassigned" stays RA Lead/Admin
+// only since it's tied to returning a lead to the distribution pool.
+// Returns { stage } when the caller may set it, or { error } when not —
+// callers must check for `error` rather than assume success.
+function resolveLeadStageUpdate(hasRole, req, stage) {
+  const bdStages = ['Connected', 'Rejected', 'Future', 'In Discussion', 'Assigned'];
+  const systemStages = ['Unassigned', 'Assigned'];
+  if (bdStages.includes(stage) && hasRole(req, 'admin', 'bd', 'bd_lead')) return { stage };
+  if (systemStages.includes(stage) && hasRole(req, 'admin', 'ra_lead')) return { stage };
+  if (hasRole(req, 'admin')) return { stage };
+  // No matching branch = the caller isn't allowed to set this specific stage
+  // value. This used to fall through silently: the request returned 200 with
+  // nothing written, so the UI showed "Stage updated" while the database
+  // never changed. Fail loudly instead.
+  return { error: `You don't have permission to set this lead's stage to "${stage}".` };
+}
+
 module.exports = (ctx) => {
   const router = express.Router();
   const {
@@ -330,11 +352,9 @@ router.put('/jobs/:id', auth, async (req, res) => {
     if (source !== undefined) updates.source = source;
     if (job_url !== undefined) updates.job_url = job_url;
     if (stage !== undefined) {
-      const bdStages = ['Connected','Rejected','Future','In Discussion'];
-      const systemStages = ['Unassigned','Assigned'];
-      if (bdStages.includes(stage) && hasRole(req, 'admin', 'bd', 'bd_lead')) updates.stage = stage;
-      else if (systemStages.includes(stage) && hasRole(req, 'admin', 'ra_lead')) updates.stage = stage;
-      else if (hasRole(req, 'admin')) updates.stage = stage;
+      const resolved = resolveLeadStageUpdate(hasRole, req, stage);
+      if (resolved.error) return res.status(403).json({ error: resolved.error });
+      updates.stage = resolved.stage;
     }
     if (notes !== undefined) updates.notes = notes;
     if (assigned_to !== undefined && hasRole(req, 'admin', 'ra_lead')) updates.assigned_to = assigned_to || null;
@@ -435,3 +455,5 @@ router.get('/jobs/:job_id/contacts', auth, async (req, res) => {
 
   return router;
 };
+
+module.exports.resolveLeadStageUpdate = resolveLeadStageUpdate;
