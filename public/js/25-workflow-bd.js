@@ -71,8 +71,11 @@
     if(isBDM(u))items.push({id:"bd_joborders",lbl:"Jobs",ic:"leads"});
     if(isRec(u)&&!isBDM(u))items.push({id:"bd_myjobs",lbl:"My Jobs",ic:"leads"});
     if(!items.length)return;
+    // Anchor after Leads when present; recruiters have no Leads item, so fall
+    // back to Dashboard to keep My Jobs at the top of their menu.
     var anchor=null,navEls=navWrap.querySelectorAll('.nav-item');
     for(var k=0;k<navEls.length;k++){if((navEls[k].getAttribute('onclick')||'').indexOf("goPage('leads')")>-1){anchor=navEls[k];break;}}
+    if(!anchor)for(var k2=0;k2<navEls.length;k2++){if((navEls[k2].getAttribute('onclick')||'').indexOf("goPage('dashboard')")>-1){anchor=navEls[k2];break;}}
     items.forEach(function(n){
       var active=(STATE.page===n.id)?' active':'';
       var d=document.createElement('div');d.className='nav-item'+active;d.setAttribute('data-bdnav','1');

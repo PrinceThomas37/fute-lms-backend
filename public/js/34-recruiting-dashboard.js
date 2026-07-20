@@ -8,7 +8,9 @@
 (function () {
 
   function esc(s){ return String(s==null?'':s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-  function involved(u){ return userHasAnyRole(u,'admin','bd','bd_lead','recruiter'); }
+  // Pure recruiters now have their own native dashboard (renderRecruiterDashboard
+  // in 05-page-dashboard.js), so the injected strip is managers-only.
+  function involved(u){ return userHasAnyRole(u,'admin','bd','bd_lead'); }
   function fmtDT(s){ try{ var d=new Date(s); return (d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }catch(e){ return ''; } }
 
   var _prevRender = window.render;

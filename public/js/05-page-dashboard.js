@@ -19,10 +19,18 @@ function renderPage(){
 }
 
 // ── DASHBOARD ──────────────────────────────────
+function isPureRecruiter(u){
+  return userHasRole(u,'recruiter')&&!userHasAnyRole(u,'admin','bd','bd_lead','ra_lead');
+}
+
 function renderDashboard(){
   // Support "view as" — admin/BD can click a team member to see their dashboard
   var u=STATE.viewingUser||STATE.user;
   var isViewingOther=STATE.viewingUser&&STATE.viewingUser.id!==STATE.user.id;
+
+  // Recruiters live in the recruiting workflow (jobs, candidates, interviews) —
+  // lead-gen widgets are someone else's desk. Give them their own dashboard.
+  if(!isViewingOther&&isPureRecruiter(u))return renderRecruiterDashboard(u);
   var pl=periodLeads(u);
   var total=pl.length;
   var emailed=pl.filter(function(l){return l.sent}).length;
@@ -39,8 +47,9 @@ function renderDashboard(){
     return '<button class="fc'+(STATE.period===p?" on":"") + '" onclick="setPeriod(\''+p+'\')" style="text-transform:capitalize">'+p+'</button>';
   }).join("");
 
-  // team card — only show for actual logged-in user (not when viewing someone else)
-  var team=isViewingOther?[]:getTeam(u);
+  // team card — only show for actual logged-in user (not when viewing someone else).
+  // Recruiters don't work leads, so their all-zero rows are excluded from this table.
+  var team=(isViewingOther?[]:getTeam(u)).filter(function(t){return !isPureRecruiter(t);});
   var canClickTeam=(STATE.user.role==="admin"||STATE.user.role==="bd");
   var teamRows=team.map(function(t){
     var tl=getMyLeads(t);
@@ -173,8 +182,13 @@ function renderDashboard(){
 
     '<div class="card cp"><div class="flex jb aic mb3"><div class="fw6">Pipeline overview</div><div class="f12 text3">'+STATE.period+'</div></div><div class="flex gap2 flex-wrap">'+stagePills+'</div></div>'+
 
-    // ── REMINDERS WIDGET ─────────────────────────
-    (function(){
+    renderRemindersWidget()+
+
+  '</div>';
+}
+
+// ── REMINDERS WIDGET (shared: BD + recruiter dashboards) ──────────────
+function renderRemindersWidget(){
       var today=todayIST();
       var myR=STATE.reminders.filter(function(r){return r.user_id===STATE.user.id&&r.status==="pending";});
       var due=myR.filter(function(r){return r.return_date<=today;});
@@ -228,7 +242,116 @@ function renderDashboard(){
         upcomingRows+
         (myR.length>5?'<div style="padding-top:10px;text-align:center"><button class="btn btn-outline btn-sm" onclick="goPage(\'reminders\')">View all '+myR.length+' reminders</button></div>':"")+
       '</div>';
-    })()+
+}
+
+// ── RECRUITER DASHBOARD ────────────────────────────────────────────────
+// A recruiter's day is jobs, candidates and interviews — not lead-gen. This
+// view is built from GET /recruiting-dashboard (same cache the "my desk"
+// strip uses, so no duplicate fetches) plus the shared reminders widget.
+function recDashboardLoad(){
+  if(STATE._recDashLoading)return;
+  var fresh=STATE._recDash&&(Date.now()-STATE._recDash._at<60000);
+  if(fresh)return;
+  STATE._recDashLoading=true;
+  apiGet('/recruiting-dashboard').then(function(d){
+    d=d||{};d._at=Date.now();
+    STATE._recDash=d;STATE._recDashLoading=false;
+    if(STATE.page==='dashboard')render();
+  }).catch(function(){STATE._recDashLoading=false;STATE._recDash={_at:Date.now(),empty:true};});
+}
+
+function recStageColor(s){
+  if(s==='Placement'||s==='Confirmation')return"var(--green)";
+  if(s==='Rejected'||s==='Not Joined')return"var(--red)";
+  if(s==='Offer')return"#7c3aed";
+  if(s==='Interview Scheduled'||s==='Interview Completed')return"#2563eb";
+  if(s==='On Hold')return"var(--amber)";
+  return"var(--text)";
+}
+
+function renderRecruiterDashboard(u){
+  recDashboardLoad();
+  var d=STATE._recDash||{};
+  var bs=d.by_stage||{};
+  var interviews=(bs['Interview Scheduled']||0)+(bs['Interview Completed']||0);
+  var loading=!d._at&&!d.empty;
+
+  var hour=new Date().getHours();
+  var greet=hour<12?"Good morning":hour<17?"Good afternoon":"Good evening";
+
+  // stage pills — backend sends by_stage keys in workflow order
+  var stagePills=Object.keys(bs).map(function(s){
+    var cnt=bs[s];
+    if(!cnt)return"";
+    return '<div style="text-align:center;padding:12px 16px;background:var(--bg);border-radius:var(--r2);min-width:76px">'+
+      '<div style="font-family:var(--display);font-size:22px;font-weight:700;color:'+recStageColor(s)+'">'+cnt+'</div>'+
+      '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+s+'</div>'+
+    '</div>';
+  }).join("");
+
+  var upcomingRows=(d.upcoming_interviews||[]).map(function(iv){
+    var dt;try{var x=new Date(iv.interview_at);dt=x.toLocaleDateString("en-IN",{day:"numeric",month:"short"})+' · '+x.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",hour12:true});}catch(e){dt='';}
+    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">'+
+      '<div style="width:7px;height:7px;border-radius:50%;background:#2563eb;flex-shrink:0"></div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(iv.candidate||'Candidate')+'</div>'+
+        '<div class="f12 text3">'+htmlEsc(dt)+(iv.interview_location?' · '+htmlEsc(iv.interview_location):'')+'</div>'+
+      '</div>'+
+    '</div>';
+  }).join("");
+
+  function tile(label,value,color){
+    return '<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;text-align:center;min-width:105px;flex:1">'+
+      '<div style="font-size:24px;font-weight:700;color:'+(color||'var(--text)')+'">'+value+'</div>'+
+      '<div style="font-size:11px;color:var(--text3);margin-top:2px;white-space:nowrap">'+label+'</div>'+
+    '</div>';
+  }
+
+  return '<div class="page">'+
+    '<div class="banner">'+
+      '<div style="position:absolute;top:16px;right:20px;background:rgba(255,255,255,.18);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.3);border-radius:var(--r2);padding:10px 16px;text-align:right">'+
+        '<div id="dash-clock-time" style="font-family:var(--display);font-size:13px;font-weight:500;letter-spacing:.01em;line-height:1;color:rgba(255,255,255,.85)">'+new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:true})+'</div>'+
+        '<div id="dash-clock-date" style="font-size:22px;font-weight:700;margin-top:5px;color:#fff;font-family:var(--display)">'+new Date().toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})+'</div>'+
+      '</div>'+
+      '<div class="banner-name">'+greet+', '+u.name.split(" ")[0]+' 👋</div>'+
+      '<div class="banner-sub">'+roleLabel(u.role)+'</div>'+
+      '<div class="banner-stats">'+
+        '<div><div class="bstat-val">'+(d.submissions_week||0)+'</div><div class="bstat-lbl">Subs this week</div></div>'+
+        '<div style="width:1px;background:rgba(255,255,255,.25);align-self:stretch"></div>'+
+        '<div><div class="bstat-val">'+(d.submissions_month||0)+'</div><div class="bstat-lbl">Subs this month</div></div>'+
+        '<div style="width:1px;background:rgba(255,255,255,.25);align-self:stretch"></div>'+
+        '<div><div class="bstat-val">'+interviews+'</div><div class="bstat-lbl">In interview</div></div>'+
+        '<div style="width:1px;background:rgba(255,255,255,.25);align-self:stretch"></div>'+
+        '<div><div class="bstat-val">'+(bs['Placement']||0)+'</div><div class="bstat-lbl">Placements</div></div>'+
+      '</div>'+
+    '</div>'+
+
+    (loading?'<div class="card cp mb4" style="text-align:center;color:var(--text3);font-size:13px">Loading your desk…</div>':'')+
+
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">'+
+      tile('My Jobs',(d.jobs&&d.jobs.total)||0,'var(--accent)')+
+      tile('In Interview',interviews,'#2563eb')+
+      tile('Offers',bs['Offer']||0,'#7c3aed')+
+      tile('Placements',bs['Placement']||0,'var(--green)')+
+      tile('Rejected',bs['Rejected']||0,'var(--red)')+
+    '</div>'+
+
+    '<div class="card cp mb4">'+
+      '<div class="flex jb aic mb3">'+
+        '<div><div class="fw6">My candidate pipeline</div><div class="f12 text3">All my submissions by stage</div></div>'+
+        '<button class="btn btn-outline btn-sm" onclick="goPage(\'bd_myjobs\')">My Jobs →</button>'+
+      '</div>'+
+      '<div class="flex gap2 flex-wrap">'+(stagePills||'<div class="text3 f13">No candidates in your pipeline yet — open My Jobs to start submitting.</div>')+'</div>'+
+    '</div>'+
+
+    '<div class="card cp">'+
+      '<div class="flex jb aic mb3">'+
+        '<div><div class="fw6">Upcoming interviews</div><div class="f12 text3">'+((d.upcoming_interviews||[]).length||'No')+' scheduled</div></div>'+
+      '</div>'+
+      (upcomingRows||'<div style="padding:16px 0;text-align:center;font-size:13px;color:var(--text3)">No interviews scheduled. Move a candidate to "Interview Scheduled" to see it here.</div>')+
+    '</div>'+
+
+    renderRemindersWidget()+
 
   '</div>';
 }
