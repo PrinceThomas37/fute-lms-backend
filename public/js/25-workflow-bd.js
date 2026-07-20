@@ -4,6 +4,25 @@
 
   // ── US states ─────────────────────────────────────────────────────────────
   var US_STATES=["Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut","Delaware","Florida","Georgia","Hawaii","Idaho","Illinois","Indiana","Iowa","Kansas","Kentucky","Louisiana","Maine","Maryland","Massachusetts","Michigan","Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada","New Hampshire","New Jersey","New Mexico","New York","North Carolina","North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island","South Carolina","South Dakota","Tennessee","Texas","Utah","Vermont","Virginia","Washington","West Virginia","Wisconsin","Wyoming"];
+  var US_STATE_ABBR={AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",CO:"Colorado",CT:"Connecticut",DE:"Delaware",DC:"District of Columbia",FL:"Florida",GA:"Georgia",HI:"Hawaii",ID:"Idaho",IL:"Illinois",IN:"Indiana",IA:"Iowa",KS:"Kansas",KY:"Kentucky",LA:"Louisiana",ME:"Maine",MD:"Maryland",MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",MS:"Mississippi",MO:"Missouri",MT:"Montana",NE:"Nebraska",NV:"Nevada",NH:"New Hampshire",NJ:"New Jersey",NM:"New Mexico",NY:"New York",NC:"North Carolina",ND:"North Dakota",OH:"Ohio",OK:"Oklahoma",OR:"Oregon",PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",SD:"South Dakota",TN:"Tennessee",TX:"Texas",UT:"Utah",VT:"Vermont",VA:"Virginia",WA:"Washington",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming"};
+
+  // Leads only ever store a combined "City, ST" (or "City, State") free-text
+  // location — there's no discrete city/state on the lead. Split it so the New
+  // Job form (whose State field is a <select> of full state names) can actually
+  // prefill instead of silently sitting blank.
+  function parseLeadLocation(loc){
+    var out={city:'',state:''};
+    if(!loc)return out;
+    var parts=String(loc).split(',');
+    if(parts.length<2){out.city=parts[0].trim();return out;}
+    out.city=parts[0].trim();
+    var raw=parts[parts.length-1].trim();
+    var abbr=raw.toUpperCase();
+    if(US_STATE_ABBR[abbr]){out.state=US_STATE_ABBR[abbr];return out;}
+    var full=US_STATES.find(function(s){return s.toLowerCase()===raw.toLowerCase();});
+    if(full)out.state=full;
+    return out;
+  }
 
   // ── BD namespace on STATE (no demo data, real API only) ───────────────────
   if(!STATE.bd){
@@ -281,7 +300,8 @@
         f.lead_code=lead.lead_code||lead.lead_code||'';
         f.job_title=lead.position||lead.pos||'';
         f.client=lead.company_name||'';
-        f.state=lead.state||''; f.city=lead.city||'';
+        var loc=parseLeadLocation(lead.location);
+        f.city=loc.city; f.state=loc.state;
       }
     }
     STATE.bd.form=f;
