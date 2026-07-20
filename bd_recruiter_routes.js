@@ -251,6 +251,46 @@ module.exports = function (app, deps) {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // Company-wide job board — every recruiter can see every job (title, client,
+  // location, who's on it, how busy it is) so they can ask to be assigned.
+  // Candidate contact details stay locked until assignment (see the masked
+  // branch of GET /job-orders/:id/submissions).
+  // NOTE: registered before /job-orders/:id so "browse" isn't parsed as an id.
+  app.get('/job-orders/browse', auth, async (req, res) => {
+    try {
+      if (!isRecruiter(req) && !isBDM(req)) return res.status(403).json({ error: 'Recruiting roles only.' });
+      const { data: jobs, error } = await supabase.from('job_orders')
+        .select('id,job_code,job_title,client,city,state,country,status,priority,positions,job_type,emp_level,remote,primary_skills,created_at,company:companies(id,name,industry)')
+        .is('deleted_at', null).order('created_at', { ascending: false });
+      if (error) throw error;
+      const list = jobs || [];
+      const ids = list.map(j => j.id);
+      const assignsByJob = {}, subCounts = {}, myReqs = {};
+      if (ids.length) {
+        const { data: assigns } = await supabase.from('recruiter_assignments')
+          .select('job_order_id, recruiter_id, recruiter:users!recruiter_id(id,name)')
+          .in('job_order_id', ids);
+        (assigns || []).forEach(a => { (assignsByJob[a.job_order_id] = assignsByJob[a.job_order_id] || []).push(a); });
+        const { data: subs } = await supabase.from('submissions')
+          .select('job_order_id').in('job_order_id', ids).is('deleted_at', null);
+        (subs || []).forEach(s => { subCounts[s.job_order_id] = (subCounts[s.job_order_id] || 0) + 1; });
+        const { data: reqs } = await supabase.from('assignment_requests')
+          .select('id,job_order_id,status').eq('recruiter_id', req.user.id).in('job_order_id', ids);
+        (reqs || []).forEach(r => {
+          const prev = myReqs[r.job_order_id];
+          if (!prev || r.status === 'pending') myReqs[r.job_order_id] = r;
+        });
+      }
+      res.json(list.map(j => ({
+        ...j,
+        recruiters: (assignsByJob[j.id] || []).map(a => (a.recruiter && a.recruiter.name) || '').filter(Boolean),
+        submission_count: subCounts[j.id] || 0,
+        assigned_to_me: (assignsByJob[j.id] || []).some(a => a.recruiter_id === req.user.id),
+        my_request: myReqs[j.id] ? { id: myReqs[j.id].id, status: myReqs[j.id].status } : null
+      })));
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   app.get('/job-orders/:id', auth, async (req, res) => {
     try {
       const { data, error } = await supabase.from('job_orders')
@@ -388,6 +428,65 @@ ${String(j.job_description).slice(0, 12000)}`;
       await supabase.from('recruiter_assignments')
         .delete().eq('job_order_id', req.params.id).eq('recruiter_id', req.params.rid);
       res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ── Assignment requests: recruiter asks to be put on a job ────────────────
+  app.post('/job-orders/:id/request-assignment', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isRecruiter(req)) return res.status(403).json({ error: 'Recruiters only.' });
+      const jid = req.params.id, uid = req.user.id;
+      const assigned = await assignedJobOrderIds(uid);
+      if (assigned.includes(jid)) return res.status(400).json({ error: 'You are already assigned to this job.' });
+      const { data: existing } = await supabase.from('assignment_requests')
+        .select('id,status').eq('job_order_id', jid).eq('recruiter_id', uid).eq('status', 'pending').maybeSingle();
+      if (existing) return res.json(existing);
+      const { data, error } = await supabase.from('assignment_requests')
+        .insert({ job_order_id: jid, recruiter_id: uid, note: (req.body && req.body.note) || null })
+        .select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // BDM: the queue of recruiters asking for jobs. Recruiter: their own requests.
+  app.get('/assignment-requests', auth, async (req, res) => {
+    try {
+      let q = supabase.from('assignment_requests')
+        .select('id,status,note,created_at,decided_at,job_order_id,recruiter_id,' +
+          'job:job_orders(id,job_code,job_title,client),recruiter:users!recruiter_id(id,name,employee_id)')
+        .order('created_at', { ascending: false }).limit(100);
+      if (isBDM(req)) { if (req.query.status) q = q.eq('status', req.query.status); }
+      else if (isRecruiter(req)) q = q.eq('recruiter_id', req.user.id);
+      else return res.status(403).json({ error: 'Recruiting roles only.' });
+      const { data, error } = await q;
+      if (error) throw error;
+      res.json(data || []);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post('/assignment-requests/:id/decide', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req)) return res.status(403).json({ error: 'Only BD Managers can decide assignment requests.' });
+      const action = (req.body && req.body.action) || '';
+      if (!['approve', 'decline'].includes(action)) return res.status(400).json({ error: "action must be 'approve' or 'decline'" });
+      const { data: reqRow } = await supabase.from('assignment_requests')
+        .select('id,job_order_id,recruiter_id,status').eq('id', req.params.id).maybeSingle();
+      if (!reqRow) return res.status(404).json({ error: 'Request not found' });
+      if (reqRow.status !== 'pending') return res.status(400).json({ error: 'Request already decided.' });
+      if (action === 'approve') {
+        const { error: aerr } = await supabase.from('recruiter_assignments')
+          .upsert({ job_order_id: reqRow.job_order_id, recruiter_id: reqRow.recruiter_id, assigned_by: req.user.id },
+            { onConflict: 'job_order_id,recruiter_id', ignoreDuplicates: true });
+        if (aerr) throw aerr;
+      }
+      const { data, error } = await supabase.from('assignment_requests')
+        .update({ status: action === 'approve' ? 'approved' : 'declined', decided_by: req.user.id, decided_at: new Date().toISOString() })
+        .eq('id', req.params.id).select().single();
+      if (error) throw error;
+      res.json(data);
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
@@ -739,7 +838,19 @@ ${String(j.job_description).slice(0, 12000)}`;
     try {
       if (isRecruiter(req) && !isBDM(req)) {
         const ids = await assignedJobOrderIds(req.user.id);
-        if (!ids.includes(req.params.id)) return res.status(403).json({ error: 'Not assigned to this job order.' });
+        if (!ids.includes(req.params.id)) {
+          // Job-board browse: an unassigned recruiter may see who is on the job
+          // and how far along they are, but candidate contact details (email,
+          // phone, resume) unlock only once the recruiter is assigned.
+          const { data, error } = await supabase.from('submissions')
+            .select('id,job_order_id,stage,sub_stage,created_at,submitted_at,' +
+              'candidate:candidates(id,candidate_code,full_name,current_title,city,state,experience_years),' +
+              'recruiter:users!recruiter_id(id,name)')
+            .eq('job_order_id', req.params.id).is('deleted_at', null)
+            .order('created_at', { ascending: false });
+          if (error) throw error;
+          return res.json({ masked: true, submissions: data || [] });
+        }
       }
       const { data, error } = await supabase.from('submissions')
         .select(SUBMISSION_SELECT).eq('job_order_id', req.params.id).is('deleted_at', null)

@@ -111,6 +111,51 @@ try {
   step('Nav keeps My Jobs after Dashboard', navItems[0] === 'Dashboard' && navItems[1] === 'My Jobs', navItems.join(' | '));
   step('Nav keeps Candidates & Sourcing', navItems.includes('Candidates') && navItems.includes('Sourcing'));
 
+  // ── Job board (All Jobs) ───────────────────────────────────────────────────
+  const jbNav = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('.sb-nav .nav-item')).map(e => e.textContent.trim()));
+  step('Nav shows All Jobs for recruiter', jbNav.includes('All Jobs'), jbNav.join(' | '));
+
+  await page.evaluate(() => {
+    // stub the API so the board's real load path runs against fixed data
+    const browse = [
+      { id: 'b1', job_code: 'JO-201', job_title: 'React Developer', client: 'Stark Industries', city: 'NYC', state: 'NY',
+        status: 'Active', priority: 'High', recruiters: ['Alice'], submission_count: 6, assigned_to_me: false, my_request: null },
+      { id: 'b2', job_code: 'JO-202', job_title: 'Cloud Architect', client: 'Wayne Ent', city: 'Gotham', state: 'NJ',
+        status: 'Active', priority: 'Normal', recruiters: [], submission_count: 0, assigned_to_me: true, my_request: null },
+      { id: 'b3', job_code: 'JO-203', job_title: 'ML Engineer', client: 'Oscorp', city: 'SF', state: 'CA',
+        status: 'On Hold', priority: 'Normal', recruiters: ['Bob'], submission_count: 2, assigned_to_me: false, my_request: { id: 'r1', status: 'pending' } }
+    ];
+    const maskedSubs = { masked: true, submissions: [
+      { id: 's1', stage: 'Screening', candidate: { id: 'c1', candidate_code: 'CAND-9', full_name: 'Peter Parker', current_title: 'Frontend Dev', city: 'Queens', state: 'NY' }, recruiter: { name: 'Alice' } }
+    ]};
+    const _origApiGet = window.apiGet;
+    window.apiGet = function(p){
+      if (p === '/job-orders/browse') return Promise.resolve(JSON.parse(JSON.stringify(browse)));
+      if (/^\/job-orders\/b\d+\/submissions$/.test(p)) return Promise.resolve(JSON.parse(JSON.stringify(maskedSubs)));
+      return _origApiGet.apply(this, arguments);
+    };
+    STATE.jb.list = null;
+    goPage('job_board');
+  });
+  await page.waitForTimeout(400);
+  const board = await page.evaluate(() => document.getElementById('content').innerHTML);
+  step('Board lists all company jobs', board.includes('React Developer') && board.includes('Cloud Architect') && board.includes('ML Engineer'));
+  step('Board shows recruiters + activity', board.includes('Alice') && board.includes('6 subs'));
+  step('Unassigned job offers Request assignment', board.includes('Request assignment'));
+  step('Assigned job shows On your desk', board.includes('On your desk'));
+  step('Pending request shows waiting state', board.includes('Requested — waiting on BD'));
+
+  // masked candidate modal — through the real fetch path (stubbed API)
+  await page.evaluate(() => { jbOpenJob('b1'); });
+  await page.waitForTimeout(300);
+  const modal = await page.evaluate(() => document.getElementById('content').innerHTML);
+  step('Modal shows candidate name + stage', modal.includes('Peter Parker') && modal.includes('Screening'));
+  step('Modal shows contact-lock notice', modal.includes('Contact details are hidden'));
+  step('Modal never leaks contacts', !modal.includes('@') || !/[\w.]+@[\w.]+/.test((modal.match(/Peter[^<]*/)||[''])[0]));
+  await page.evaluate(() => { jbCloseModal(); goPage('dashboard'); });
+  await page.waitForTimeout(200);
+
   // Sanity: BD guest still gets the classic dashboard
   await page.evaluate(() => {
     STATE.user.role = 'bd'; STATE.user.roles = ['bd'];
@@ -123,6 +168,21 @@ try {
     Array.from(document.querySelectorAll('.sb-nav .nav-item')).map(e => e.textContent.trim()));
   step('BD still sees lead widgets', bdContent.includes('Response rate trend') && bdContent.includes('Industry breakdown'));
   step('BD still sees Leads nav', bdNav.includes('Leads'), bdNav.join(' | '));
+  step('BD has no All Jobs nav (their Jobs page covers it)', !bdNav.includes('All Jobs'), bdNav.join(' | '));
+
+  // BDM assignment-requests card
+  await page.evaluate(() => {
+    STATE.jb._reqs = { _at: Date.now(), list: [
+      { id: 'r9', status: 'pending', created_at: new Date(Date.now()-7200000).toISOString(),
+        job: { id: 'b1', job_code: 'JO-201', job_title: 'React Developer' },
+        recruiter: { id: 'u9', name: 'James Wilson' } }
+    ]};
+    render();
+  });
+  await page.waitForTimeout(200);
+  const bdDash = await page.evaluate(() => document.getElementById('content').innerHTML);
+  step('BDM sees assignment-requests card', bdDash.includes('Assignment requests') && bdDash.includes('James Wilson') && bdDash.includes('React Developer'));
+  step('Request row has Assign/Decline buttons', bdDash.includes('Assign') && bdDash.includes('Decline'));
 
   step('No JS page errors', pageErrors.length === 0, pageErrors.join('; ').slice(0, 300));
 } finally {

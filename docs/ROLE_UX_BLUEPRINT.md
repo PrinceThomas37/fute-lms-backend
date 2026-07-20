@@ -50,8 +50,14 @@ segment big, the neighbouring hand-off points small, and everything else not at 
 **Mission**: fill assigned jobs with candidates. **Measured on**: submissions/week,
 interviews, placements, rejection rate.
 
-- **Sidebar**: Dashboard · My Jobs · Candidates · Sourcing · Email · Reminders · My Profile
-  (no Leads — shipped)
+- **Sidebar**: Dashboard · My Jobs · All Jobs · Candidates · Sourcing · Email · Reminders ·
+  My Profile (no Leads — shipped)
+- **All Jobs** (✅ shipped): company-wide job board. Every recruiter sees every job —
+  title, client, location, status, priority, who's on it, submission activity — and a
+  *Request assignment* button. Candidates on unassigned jobs show name/title/stage
+  only; **contact details (email, phone, resume) unlock on assignment** (masked
+  server-side). Requests land on the BD Manager's dashboard as an
+  **Assignment requests** card with *Assign* / *Decline*.
 - **Dashboard** (shipped): greeting banner (subs week/month, in interview, placements)
   → desk tiles → **My jobs** card (assigned-timeline counts, top-5 by team activity,
   "All my jobs →") → **My candidate pipeline** by stage → **Upcoming interviews** → Reminders.
@@ -190,19 +196,50 @@ placements (revenue).
 | 5 | Admin org-funnel + system-health cards | Oversight, lowest urgency |
 | 6 | `user_goals` table + target-progress banners (RA + recruiter) | Needs product input on targets |
 
-## 9. Open questions (answers would sharpen, not block)
+## 9. Decisions from product (2026-07-20)
 
-1. **Targets**: do RAs/recruiters have official daily/weekly quotas today (e.g. 20
-   leads/day, 10 subs/week)? Who sets them — admin, or each lead/manager?
-2. **BDM ↔ recruiter reporting**: is a recruiter attached to one BD manager, or do
-   all recruiters work all BDMs' jobs? (Affects whose numbers appear in whose team card.)
-3. **Deliverability for RA Lead**: do RA Leads actually manage sending accounts, or
-   should that page be BD Lead/Admin only?
-4. **Rejection reasons**: does the business track *why* clients reject candidates?
+1. **Targets are milestones, not quotas.** Progress UI must read as motivation —
+   "7 of 10 this week 🎯", milestone celebrations on crossing — never as
+   enforcement. No red "behind target" states, no failure language. Copy tone:
+   reach for it, don't answer for it.
+2. **The next-in-line manager sets milestones** for the people under them
+   (RA Lead → RAs, BDM/Recruiter Lead → recruiters, Associate Director → leads).
+   `user_goals` needs `set_by` and period; the settings UI lives on the manager's
+   team page, not in Admin.
+3. **Company-wide job visibility for recruiters** — shipped (see §1 All Jobs):
+   browse all jobs, masked candidate contacts until assigned, request-assignment
+   loop through the BDM dashboard.
+
+## 10. Extended org structure (proposed — pending product detail)
+
+The role system (`users.roles[]`) can host new profiles without schema change.
+Proposed next roles, to be specified with product before building:
+
+- **Recruiter Lead (`recruiter_lead`)**: runs a team of recruiters. Sees: team
+  submissions/interviews/placements per recruiter, workload balance (jobs per
+  recruiter), idle alerts, and sets recruiter milestones. Can reassign jobs
+  within the team (assignment stays BDM-approved). Dashboard = recruiter
+  dashboard + "My recruiting team" card.
+- **Associate Director (`assoc_director`)**: oversight across desks. Sees the
+  entire work detail of the BDs and recruiters in their span: org funnel,
+  desk-by-desk comparison, any team member's dashboard (view-as, read-only),
+  milestone-setting for the leads under them. No day-to-day action buttons —
+  their screens are analysis-first.
+- Hierarchy needs one new field: `users.manager_id` (who is my next-in-line),
+  which also drives who may set whose milestones (§9.2) and who appears in
+  whose team cards — replacing today's role-pair conventions (`bdm` field).
+
+## 11. Open questions (answers would sharpen, not block)
+
+1. **Rejection reasons**: does the business track *why* clients reject candidates?
    If yes, adding `rejection_reason` unlocks the recruiter quality card.
-5. **Revenue**: are placement fees tracked well enough that BDM/Admin dashboards
+2. **Revenue**: are placement fees tracked well enough that BDM/Admin dashboards
    should show ₹/$ value instead of counts?
-6. **Interview logistics**: who actually schedules interviews — recruiter or BDM?
+3. **Interview logistics**: who actually schedules interviews — recruiter or BDM?
    (Decides where scheduling UI lives.)
-7. **RA quality signal**: is "lead became a job" the right quality metric for RAs,
+4. **RA quality signal**: is "lead became a job" the right quality metric for RAs,
    or is "lead got a response" fairer (jobs depend on BD skill too)?
+5. **Deliverability for RA Lead**: do RA Leads actually manage sending accounts, or
+   should that page be BD Lead/Admin only?
+6. **New-role spans**: for Recruiter Lead / Associate Director — who reports to
+   whom exactly, and which decisions are theirs alone? (Feeds §10.)
