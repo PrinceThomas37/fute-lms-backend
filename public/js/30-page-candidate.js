@@ -82,7 +82,7 @@
 
   // ── back-navigation: return to wherever the profile was opened from ────────
   function backLabel(back){
-    var labels = { bd_submissions:'Submissions', bd_pipeline:'Pipeline', bd_kanban:'Board', bd_jodetail:'Job', bd_myjobs:'My Jobs', applicants:'Candidates' };
+    var labels = { bd_submissions:'Candidates', bd_pipeline:'Candidates', bd_kanban:'Board', bd_jodetail:'Job', bd_myjobs:'My Jobs', applicants:'Candidates' };
     return labels[(back&&back.page)||''] || 'Candidates';
   }
   window.cpGoBack = function(){
@@ -198,8 +198,7 @@
         '<td style="padding:9px 10px;font-size:12px">'+(p?code(p.pipeline_code||'')+' <span style="color:var(--text3)">'+esc(p.pipeline_status||'')+'</span>':'<span style="color:var(--text3)">—</span>')+'</td>'+
         '<td style="padding:9px 10px;font-size:12px">'+(s?code(s.submission_code||'')+' <span style="color:var(--text3)">'+esc(s.stage||'')+'</span>':'<span style="color:var(--text3)">—</span>')+'</td>'+
         '<td style="padding:9px 10px;white-space:nowrap">'+
-          '<button class="btn btn-sm btn-outline" onclick="bdOpenPipeline(\''+j.id+'\')">Pipeline</button> '+
-          '<button class="btn btn-sm btn-outline" onclick="bdOpenSubmissions(\''+j.id+'\')">Submissions</button>'+
+          '<button class="btn btn-sm btn-outline" onclick="bdOpenPipeline(\''+j.id+'\')">Open</button>'+
         '</td>'+
       '</tr>';
     }).join('') || '<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--text3)">No jobs yet.</td></tr>';

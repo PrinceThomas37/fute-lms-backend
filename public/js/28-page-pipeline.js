@@ -10,7 +10,7 @@
   var PSTATUS_COLORS = { 'Tagged':'var(--text3)','Contacted':'#6b7280','Interested':'#2563eb','Screening':'var(--amber)',
     'Shortlisted':'#7c3aed','Moved to Submission':'var(--green)','Not Interested':'#9ca3af','Rejected':'var(--red)' };
 
-  if (STATE.bd) { STATE.bd.pipeline = STATE.bd.pipeline || []; STATE.bd.view = STATE.bd.view || {}; }
+  if (STATE.bd) { STATE.bd.pipeline = STATE.bd.pipeline || []; STATE.bd.view = STATE.bd.view || {}; STATE.bd.plSel = STATE.bd.plSel || {}; }
 
   function esc(s){ return String(s==null?'':s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
   function code(t){ return '<span style="font-family:var(--mono);font-size:10.5px;color:var(--text3);font-weight:600">'+esc(t)+'</span>'; }
@@ -22,8 +22,13 @@
   function candLoc(c){ return [c.city,c.state].filter(Boolean).join(', ') || c.current_location || '—'; }
 
   function loadPipeline(jid){
-    return apiGet('/job-orders/'+jid+'/pipeline').then(function(d){ STATE.bd.pipeline = d||[]; })
-      .catch(function(e){ STATE.bd.pipeline = []; showToast('Failed to load pipeline: '+e.message,'error'); });
+    return apiGet('/job-orders/'+jid+'/pipeline').then(function(d){
+      STATE.bd.pipeline = d||[];
+      // Seed STATE.bd.submissions from promoted rows so the shared stage modal
+      // can resolve each candidate's current stage + name for its confirmation.
+      STATE.bd.submissions = (d||[]).filter(function(p){ return p.submission; })
+        .map(function(p){ return Object.assign({}, p.submission, { candidate: p.candidate }); });
+    }).catch(function(e){ STATE.bd.pipeline = []; showToast('Failed to load pipeline: '+e.message,'error'); });
   }
 
   // ── render + routing wrap (mirrors the applicants module) ────────────────────
@@ -32,7 +37,7 @@
     _prevRender.apply(this, arguments);
     if (STATE.page === 'bd_pipeline'){
       paintPipelinePage();
-      var t = document.querySelector('.tb-title'); if (t) t.textContent = 'Pipeline';
+      var t = document.querySelector('.tb-title'); if (t) t.textContent = 'Candidates';
     }
   };
   var _prevGoPage = window.goPage;
@@ -63,13 +68,26 @@
 
     var tabs =
       '<div style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:14px">'+
-        '<div style="padding:8px 16px;font-size:13px;font-weight:700;color:var(--accent);border-bottom:2px solid var(--accent)">Pipeline ('+rows.length+')</div>'+
-        '<div style="padding:8px 16px;font-size:13px;font-weight:600;color:var(--text3);cursor:pointer" onclick="bdOpenSubmissions(\''+j.id+'\')">Submissions</div>'+
+        '<div style="padding:8px 16px;font-size:13px;font-weight:700;color:var(--accent);border-bottom:2px solid var(--accent)">Candidates ('+rows.length+')</div>'+
         '<div style="padding:8px 16px;font-size:13px;font-weight:600;color:var(--text3);cursor:pointer" onclick="bdOpenKanban(\''+j.id+'\')">Board</div>'+
         (isBDM(u)?'<div style="padding:8px 16px;font-size:13px;font-weight:600;color:var(--text3);cursor:pointer" onclick="bdOpenJobOrder(\''+j.id+'\')">Job details</div>':'')+
       '</div>';
 
-    var head = ['Pipeline ID','Candidate Name','Stage','Work Auth','Mobile','Location','Country','Exp','Source','Resume',
+    // multi-select bulk bar (ported from the old Submissions tab): sequence
+    // the promoted candidates, or email the JD to the selected ones.
+    var sel = STATE.bd.plSel || {};
+    var selRows = rows.filter(function(p){ return sel[p.id]; });
+    var bulkBar = selRows.length ?
+      '<div class="card" style="padding:9px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
+        '<span style="font-size:12.5px;color:var(--text2)"><b>'+selRows.length+'</b> selected</span>'+
+        '<button class="btn btn-sm btn-primary" onclick="plSequenceSelected()">▶ Start sequence</button>'+
+        '<button class="btn btn-sm btn-outline" onclick="plEmailJD()">✉ Email JD</button>'+
+        '<button class="btn btn-sm btn-outline" onclick="plClearSel()">Clear</button>'+
+      '</div>' : '';
+
+    var allOn = rows.length && rows.every(function(p){ return sel[p.id]; });
+    var head = '<th style="padding:8px 9px"><input type="checkbox" '+(allOn?'checked':'')+' onclick="plToggleSelAll()"></th>'+
+      ['Pipeline ID','Candidate Name','Stage','Work Auth','Mobile','Location','Country','Exp','Source','Resume',
       'Bill Rate','Pay Rate','Employer','Availability','Notice','Current CTC','Tagged By','Tagged On','']
       .map(function(h){ return '<th style="text-align:left;padding:8px 9px;font-size:11px;color:var(--text3);font-weight:700;white-space:nowrap">'+h+'</th>'; }).join('');
 
@@ -91,6 +109,7 @@
         (p.submission&&p.submission.sub_stage?'<div style="font-size:10px;color:var(--text3);margin-top:2px">'+esc(p.submission.sub_stage)+'</div>':'');
       var resume = c.resume_url ? '<a href="'+esc(c.resume_url)+'" target="_blank" rel="noopener" style="color:var(--accent)">↗</a>' : '—';
       return '<tr style="border-top:1px solid var(--border)">'+
+        '<td style="padding:8px 9px"><input type="checkbox" '+(sel[p.id]?'checked':'')+' onclick="plToggleSel(\''+p.id+'\')"></td>'+
         '<td style="padding:8px 9px;white-space:nowrap">'+code(p.pipeline_code||'—')+'</td>'+
         '<td style="padding:8px 9px;white-space:nowrap;font-size:12.5px"><span style="font-weight:600;cursor:pointer;color:var(--accent)" onclick="bdOpenCandidate(\''+c.id+'\')">'+esc(c.full_name||'—')+'</span> '+(c.candidate_code?'<span style="font-size:10px;color:var(--text3)">'+esc(c.candidate_code)+'</span>':'')+'</td>'+
         '<td style="padding:8px 9px">'+statusSel+'</td>'+
@@ -116,17 +135,17 @@
         '</td>'+
       '</tr>';
     }).join('');
-    if (!rows.length) body = '<tr><td colspan="19" style="padding:40px;text-align:center;color:var(--text3)">No candidates tagged yet. '+
-      '<span style="color:var(--accent);cursor:pointer" onclick="plOpenAdd(\''+j.id+'\')">Add to pipeline →</span></td></tr>';
+    if (!rows.length) body = '<tr><td colspan="20" style="padding:40px;text-align:center;color:var(--text3)">No candidates on this job yet. '+
+      '<span style="color:var(--accent);cursor:pointer" onclick="plOpenAdd(\''+j.id+'\')">Add a candidate →</span></td></tr>';
 
     return '<div class="page">'+
       '<div style="margin-bottom:6px"><span onclick="goPage(\''+back+'\')" style="cursor:pointer;font-size:12.5px;color:var(--accent)">← Jobs</span></div>'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'+
         '<div><div style="display:flex;gap:8px;align-items:center">'+code(j.job_code)+'<span style="font-weight:700;font-size:17px">'+esc(j.job_title||'')+'</span></div>'+
         '<div style="font-size:12.5px;color:var(--text3)">'+esc(j.client||'')+'</div></div>'+
-        '<button class="btn btn-primary" onclick="plOpenAdd(\''+j.id+'\')">+ Add to Pipeline</button>'+
+        '<button class="btn btn-primary" onclick="plOpenAdd(\''+j.id+'\')">+ Add Candidate</button>'+
       '</div>'+
-      tabs+
+      tabs+bulkBar+
       '<div class="card" style="padding:0;overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:1500px">'+
         '<thead><tr style="background:var(--bg)">'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>'+
     '</div>';
@@ -155,6 +174,43 @@
       openStageModal(sub.id, stage, function(){ bdReloadPipeline(); });
     }).catch(function(e){ showToast('Failed: '+e.message,'error'); });
   };
+  // ── multi-select + bulk actions (ported from the old Submissions tab) ───────
+  function plCurrentRows(){
+    var jid = STATE.bd.view && STATE.bd.view.pipelineJoId;
+    return (STATE.bd.pipeline||[]).filter(function(p){ return p.job_order_id===jid; });
+  }
+  function plSelectedRows(){ var sel=STATE.bd.plSel||{}; return plCurrentRows().filter(function(p){ return sel[p.id]; }); }
+  window.plToggleSel = function(id){ STATE.bd.plSel=STATE.bd.plSel||{}; STATE.bd.plSel[id]=!STATE.bd.plSel[id]; render(); };
+  window.plToggleSelAll = function(){
+    var rows=plCurrentRows(); var sel=STATE.bd.plSel||{};
+    var allOn=rows.length && rows.every(function(p){ return sel[p.id]; });
+    rows.forEach(function(p){ sel[p.id]=!allOn; }); STATE.bd.plSel=sel; render();
+  };
+  window.plClearSel = function(){ STATE.bd.plSel={}; render(); };
+  window.plSequenceSelected = function(){
+    // Sequencing enrolls a submitted candidate — only promoted rows qualify.
+    var promoted = plSelectedRows().filter(function(p){ return p.submission_id; });
+    var skipped = plSelectedRows().length - promoted.length;
+    if(!promoted.length){ showToast('Sequencing needs submitted candidates — move a tagged candidate to a stage first','error'); return; }
+    if(skipped) showToast(skipped+' tagged (un-submitted) candidate'+(skipped>1?'s':'')+' skipped','info');
+    if(typeof wfStartSequence!=='function'){ showToast('Sequencing module not loaded','error'); return; }
+    var items = promoted.map(function(p){ var c=p.candidate||{}; return { entity_id:p.submission_id, label:c.full_name||'Candidate' }; });
+    wfStartSequence('submission', items, { anyStage:true });
+  };
+  window.plEmailJD = function(){
+    var jid = STATE.bd.view && STATE.bd.view.pipelineJoId;
+    var j = joById(jid) || {};
+    var emails = plSelectedRows().map(function(p){ return (p.candidate||{}).email; }).filter(Boolean);
+    if(!emails.length){ showToast('No email addresses on the selected candidates','error'); return; }
+    var subject = 'Job opportunity: '+(j.job_title||'')+(j.client?' — '+j.client:'');
+    var body = 'Hi,\n\nI would like to share this opportunity with you:\n\n'+
+      (j.job_title||'')+(j.client?' at '+j.client:'')+'\n'+
+      [j.city,j.state].filter(Boolean).join(', ')+'\n\n'+
+      String(j.job_description||'').slice(0,1300)+
+      '\n\nPlease reply if you are interested and we can discuss the details.\n';
+    window.open('mailto:'+encodeURIComponent(emails.join(','))+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body), '_self');
+  };
+
   window.plRemove = function(id){
     if (!confirm('Remove this candidate from the pipeline?')) return;
     apiDelete('/pipeline/'+id).then(function(){ showToast('Removed from pipeline','info'); bdReloadPipeline(); })
