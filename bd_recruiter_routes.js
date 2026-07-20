@@ -251,6 +251,46 @@ module.exports = function (app, deps) {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // Company-wide job board — every recruiter can see every job (title, client,
+  // location, who's on it, how busy it is) so they can ask to be assigned.
+  // Candidate contact details stay locked until assignment (see the masked
+  // branch of GET /job-orders/:id/submissions).
+  // NOTE: registered before /job-orders/:id so "browse" isn't parsed as an id.
+  app.get('/job-orders/browse', auth, async (req, res) => {
+    try {
+      if (!isRecruiter(req) && !isBDM(req)) return res.status(403).json({ error: 'Recruiting roles only.' });
+      const { data: jobs, error } = await supabase.from('job_orders')
+        .select('id,job_code,job_title,client,city,state,country,status,priority,positions,job_type,emp_level,remote,primary_skills,created_at,company:companies(id,name,industry)')
+        .is('deleted_at', null).order('created_at', { ascending: false });
+      if (error) throw error;
+      const list = jobs || [];
+      const ids = list.map(j => j.id);
+      const assignsByJob = {}, subCounts = {}, myReqs = {};
+      if (ids.length) {
+        const { data: assigns } = await supabase.from('recruiter_assignments')
+          .select('job_order_id, recruiter_id, recruiter:users!recruiter_id(id,name)')
+          .in('job_order_id', ids);
+        (assigns || []).forEach(a => { (assignsByJob[a.job_order_id] = assignsByJob[a.job_order_id] || []).push(a); });
+        const { data: subs } = await supabase.from('submissions')
+          .select('job_order_id').in('job_order_id', ids).is('deleted_at', null);
+        (subs || []).forEach(s => { subCounts[s.job_order_id] = (subCounts[s.job_order_id] || 0) + 1; });
+        const { data: reqs } = await supabase.from('assignment_requests')
+          .select('id,job_order_id,status').eq('recruiter_id', req.user.id).in('job_order_id', ids);
+        (reqs || []).forEach(r => {
+          const prev = myReqs[r.job_order_id];
+          if (!prev || r.status === 'pending') myReqs[r.job_order_id] = r;
+        });
+      }
+      res.json(list.map(j => ({
+        ...j,
+        recruiters: (assignsByJob[j.id] || []).map(a => (a.recruiter && a.recruiter.name) || '').filter(Boolean),
+        submission_count: subCounts[j.id] || 0,
+        assigned_to_me: (assignsByJob[j.id] || []).some(a => a.recruiter_id === req.user.id),
+        my_request: myReqs[j.id] ? { id: myReqs[j.id].id, status: myReqs[j.id].status } : null
+      })));
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   app.get('/job-orders/:id', auth, async (req, res) => {
     try {
       const { data, error } = await supabase.from('job_orders')
@@ -391,6 +431,65 @@ ${String(j.job_description).slice(0, 12000)}`;
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // ── Assignment requests: recruiter asks to be put on a job ────────────────
+  app.post('/job-orders/:id/request-assignment', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isRecruiter(req)) return res.status(403).json({ error: 'Recruiters only.' });
+      const jid = req.params.id, uid = req.user.id;
+      const assigned = await assignedJobOrderIds(uid);
+      if (assigned.includes(jid)) return res.status(400).json({ error: 'You are already assigned to this job.' });
+      const { data: existing } = await supabase.from('assignment_requests')
+        .select('id,status').eq('job_order_id', jid).eq('recruiter_id', uid).eq('status', 'pending').maybeSingle();
+      if (existing) return res.json(existing);
+      const { data, error } = await supabase.from('assignment_requests')
+        .insert({ job_order_id: jid, recruiter_id: uid, note: (req.body && req.body.note) || null })
+        .select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // BDM: the queue of recruiters asking for jobs. Recruiter: their own requests.
+  app.get('/assignment-requests', auth, async (req, res) => {
+    try {
+      let q = supabase.from('assignment_requests')
+        .select('id,status,note,created_at,decided_at,job_order_id,recruiter_id,' +
+          'job:job_orders(id,job_code,job_title,client),recruiter:users!recruiter_id(id,name,employee_id)')
+        .order('created_at', { ascending: false }).limit(100);
+      if (isBDM(req)) { if (req.query.status) q = q.eq('status', req.query.status); }
+      else if (isRecruiter(req)) q = q.eq('recruiter_id', req.user.id);
+      else return res.status(403).json({ error: 'Recruiting roles only.' });
+      const { data, error } = await q;
+      if (error) throw error;
+      res.json(data || []);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post('/assignment-requests/:id/decide', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req)) return res.status(403).json({ error: 'Only BD Managers can decide assignment requests.' });
+      const action = (req.body && req.body.action) || '';
+      if (!['approve', 'decline'].includes(action)) return res.status(400).json({ error: "action must be 'approve' or 'decline'" });
+      const { data: reqRow } = await supabase.from('assignment_requests')
+        .select('id,job_order_id,recruiter_id,status').eq('id', req.params.id).maybeSingle();
+      if (!reqRow) return res.status(404).json({ error: 'Request not found' });
+      if (reqRow.status !== 'pending') return res.status(400).json({ error: 'Request already decided.' });
+      if (action === 'approve') {
+        const { error: aerr } = await supabase.from('recruiter_assignments')
+          .upsert({ job_order_id: reqRow.job_order_id, recruiter_id: reqRow.recruiter_id, assigned_by: req.user.id },
+            { onConflict: 'job_order_id,recruiter_id', ignoreDuplicates: true });
+        if (aerr) throw aerr;
+      }
+      const { data, error } = await supabase.from('assignment_requests')
+        .update({ status: action === 'approve' ? 'approved' : 'declined', decided_by: req.user.id, decided_at: new Date().toISOString() })
+        .eq('id', req.params.id).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // Job orders a specific user is assigned to — lets an admin/BDM see a
   // recruiter's assignments from that recruiter's profile (the recruiter's own
   // /job-orders is scoped to themselves; this is the "view someone else" version).
@@ -425,7 +524,7 @@ ${String(j.job_description).slice(0, 12000)}`;
     'id,candidate_code,full_name,first_name,last_name,email,phone,alt_phone,linkedin_url,' +
     'current_location,city,state,country,zip,current_title,headline,skills,experience_years,' +
     'work_authorization,clearance,current_employer,availability,notice_period,current_ctc,expected_ctc,' +
-    'bill_rate,pay_rate,pay_type,pay_currency,applicant_status,source,resume_url,resume_filename,' +
+    'bill_rate,pay_rate,pay_type,pay_currency,applicant_status,source,resume_url,resume_filename,resume_text,' +
     'tags,owner_id,created_by,created_at,updated_at,' +
     'owner:users!owner_id(id,name,employee_id),creator:users!created_by(id,name,employee_id)';
 
@@ -739,7 +838,19 @@ ${String(j.job_description).slice(0, 12000)}`;
     try {
       if (isRecruiter(req) && !isBDM(req)) {
         const ids = await assignedJobOrderIds(req.user.id);
-        if (!ids.includes(req.params.id)) return res.status(403).json({ error: 'Not assigned to this job order.' });
+        if (!ids.includes(req.params.id)) {
+          // Job-board browse: an unassigned recruiter may see who is on the job
+          // and how far along they are, but candidate contact details (email,
+          // phone, resume) unlock only once the recruiter is assigned.
+          const { data, error } = await supabase.from('submissions')
+            .select('id,job_order_id,stage,sub_stage,created_at,submitted_at,' +
+              'candidate:candidates(id,candidate_code,full_name,current_title,city,state,experience_years),' +
+              'recruiter:users!recruiter_id(id,name)')
+            .eq('job_order_id', req.params.id).is('deleted_at', null)
+            .order('created_at', { ascending: false });
+          if (error) throw error;
+          return res.json({ masked: true, submissions: data || [] });
+        }
       }
       const { data, error } = await supabase.from('submissions')
         .select(SUBMISSION_SELECT).eq('job_order_id', req.params.id).is('deleted_at', null)
@@ -824,10 +935,30 @@ ${String(j.job_description).slice(0, 12000)}`;
       }
 
       // ── THE GATE ──────────────────────────────────────────────────────────
-      // Moving INTO "Submitted to Client" requires BD Manager. A recruiter can
-      // take a candidate up to "Submitted to BDM" but no further on their own.
+      // Recruiters own the stages up to "Submitted to BDM"; everything after
+      // (client submission, interviews, offer, placement, rejection) is BD's.
+      // Recruiters can still SEE later stages, they just can't change them.
+      const RECRUITER_STAGES = ['Sourced', 'Screening', 'Submitted to BDM'];
+      if (recruiterScoped) {
+        if (!RECRUITER_STAGES.includes(newStage)) {
+          return res.status(403).json({ error: 'Recruiters can move candidates up to "Submitted to BDM" — the BD team owns the stages after that.' });
+        }
+        if (!RECRUITER_STAGES.includes(sub.stage)) {
+          return res.status(403).json({ error: 'This candidate is with the BD team now — only a BD Manager can change this stage.' });
+        }
+        if (newStage === 'Submitted to BDM') {
+          const det = req.body.submission_details;
+          if (!det || !String(det.comment || '').trim()) {
+            return res.status(400).json({ error: 'Submission details with a comment are required to submit to the BD Manager.' });
+          }
+        }
+      }
       if (newStage === BDM_GATED_STAGE && !isBDM(req)) {
         return res.status(403).json({ error: 'Only a BD Manager can approve "Submitted to BDM" candidates through to the client.' });
+      }
+      // BD duty: every rejection carries its reason (client feedback, BDM call…)
+      if (newStage === 'Rejected' && !String((req.body || {}).rejection_reason || '').trim()) {
+        return res.status(400).json({ error: 'Please add the reason for rejection.' });
       }
 
       const bb = req.body || {};
@@ -835,6 +966,8 @@ ${String(j.job_description).slice(0, 12000)}`;
       const updates = { stage: newStage, stage_updated_at: new Date(), sub_stage: bb.sub_stage || null };
       if (bb.interview_at !== undefined) updates.interview_at = bb.interview_at || null;
       if (bb.interview_location !== undefined) updates.interview_location = bb.interview_location || null;
+      if (bb.submission_details !== undefined) updates.submission_details = bb.submission_details || null;
+      if (newStage === 'Rejected') updates.rejection_reason = String(bb.rejection_reason).trim();
       let action = 'stage_change';
       if (newStage === BDM_GATED_STAGE && isBDM(req)) {
         updates.bdm_approved_at = new Date();
@@ -1328,17 +1461,26 @@ ${String(j.job_description).slice(0, 12000)}`;
       const uid = req.user.id;
 
       let jobIds = null;
+      let assignedAtByJob = {};
       if (recruiterView) {
-        jobIds = await assignedJobOrderIds(uid);
-        if (!jobIds.length) return res.json({ role: 'recruiter', jobs: { total: 0, active: 0 }, by_stage: {}, submissions_week: 0, submissions_month: 0, upcoming_interviews: [], awaiting_approval: 0 });
+        const { data: asg } = await supabase.from('recruiter_assignments')
+          .select('job_order_id, assigned_at').eq('recruiter_id', uid);
+        (asg || []).forEach(a => {
+          const prev = assignedAtByJob[a.job_order_id];
+          if (!prev || (a.assigned_at && a.assigned_at > prev)) assignedAtByJob[a.job_order_id] = a.assigned_at;
+        });
+        jobIds = Object.keys(assignedAtByJob);
+        if (!jobIds.length) return res.json({ role: 'recruiter', jobs: { total: 0, active: 0 }, jobs_assigned: { week: 0, month: 0, quarter: 0, total: 0 }, top_jobs: [], by_stage: {}, submissions_week: 0, submissions_month: 0, upcoming_interviews: [], awaiting_approval: 0 });
       }
 
-      let jq = supabase.from('job_orders').select('id,status').is('deleted_at', null);
+      let jq = supabase.from('job_orders')
+        .select('id,job_code,job_title,client,city,state,status,priority,created_at')
+        .is('deleted_at', null);
       if (recruiterView) jq = jq.in('id', jobIds);
       const { data: jobs } = await jq;
 
       let sq = supabase.from('submissions')
-        .select('id,stage,sub_stage,created_at,submitted_at,interview_at,interview_location,job_order_id,recruiter_id,candidate:candidates(id,full_name)')
+        .select('id,stage,sub_stage,created_at,submitted_at,stage_updated_at,rejection_reason,interview_at,interview_location,job_order_id,recruiter_id,candidate:candidates(id,full_name)')
         .is('deleted_at', null);
       if (recruiterView) sq = sq.eq('recruiter_id', uid);
       const { data: subs } = await sq;
@@ -1361,12 +1503,67 @@ ${String(j.job_description).slice(0, 12000)}`;
       });
       upcoming.sort((a, b) => new Date(a.interview_at) - new Date(b.interview_at));
 
+      // rejection context: not a judgement metric — shown next to the counts so
+      // the recruiter knows WHY (BD records the reason on every rejection)
+      const recentRejections = (subs || [])
+        .filter(s => s.stage === 'Rejected')
+        .sort((a, b) => new Date(b.stage_updated_at || b.created_at) - new Date(a.stage_updated_at || a.created_at))
+        .slice(0, 5)
+        .map(s => ({
+          submission_id: s.id,
+          candidate: (s.candidate && s.candidate.full_name) || '',
+          reason: s.rejection_reason || null,
+          sub_stage: s.sub_stage || null,
+          at: s.stage_updated_at || s.created_at
+        }));
+
+      // recruiter extras: when was each job assigned to me, and which of my
+      // jobs the whole team is actively working (so the recruiter's dashboard
+      // can surface the desk's hottest jobs first)
+      let jobsAssigned, topJobs;
+      if (recruiterView) {
+        const quarterAgo = new Date(now.getTime() - 90 * 86400000);
+        jobsAssigned = { week: 0, month: 0, quarter: 0, total: jobIds.length };
+        (jobs || []).forEach(j => {
+          const t = new Date(assignedAtByJob[j.id] || j.created_at);
+          if (t >= weekAgo) jobsAssigned.week++;
+          if (t >= monthStart) jobsAssigned.month++;
+          if (t >= quarterAgo) jobsAssigned.quarter++;
+        });
+
+        // team-wide submissions on my jobs (not just mine) → activity ranking
+        const { data: teamSubs } = await supabase.from('submissions')
+          .select('job_order_id,recruiter_id,created_at,submitted_at')
+          .in('job_order_id', jobIds).is('deleted_at', null);
+        const fortnightAgo = new Date(now.getTime() - 14 * 86400000);
+        const act = {};
+        (teamSubs || []).forEach(s => {
+          const a = act[s.job_order_id] = act[s.job_order_id] || { team: 0, recent: 0, mine: 0 };
+          a.team++;
+          if (s.recruiter_id === uid) a.mine++;
+          if (new Date(s.submitted_at || s.created_at) >= fortnightAgo) a.recent++;
+        });
+        topJobs = (jobs || [])
+          .map(j => {
+            const a = act[j.id] || { team: 0, recent: 0, mine: 0 };
+            return {
+              id: j.id, job_code: j.job_code, job_title: j.job_title, client: j.client,
+              city: j.city, state: j.state, status: j.status, priority: j.priority,
+              created_at: j.created_at, assigned_at: assignedAtByJob[j.id] || null,
+              team_subs: a.team, team_subs_14d: a.recent, my_subs: a.mine
+            };
+          })
+          .sort((a, b) => (b.team_subs_14d - a.team_subs_14d) || (b.team_subs - a.team_subs) || (new Date(b.created_at) - new Date(a.created_at)))
+          .slice(0, 5);
+      }
+
       res.json({
         role: recruiterView ? 'recruiter' : 'manager',
         jobs: {
           total: (jobs || []).length,
           active: (jobs || []).filter(j => j.status === 'Active').length
         },
+        ...(recruiterView ? { jobs_assigned: jobsAssigned, top_jobs: topJobs, recent_rejections: recentRejections } : {}),
         by_stage: byStage,
         submissions_week: week,
         submissions_month: month,
@@ -1386,15 +1583,27 @@ ${String(j.job_description).slice(0, 12000)}`;
       if (!isBDM(req)) return res.status(403).json({ error: 'BD Manager only.' });
 
       const { data: subs } = await supabase.from('submissions')
-        .select('recruiter_id, stage').is('deleted_at', null);
+        .select('recruiter_id, stage, job_order_id').is('deleted_at', null);
       const { data: recruiters } = await supabase.from('users')
         .select('id,name,employee_id,roles,role');
+
+      // placement fee per job → revenue attribution for placed submissions
+      const placedJobIds = [...new Set((subs || []).filter(s => s.stage === 'Placement').map(s => s.job_order_id))];
+      const feeByJob = {};
+      if (placedJobIds.length) {
+        const { data: fj } = await supabase.from('job_orders')
+          .select('id, placement_fee').in('id', placedJobIds);
+        (fj || []).forEach(j => {
+          const n = parseFloat(String(j.placement_fee || '').replace(/[^0-9.]/g, ''));
+          feeByJob[j.id] = isNaN(n) ? 0 : n;
+        });
+      }
 
       const isRec = u => (Array.isArray(u.roles) && u.roles.includes('recruiter')) || u.role === 'recruiter';
       const recMap = {};
       (recruiters || []).filter(isRec).forEach(u => {
         recMap[u.id] = { recruiter_id: u.id, name: u.name, employee_id: u.employee_id,
-                         total: 0, submitted_to_bdm: 0, submitted_to_client: 0, interview: 0, offer: 0, placed: 0, rejected: 0 };
+                         total: 0, submitted_to_bdm: 0, submitted_to_client: 0, interview: 0, offer: 0, placed: 0, rejected: 0, revenue: 0 };
       });
       (subs || []).forEach(s => {
         const r = recMap[s.recruiter_id];
@@ -1404,7 +1613,7 @@ ${String(j.job_description).slice(0, 12000)}`;
         else if (s.stage === 'Submitted to Client') r.submitted_to_client++;
         else if (s.stage === 'Interview Scheduled') r.interview++;
         else if (s.stage === 'Offer') r.offer++;
-        else if (s.stage === 'Placement') r.placed++;
+        else if (s.stage === 'Placement') { r.placed++; r.revenue += feeByJob[s.job_order_id] || 0; }
         else if (s.stage === 'Rejected') r.rejected++;
       });
       const rows = Object.values(recMap).map(r => ({

@@ -8,7 +8,9 @@
 (function () {
 
   function esc(s){ return String(s==null?'':s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-  function involved(u){ return userHasAnyRole(u,'admin','bd','bd_lead','recruiter'); }
+  // Pure recruiters now have their own native dashboard (renderRecruiterDashboard
+  // in 05-page-dashboard.js), so the injected strip is managers-only.
+  function involved(u){ return userHasAnyRole(u,'admin','bd','bd_lead'); }
   function fmtDT(s){ try{ var d=new Date(s); return (d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }catch(e){ return ''; } }
 
   var _prevRender = window.render;
@@ -27,6 +29,51 @@
       STATE._recDash = d; STATE._recDashLoading = false;
       if (STATE.page==='dashboard') render();
     }).catch(function(){ STATE._recDashLoading = false; STATE._recDash = { _at: Date.now(), empty:true }; });
+  }
+
+  // Per-recruiter performance for the manager next in line: submissions,
+  // interviews, offers, placements and the revenue those placements brought
+  // in (job_orders.placement_fee), so a manager can see what's happening
+  // with each recruiter assigned to them without opening every job.
+  function loadRecruiterAnalytics(){
+    if (STATE._recAnLoading) return;
+    var fresh = STATE._recAn && (Date.now() - STATE._recAn._at < 60000);
+    if (fresh) return;
+    STATE._recAnLoading = true;
+    apiGet('/bd-analytics/recruiters').then(function(d){
+      STATE._recAn = { _at: Date.now(), rows: d || [] }; STATE._recAnLoading = false;
+      if (STATE.page==='dashboard') render();
+    }).catch(function(){ STATE._recAn = { _at: Date.now(), rows: [] }; STATE._recAnLoading = false; });
+  }
+
+  function money(n){
+    n = n || 0;
+    return '$' + n.toLocaleString('en-US', { maximumFractionDigits: 0 });
+  }
+
+  function recruiterTeamCard(){
+    loadRecruiterAnalytics();
+    var rows = (STATE._recAn && STATE._recAn.rows) || [];
+    if (!rows.length) return '';
+    var totalRevenue = rows.reduce(function(s,r){ return s + (r.revenue||0); }, 0);
+    var body = rows.map(function(r){
+      return '<div style="display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid var(--border)">'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(r.name||'')+'</div>'+
+          '<div style="font-size:11px;color:var(--text3)">'+esc(r.employee_id||'')+'</div>'+
+        '</div>'+
+        '<div style="text-align:center;width:56px"><div style="font-weight:700;font-size:14px">'+(r.total||0)+'</div><div style="font-size:9.5px;color:var(--text3)">subs</div></div>'+
+        '<div style="text-align:center;width:56px"><div style="font-weight:700;font-size:14px;color:#2563eb">'+(r.interview||0)+'</div><div style="font-size:9.5px;color:var(--text3)">interview</div></div>'+
+        '<div style="text-align:center;width:56px"><div style="font-weight:700;font-size:14px;color:#7c3aed">'+(r.offer||0)+'</div><div style="font-size:9.5px;color:var(--text3)">offers</div></div>'+
+        '<div style="text-align:center;width:64px"><div style="font-weight:700;font-size:14px;color:var(--green)">'+(r.placed||0)+'</div><div style="font-size:9.5px;color:var(--text3)">placed</div></div>'+
+        '<div style="text-align:right;width:84px"><div style="font-weight:700;font-size:13.5px;color:var(--green)">'+(r.revenue?money(r.revenue):'—')+'</div><div style="font-size:9.5px;color:var(--text3)">revenue</div></div>'+
+      '</div>';
+    }).join('');
+    return '<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-top:10px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
+        '<div style="font-weight:600;font-size:12.5px">My recruiting team — performance</div>'+
+        (totalRevenue?'<div style="font-size:11.5px;color:var(--text3)">Total revenue: <b style="color:var(--green)">'+money(totalRevenue)+'</b></div>':'')+
+      '</div>'+body+'</div>';
   }
 
   function tile(label, value, color){
@@ -85,6 +132,7 @@
         '<div style="display:flex;gap:10px;flex-wrap:wrap">'+tiles.join('')+'</div>'+
         (upcoming?'<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-top:10px">'+
           '<div style="font-weight:600;font-size:12.5px;margin-bottom:5px">Upcoming interviews</div>'+upcoming+'</div>':'')+
+        (isRecruiter?'':recruiterTeamCard())+
       '</div>';
     var page = content.querySelector('.page') || content.firstElementChild;
     if (page) page.insertBefore(wrap, page.firstChild);
