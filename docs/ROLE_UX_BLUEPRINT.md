@@ -60,14 +60,26 @@ interviews, placements, rejection rate.
   **Assignment requests** card with *Assign* / *Decline*.
 - **Dashboard** (shipped): greeting banner (subs week/month, in interview, placements)
   → desk tiles → **My jobs** card (assigned-timeline counts, top-5 by team activity,
-  "All my jobs →") → **My candidate pipeline** by stage → **Upcoming interviews** → Reminders.
-- **Primary actions**: My Jobs → open job → *Add candidate / Submit to BDM*.
+  "All my jobs →") → **My candidate pipeline** by stage → **Recent rejections**
+  (candidate + BD's reason, framed "for context, not a scorecard" — see §9.4)
+  → **Upcoming interviews** → Reminders.
+- **Stage ownership is gated, not just conventional** (✅ shipped): a recruiter can
+  move a candidate through Sourced → Screening → **Submitted to BDM** and no further.
+  Every stage from Submitted to Client onward (interview, offer, confirmation,
+  placement, rejection) is BD-only — enforced server-side, and the stage modal
+  won't even open a blocked move client-side. Recruiters still *see* later stages
+  on their pipeline card; they just can't change them.
+- **Submit to BD Manager is a hand-off form, not a dropdown** (✅ shipped): moving to
+  "Submitted to BDM" opens a modal mirroring the company's submission-details
+  template — applicant name, email, mobile, home phone, work auth, current
+  location, relocation, availability, and a required "Submission Comment
+  (important)" — plus resume attach and a "Format resume" action (§6 below). The
+  comment is mandatory; submission won't go through without it.
+- **Primary actions**: My Jobs → open job → *Add candidate* → move through stages to
+  *Submit to BD Manager* (opens the hand-off form above).
 - **Still to build**:
   - Interview-day view: "You have 2 interviews today" strip pinned above tiles.
-  - Rejection-reason breakdown ("why my candidates get rejected") — needs
-    `rejection_reason` on submissions.
-  - Per-recruiter goal setting (e.g. 10 subs/week) so the banner can show progress
-    toward target instead of bare counts. Needs `user_goals` table.
+  - Per-recruiter goal setting as milestones, not quotas (§9.1) — needs `user_goals`.
 
 ## 2. BD MANAGER (`bd`)
 
@@ -78,25 +90,37 @@ placements (revenue).
 - **Sidebar**: Dashboard · Leads · Jobs · Candidates · Sourcing · Email · Reminders ·
   My Insights · My Profile. (Current layout is right; "Jobs" should carry an
   **Awaiting approval** badge — count of `Submitted to BDM`.)
-- **Dashboard** (redesign):
+- **Dashboard** (redesign in progress):
   1. Banner: keep lead stats (leads, emails, response, positive) — this IS their number.
-  2. **Approvals queue card — the #1 change.** "Awaiting your approval (3)" with
-     candidate, job, recruiter, waiting-time; inline *Approve → Client* / *Reject*
-     buttons (endpoint exists). An approval sitting 3+ days turns amber. This is the
-     BDM's most time-sensitive daily action and today it hides inside job detail.
-  3. **Recruiting desk strip** (exists, keep): Active Jobs, At Client, In Interview,
+  2. **Assignment requests card** (✅ shipped): recruiters browsing All Jobs (§1) can
+     ask to be put on a job; requests land here with *Assign* / *Decline*.
+  3. **Approvals queue card — still the #1 remaining change.** "Awaiting your
+     approval (3)" with candidate, job, recruiter, waiting-time; inline
+     *Approve → Client* / *Reject* buttons (endpoint exists). An approval sitting
+     3+ days turns amber. This is the BDM's most time-sensitive daily action and
+     today it hides inside job detail.
+  4. **Recruiting desk strip** (exists, keep): Active Jobs, At Client, In Interview,
      Offers, Placements, Subs Week/Month.
-  4. **My team card** (exists): RA rows with lead stats — but split into two tables:
-     "Lead-gen team" (RAs, lead stats) and "Recruiting team" (recruiters — subs,
-     interviews, placements from `/bd-analytics/recruiters`, endpoint exists, no UI).
-  5. **Jobs needing attention**: jobs with 0 submissions in 14 days, or no recruiter
+  5. **My recruiting team — performance card** (✅ shipped): per recruiter — subs,
+     interviews, offers, **placements, and revenue** (job_orders.placement_fee
+     attributed to each placement), plus a total-revenue rollup. This is the
+     "next-in-line manager sees revenue + placements for people under them" answer
+     (§9.5). Still open: scoping to *only the recruiters actually under this
+     manager* once §10's reporting-line field exists — today it shows every
+     recruiter company-wide, since that binding doesn't exist yet.
+  6. **Jobs needing attention**: jobs with 0 submissions in 14 days, or no recruiter
      assigned ("cold jobs"). *Assign recruiter* button inline.
-  6. Response trend + Industry breakdown (keep — these are lead-gen tools).
-  7. Reminders (keep).
+  7. Response trend + Industry breakdown (keep — these are lead-gen tools).
+  8. Reminders (keep).
+- **Rejection is BD's duty** (✅ shipped): moving a submission to "Rejected" requires
+  a reason (free text — "it depends on a lot," per product, so no fixed enum). The
+  reason travels with the submission and surfaces on the recruiter's own dashboard
+  as context, never as a performance judgment (§9.4).
 - **Primary actions**: Leads → *Convert to Job*; Jobs → *Assign recruiter*, *Approve
-  submission*; Dashboard → *Approve* from the queue card.
+  submission*; Dashboard → *Assign*/*Decline* a request, *Approve* from the (still
+  to build) approvals queue.
 - **Still to build**: approvals-queue endpoint (`GET /submissions?stage=Submitted to BDM`
-  scoped to their jobs, with waiting-time), cold-jobs query, recruiter table UI.
+  scoped to their jobs, with waiting-time), cold-jobs query.
 
 ## 3. BD TEAM LEAD (`bd_lead`)
 
@@ -187,14 +211,16 @@ placements (revenue).
 
 ## 8. Build order (proposed)
 
-| Phase | What | Why first |
-|---|---|---|
-| 1 | BDM approvals-queue card + Jobs badge | Most time-sensitive daily action in the org |
-| 2 | RA dashboard (target banner, lead-outcome card) | Largest headcount, worst current fit |
-| 3 | BDM recruiting-team table + cold-jobs card | Endpoint exists; closes the manager loop |
-| 4 | RA Lead unassigned-card + idle-RA timestamps | Small delta on existing pages |
-| 5 | Admin org-funnel + system-health cards | Oversight, lowest urgency |
-| 6 | `user_goals` table + target-progress banners (RA + recruiter) | Needs product input on targets |
+| Phase | What | Why first | Status |
+|---|---|---|---|
+| 1 | BDM approvals-queue card + Jobs badge | Most time-sensitive daily action in the org | Not started |
+| — | Recruiter stage gating, Submit-to-BDM form, rejection reasons, recruiting-team revenue/placements card, resume preview, resume formatter, All Jobs board | Explicit product asks (§9.3–8) | ✅ Shipped |
+| 2 | RA dashboard (target banner, lead-outcome card) | Largest headcount, worst current fit | Not started |
+| 3 | Cold-jobs card + true manager-scoped team table | Needs §10's manager_id first | Not started |
+| 4 | RA Lead unassigned-card + idle-RA timestamps | Small delta on existing pages | Not started |
+| 5 | Admin org-funnel + system-health cards | Oversight, lowest urgency | Not started |
+| 6 | `user_goals` table + milestone-progress banners (RA + recruiter) | Needs the manager-sets-milestones UI (§9.2) | Not started |
+| 7 | Real letterhead asset swapped into the resume formatter | Waiting on the brand asset | Blocked on asset |
 
 ## 9. Decisions from product (2026-07-20)
 
@@ -209,6 +235,36 @@ placements (revenue).
 3. **Company-wide job visibility for recruiters** — shipped (see §1 All Jobs):
    browse all jobs, masked candidate contacts until assigned, request-assignment
    loop through the BDM dashboard.
+4. **Rejection reasons are BD's duty, free-text, and never a recruiter scorecard**
+   — shipped. "It depends on a lot" (product's words), so no fixed enum; a note is
+   attached to every rejection. Shown alongside the recruiter's own period stats
+   (subs/interviews/etc. for the week, month, or any range) as context for *why*,
+   explicitly not as a performance measure — see the recruiter dashboard's
+   "Recent rejections… for context, not a scorecard" card.
+5. **Next-in-line managers see revenue + placements** for the people under (or
+   assigned to) them — shipped on the BD Manager dashboard's "My recruiting team"
+   card (subs, interviews, offers, placements, revenue per recruiter, total
+   revenue rollup). Revenue is `job_orders.placement_fee` attributed to each
+   placement. True "people under them" scoping needs §10's manager_id field —
+   until then this shows every recruiter, since recruiters aren't bound to one BDM.
+6. **Stage ownership: BD schedules interviews and owns everything past BD
+   submission.** A recruiter can change a submission's stage only up to
+   "Submitted to BDM" — enforced both in the stage-change endpoint and the stage
+   modal (a recruiter literally cannot open a blocked stage). Submitting to the
+   BD Manager is a dedicated hand-off form matching the company's existing
+   submission-details email template (applicant name/contact/work-auth/location/
+   relocation/availability + a required "Submission Comment (important)"), with
+   resume attach built in — shipped, see §1.
+7. **Resume → formatted submission document** — shipped as a first pass: parses
+   the uploaded resume (txt/pdf/docx, reusing the existing resume-parser), lays
+   it out under a letterhead, and offers a live preview with Word and PDF
+   download. **The real letterhead asset is still needed** — the current
+   letterhead is a placeholder brand bar (`public/js/36-resume-format.js`,
+   `LETTERHEAD_TOP`/`LETTERHEAD_BOTTOM`); swap it in as soon as it's provided.
+8. **Resume preview on the candidate profile** — shipped. PDFs render inline via
+   an embedded viewer; other formats fall back to the extracted resume text
+   (`candidates.resume_text`) captured at parse time, with a download link when
+   no text was captured.
 
 ## 10. Extended org structure (proposed — pending product detail)
 
@@ -231,15 +287,31 @@ Proposed next roles, to be specified with product before building:
 
 ## 11. Open questions (answers would sharpen, not block)
 
-1. **Rejection reasons**: does the business track *why* clients reject candidates?
-   If yes, adding `rejection_reason` unlocks the recruiter quality card.
-2. **Revenue**: are placement fees tracked well enough that BDM/Admin dashboards
-   should show ₹/$ value instead of counts?
-3. **Interview logistics**: who actually schedules interviews — recruiter or BDM?
-   (Decides where scheduling UI lives.)
-4. **RA quality signal**: is "lead became a job" the right quality metric for RAs,
+1. **RA quality signal**: is "lead became a job" the right quality metric for RAs,
    or is "lead got a response" fairer (jobs depend on BD skill too)?
-5. **Deliverability for RA Lead**: do RA Leads actually manage sending accounts, or
+2. **Deliverability for RA Lead**: do RA Leads actually manage sending accounts, or
    should that page be BD Lead/Admin only?
-6. **New-role spans**: for Recruiter Lead / Associate Director — who reports to
-   whom exactly, and which decisions are theirs alone? (Feeds §10.)
+3. **New-role spans**: for Recruiter Lead / Associate Director — who reports to
+   whom exactly, and which decisions are theirs alone? (Feeds §10.) In particular:
+   is a recruiter bound to exactly one BD Manager, or can any BDM assign any
+   recruiter to any job (today's actual behavior)? This decides whether §2's "My
+   recruiting team" card can ever scope down from "every recruiter" to "my
+   recruiters."
+4. **Letterhead asset**: the resume formatter (§9.7) needs the real letterhead
+   (logo, colors, footer/contact block) to replace the current placeholder.
+5. **Job-board contact masking scope**: All Jobs masks candidate contacts on jobs
+   a recruiter isn't assigned to (§1). The general Candidates list still shows
+   full contact details to any recruiter — should that also be locked to "only
+   candidates on your own jobs," or is the shared candidate pool intentionally
+   open to every recruiter?
+
+## 12. Bugs found and fixed in passing
+
+- **My Profile page was silently broken for every user.** `30-page-candidate.js`
+  declared `window.renderProfile = function(){...}` for the *candidate* profile
+  view, which — because plain `<script>` globals share one namespace — overwrote
+  `10-page-modals.js`'s `renderProfile()`, the actual My Profile / account page.
+  Every user opening "My Profile" saw "No candidate loaded." instead of their
+  account page. Fixed by renaming the candidate-profile function to
+  `renderCandidateProfile` (its one call site, `paintProfile()`, updated to
+  match). Covered by a regression check in `test/workflow-gating-smoke.mjs`.

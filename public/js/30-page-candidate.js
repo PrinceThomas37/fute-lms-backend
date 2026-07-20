@@ -76,7 +76,7 @@
     if (p === 'bd_candidate'){ STATE.page='bd_candidate'; STATE.modal=null; render(); return; }
     return _prevGoPage.apply(this, arguments);
   };
-  function paintProfile(){ var c=document.getElementById('content'); if(!c) return; c.innerHTML = renderProfile(); }
+  function paintProfile(){ var c=document.getElementById('content'); if(!c) return; c.innerHTML = renderCandidateProfile(); }
 
   window.bdProfileSelectJob = function(jid){ if(STATE.bd.profile) STATE.bd.profile.selJob = jid; render(); };
 
@@ -139,7 +139,11 @@
   }
 
   // ── the page ──────────────────────────────────────────────────────────────
-  window.renderProfile = function(){
+  // Named renderCandidateProfile (not renderProfile) — that name is the
+  // My Profile account-settings page (10-page-modals.js); this file used to
+  // clobber it via `window.renderProfile =`, which silently broke My Profile
+  // for every user (it rendered "No candidate loaded." instead).
+  window.renderCandidateProfile = function(){
     var pr = STATE.bd.profile; if(!pr) return '<div class="page"><div style="padding:40px;text-align:center;color:var(--text3)">No candidate loaded.</div></div>';
     var c = pr.candidate||{}, h = pr.history||{pipeline:[],submissions:[],activity:[]};
 
@@ -263,9 +267,35 @@
         docRows+
       '</div>';
 
+    // Resume preview — candidates enter the system by resume, so the profile
+    // shows it inline: PDFs render in an embedded viewer; Word/other formats
+    // fall back to the extracted resume text (candidates.resume_text) or a
+    // download link when no text was captured.
+    var resumeDoc = docs.find(function(d){ return d.doc_type==='resume' && d.url; });
+    var isPdf = resumeDoc && (/(\.pdf)$/i.test(resumeDoc.filename||'') || /pdf/i.test(resumeDoc.content_type||''));
+    var resumeCard = '';
+    if (resumeDoc || c.resume_text) {
+      var body;
+      if (resumeDoc && isPdf) {
+        body = '<iframe src="'+esc(resumeDoc.url)+'" style="width:100%;height:520px;border:1px solid var(--border);border-radius:8px;background:#fff"></iframe>';
+      } else if (c.resume_text) {
+        body = '<div style="max-height:420px;overflow:auto;border:1px solid var(--border);border-radius:8px;background:var(--bg);padding:14px;font-size:12.5px;line-height:1.55;white-space:pre-wrap">'+esc(c.resume_text)+'</div>';
+      } else {
+        body = '<div style="padding:14px;color:var(--text3);font-size:12.5px">Preview not available for this file type — <a href="'+esc(resumeDoc.url)+'" target="_blank" rel="noopener" style="color:var(--accent)">open “'+esc(resumeDoc.filename)+'”</a> instead.</div>';
+      }
+      resumeCard =
+        '<div class="card" style="padding:16px;margin-bottom:16px">'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+            '<div style="font-weight:600;font-size:14px">Resume</div>'+
+            (resumeDoc?'<a class="btn btn-sm btn-outline" href="'+esc(resumeDoc.url)+'" target="_blank" rel="noopener" download>Download</a>':'')+
+          '</div>'+
+          body+
+        '</div>';
+    }
+
     return '<div class="page">'+
       '<div style="margin-bottom:6px"><span onclick="cpGoBack()" style="cursor:pointer;font-size:12.5px;color:var(--accent)">← '+esc(backLabel(pr.back))+'</span></div>'+
-      header + lifecycle + jobsCard + notesCard + docsCard + actCard +
+      header + lifecycle + resumeCard + jobsCard + notesCard + docsCard + actCard +
     '</div>';
   };
 

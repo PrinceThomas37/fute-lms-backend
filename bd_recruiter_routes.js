@@ -524,7 +524,7 @@ ${String(j.job_description).slice(0, 12000)}`;
     'id,candidate_code,full_name,first_name,last_name,email,phone,alt_phone,linkedin_url,' +
     'current_location,city,state,country,zip,current_title,headline,skills,experience_years,' +
     'work_authorization,clearance,current_employer,availability,notice_period,current_ctc,expected_ctc,' +
-    'bill_rate,pay_rate,pay_type,pay_currency,applicant_status,source,resume_url,resume_filename,' +
+    'bill_rate,pay_rate,pay_type,pay_currency,applicant_status,source,resume_url,resume_filename,resume_text,' +
     'tags,owner_id,created_by,created_at,updated_at,' +
     'owner:users!owner_id(id,name,employee_id),creator:users!created_by(id,name,employee_id)';
 
@@ -935,10 +935,30 @@ ${String(j.job_description).slice(0, 12000)}`;
       }
 
       // ── THE GATE ──────────────────────────────────────────────────────────
-      // Moving INTO "Submitted to Client" requires BD Manager. A recruiter can
-      // take a candidate up to "Submitted to BDM" but no further on their own.
+      // Recruiters own the stages up to "Submitted to BDM"; everything after
+      // (client submission, interviews, offer, placement, rejection) is BD's.
+      // Recruiters can still SEE later stages, they just can't change them.
+      const RECRUITER_STAGES = ['Sourced', 'Screening', 'Submitted to BDM'];
+      if (recruiterScoped) {
+        if (!RECRUITER_STAGES.includes(newStage)) {
+          return res.status(403).json({ error: 'Recruiters can move candidates up to "Submitted to BDM" — the BD team owns the stages after that.' });
+        }
+        if (!RECRUITER_STAGES.includes(sub.stage)) {
+          return res.status(403).json({ error: 'This candidate is with the BD team now — only a BD Manager can change this stage.' });
+        }
+        if (newStage === 'Submitted to BDM') {
+          const det = req.body.submission_details;
+          if (!det || !String(det.comment || '').trim()) {
+            return res.status(400).json({ error: 'Submission details with a comment are required to submit to the BD Manager.' });
+          }
+        }
+      }
       if (newStage === BDM_GATED_STAGE && !isBDM(req)) {
         return res.status(403).json({ error: 'Only a BD Manager can approve "Submitted to BDM" candidates through to the client.' });
+      }
+      // BD duty: every rejection carries its reason (client feedback, BDM call…)
+      if (newStage === 'Rejected' && !String((req.body || {}).rejection_reason || '').trim()) {
+        return res.status(400).json({ error: 'Please add the reason for rejection.' });
       }
 
       const bb = req.body || {};
@@ -946,6 +966,8 @@ ${String(j.job_description).slice(0, 12000)}`;
       const updates = { stage: newStage, stage_updated_at: new Date(), sub_stage: bb.sub_stage || null };
       if (bb.interview_at !== undefined) updates.interview_at = bb.interview_at || null;
       if (bb.interview_location !== undefined) updates.interview_location = bb.interview_location || null;
+      if (bb.submission_details !== undefined) updates.submission_details = bb.submission_details || null;
+      if (newStage === 'Rejected') updates.rejection_reason = String(bb.rejection_reason).trim();
       let action = 'stage_change';
       if (newStage === BDM_GATED_STAGE && isBDM(req)) {
         updates.bdm_approved_at = new Date();
@@ -1458,7 +1480,7 @@ ${String(j.job_description).slice(0, 12000)}`;
       const { data: jobs } = await jq;
 
       let sq = supabase.from('submissions')
-        .select('id,stage,sub_stage,created_at,submitted_at,interview_at,interview_location,job_order_id,recruiter_id,candidate:candidates(id,full_name)')
+        .select('id,stage,sub_stage,created_at,submitted_at,stage_updated_at,rejection_reason,interview_at,interview_location,job_order_id,recruiter_id,candidate:candidates(id,full_name)')
         .is('deleted_at', null);
       if (recruiterView) sq = sq.eq('recruiter_id', uid);
       const { data: subs } = await sq;
@@ -1480,6 +1502,20 @@ ${String(j.job_description).slice(0, 12000)}`;
         }
       });
       upcoming.sort((a, b) => new Date(a.interview_at) - new Date(b.interview_at));
+
+      // rejection context: not a judgement metric — shown next to the counts so
+      // the recruiter knows WHY (BD records the reason on every rejection)
+      const recentRejections = (subs || [])
+        .filter(s => s.stage === 'Rejected')
+        .sort((a, b) => new Date(b.stage_updated_at || b.created_at) - new Date(a.stage_updated_at || a.created_at))
+        .slice(0, 5)
+        .map(s => ({
+          submission_id: s.id,
+          candidate: (s.candidate && s.candidate.full_name) || '',
+          reason: s.rejection_reason || null,
+          sub_stage: s.sub_stage || null,
+          at: s.stage_updated_at || s.created_at
+        }));
 
       // recruiter extras: when was each job assigned to me, and which of my
       // jobs the whole team is actively working (so the recruiter's dashboard
@@ -1527,7 +1563,7 @@ ${String(j.job_description).slice(0, 12000)}`;
           total: (jobs || []).length,
           active: (jobs || []).filter(j => j.status === 'Active').length
         },
-        ...(recruiterView ? { jobs_assigned: jobsAssigned, top_jobs: topJobs } : {}),
+        ...(recruiterView ? { jobs_assigned: jobsAssigned, top_jobs: topJobs, recent_rejections: recentRejections } : {}),
         by_stage: byStage,
         submissions_week: week,
         submissions_month: month,
@@ -1547,15 +1583,27 @@ ${String(j.job_description).slice(0, 12000)}`;
       if (!isBDM(req)) return res.status(403).json({ error: 'BD Manager only.' });
 
       const { data: subs } = await supabase.from('submissions')
-        .select('recruiter_id, stage').is('deleted_at', null);
+        .select('recruiter_id, stage, job_order_id').is('deleted_at', null);
       const { data: recruiters } = await supabase.from('users')
         .select('id,name,employee_id,roles,role');
+
+      // placement fee per job → revenue attribution for placed submissions
+      const placedJobIds = [...new Set((subs || []).filter(s => s.stage === 'Placement').map(s => s.job_order_id))];
+      const feeByJob = {};
+      if (placedJobIds.length) {
+        const { data: fj } = await supabase.from('job_orders')
+          .select('id, placement_fee').in('id', placedJobIds);
+        (fj || []).forEach(j => {
+          const n = parseFloat(String(j.placement_fee || '').replace(/[^0-9.]/g, ''));
+          feeByJob[j.id] = isNaN(n) ? 0 : n;
+        });
+      }
 
       const isRec = u => (Array.isArray(u.roles) && u.roles.includes('recruiter')) || u.role === 'recruiter';
       const recMap = {};
       (recruiters || []).filter(isRec).forEach(u => {
         recMap[u.id] = { recruiter_id: u.id, name: u.name, employee_id: u.employee_id,
-                         total: 0, submitted_to_bdm: 0, submitted_to_client: 0, interview: 0, offer: 0, placed: 0, rejected: 0 };
+                         total: 0, submitted_to_bdm: 0, submitted_to_client: 0, interview: 0, offer: 0, placed: 0, rejected: 0, revenue: 0 };
       });
       (subs || []).forEach(s => {
         const r = recMap[s.recruiter_id];
@@ -1565,7 +1613,7 @@ ${String(j.job_description).slice(0, 12000)}`;
         else if (s.stage === 'Submitted to Client') r.submitted_to_client++;
         else if (s.stage === 'Interview Scheduled') r.interview++;
         else if (s.stage === 'Offer') r.offer++;
-        else if (s.stage === 'Placement') r.placed++;
+        else if (s.stage === 'Placement') { r.placed++; r.revenue += feeByJob[s.job_order_id] || 0; }
         else if (s.stage === 'Rejected') r.rejected++;
       });
       const rows = Object.values(recMap).map(r => ({

@@ -320,6 +320,29 @@ function renderRecruiterJobsCard(d){
   '</div>';
 }
 
+// Rejections shown as context next to the period's stats — not a scorecard.
+// The reason (BD's duty to record) explains WHY, so a run of rejections reads
+// as "client wanted X" rather than as a mark against the recruiter.
+function renderRecentRejections(d){
+  var rows=d.recent_rejections||[];
+  if(!rows.length)return'';
+  var items=rows.map(function(r){
+    var when;try{when=new Date(r.at).toLocaleDateString("en-IN",{day:"numeric",month:"short"});}catch(e){when='';}
+    return '<div style="padding:9px 0;border-bottom:1px solid var(--border)">'+
+      '<div style="display:flex;justify-content:space-between;gap:10px">'+
+        '<span style="font-size:13px;font-weight:600">'+htmlEsc(r.candidate||'Candidate')+'</span>'+
+        '<span class="f12 text3" style="white-space:nowrap">'+htmlEsc(when)+'</span>'+
+      '</div>'+
+      '<div class="f12 text3" style="margin-top:2px">'+(r.reason?htmlEsc(r.reason):'No reason recorded yet')+'</div>'+
+    '</div>';
+  }).join("");
+  return '<div class="card cp mb4">'+
+    '<div class="fw6" style="margin-bottom:2px">Recent rejections</div>'+
+    '<div class="f12 text3 mb3">For context, not a scorecard — reasons are logged by the BD team</div>'+
+    items+
+  '</div>';
+}
+
 function renderRecruiterDashboard(u){
   recDashboardLoad();
   var d=STATE._recDash||{};
@@ -395,6 +418,8 @@ function renderRecruiterDashboard(u){
       '</div>'+
       '<div class="flex gap2 flex-wrap">'+(stagePills||'<div class="text3 f13">No candidates in your pipeline yet — open My Jobs to start submitting.</div>')+'</div>'+
     '</div>'+
+
+    renderRecentRejections(d)+
 
     '<div class="card cp">'+
       '<div class="flex jb aic mb3">'+
