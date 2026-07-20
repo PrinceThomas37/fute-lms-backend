@@ -12,6 +12,7 @@
 
 const { EVENTS, emit } = require('./events');
 const { PROVIDER_IDS, providerList } = require('./config/sourcing');
+const { parseResume } = require('./resume-parser');
 
 module.exports = function (app, deps) {
   const { supabase, auth, hasRole, notGuest, today } = deps;
@@ -77,7 +78,7 @@ module.exports = function (app, deps) {
     'start_date','end_date','duration','placement_fee','req_docs',
     'primary_skills','secondary_skills','exp_min','exp_max',
     'industry','domain','degree','languages','job_category',
-    'positions','job_description','comments'
+    'positions','job_description','posting_description','comments'
   ];
   // Date columns need null (not '') when empty, or Postgres rejects them.
   const JOB_DATE_FIELDS = ['start_date','end_date'];
@@ -293,6 +294,67 @@ module.exports = function (app, deps) {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // ── anonymized posting JD ──────────────────────────────────────────────────
+  // Rewrite the job description with the client/company identity removed so it
+  // can be published on job boards. AI rewrite when a key is configured;
+  // otherwise a rule-based scrub (replace client names with "our client",
+  // strip emails/phones/URLs). Returns the text — saving is a separate PUT.
+  function scrubJobDescription(jd, names) {
+    let out = String(jd || '');
+    names.filter(Boolean).forEach(n => {
+      const safe = String(n).trim();
+      if (safe.length < 3) return;
+      out = out.replace(new RegExp(safe.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), 'our client');
+      // also scrub without common suffixes (Acme Corp → Acme)
+      const base = safe.replace(/[,.]?\s+(inc|llc|llp|ltd|corp|co|company|group|pllc|pc)\.?$/i, '').trim();
+      if (base.length >= 4 && base.toLowerCase() !== safe.toLowerCase()) {
+        out = out.replace(new RegExp(base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), 'our client');
+      }
+    });
+    out = out.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '')     // emails
+             .replace(/https?:\/\/\S+|www\.\S+/gi, '')                           // urls
+             .replace(/(\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g, '')  // phones
+             .replace(/(our client)(\s+\1)+/gi, 'our client')
+             .replace(/[ \t]{2,}/g, ' ').trim();
+    return out;
+  }
+
+  app.post('/job-orders/:id/posting-jd', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      if (!(await recruiterCanTouchJob(req, req.params.id))) return res.status(403).json({ error: 'Not assigned to this job order.' });
+      const { data: j, error } = await supabase.from('job_orders')
+        .select('job_title,client,end_client,client_manager,job_description,company:companies(name)')
+        .eq('id', req.params.id).is('deleted_at', null).single();
+      if (error || !j) return res.status(404).json({ error: 'Job order not found' });
+      if (!j.job_description || !j.job_description.trim()) return res.status(400).json({ error: 'This job has no description to rewrite.' });
+
+      const names = [j.client, j.end_client, j.client_manager, j.company && j.company.name];
+      const key = process.env.ANTHROPIC_API_KEY;
+      if (key && key !== 'your_anthropic_api_key_here') {
+        try {
+          const prompt = `Rewrite this job description for public posting on job boards. Remove ALL identifying details of the hiring company: company names (${names.filter(Boolean).join(', ') || 'any company names present'}), people's names, emails, phone numbers, URLs, and street addresses. Refer to the company only as "our client". Keep every requirement, responsibility, pay/benefit detail, and location (city/state is fine). Keep the same structure and roughly the same length. Reply with ONLY the rewritten description — no preamble.
+
+JOB TITLE: ${j.job_title || ''}
+
+DESCRIPTION:
+${String(j.job_description).slice(0, 12000)}`;
+          const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+            body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 2500, messages: [{ role: 'user', content: prompt }] })
+          });
+          const aiData = await response.json();
+          const text = aiData.content?.[0]?.text?.trim();
+          // belt-and-braces: scrub the AI output too, in case a name slipped through
+          if (text) return res.json({ posting: scrubJobDescription(text, names), used_ai: true });
+        } catch (_) { /* fall through to rules */ }
+      }
+      res.json({ posting: scrubJobDescription(j.job_description, names), used_ai: false });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // ==========================================================================
   // RECRUITER ASSIGNMENT
   // ==========================================================================
@@ -357,7 +419,7 @@ module.exports = function (app, deps) {
     'work_authorization','clearance','current_employer',
     'availability','notice_period','current_ctc','expected_ctc',
     'bill_rate','pay_rate','pay_type','pay_currency',
-    'applicant_status','source','resume_url','resume_filename'
+    'applicant_status','source','resume_url','resume_filename','resume_text'
   ];
   const CANDIDATE_SELECT =
     'id,candidate_code,full_name,first_name,last_name,email,phone,alt_phone,linkedin_url,' +
@@ -1002,6 +1064,27 @@ module.exports = function (app, deps) {
       await supabase.from('candidate_pipeline').update({ deleted_at: new Date() }).eq('id', req.params.id);
       res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ==========================================================================
+  // RESUME PARSING — file → candidate fields (AI-assisted, rule fallback)
+  // ==========================================================================
+
+  // Parse an uploaded resume and return candidate fields for the UI to prefill.
+  // Creates nothing — the recruiter reviews before saving.
+  app.post('/candidates/parse-resume', auth, async (req, res) => {
+    try {
+      if (notGuest(req, res)) return;
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      const b = req.body || {};
+      if (!b.filename || !b.data_base64) return res.status(400).json({ error: 'filename and data_base64 required' });
+      const raw = String(b.data_base64).replace(/^data:.*;base64,/, '');
+      const buffer = Buffer.from(raw, 'base64');
+      if (!buffer.length) return res.status(400).json({ error: 'empty file' });
+      if (buffer.length > 4.5 * 1024 * 1024) return res.status(413).json({ error: 'File too large (max ~4.5 MB).' });
+      const { fields, used_ai, text } = await parseResume(buffer, b.filename);
+      res.json({ fields, used_ai, resume_text: text });
+    } catch (err) { res.status(400).json({ error: err.message }); }
   });
 
   // ==========================================================================

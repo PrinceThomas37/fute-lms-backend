@@ -252,18 +252,61 @@
 
   // ── add / edit modal ─────────────────────────────────────────────────────────
   window.atsOpenNew = function(){
-    STATE.ats.editId = null; STATE.ats.dupMatches = [];
+    STATE.ats.editId = null; STATE.ats.dupMatches = []; STATE.ats._resumeStash = null;
     STATE.ats.form = { applicant_status:'New lead', source:'Manual', pay_currency:'USD' };
     showApplicantModal();
   };
   window.atsOpenEdit = function(id){
     var c = STATE.ats.rows.find(function(x){ return x.id===id; });
-    if(!c){ apiGet('/candidates/'+id).then(function(d){ STATE.ats.editId=id; STATE.ats.dupMatches=[]; STATE.ats.form=Object.assign({},d); showApplicantModal(); }).catch(function(e){ showToast('Failed: '+e.message,'error'); }); return; }
-    STATE.ats.editId = id; STATE.ats.dupMatches = []; STATE.ats.form = Object.assign({}, c);
+    if(!c){ apiGet('/candidates/'+id).then(function(d){ STATE.ats.editId=id; STATE.ats.dupMatches=[]; STATE.ats._resumeStash=null; STATE.ats.form=Object.assign({},d); showApplicantModal(); }).catch(function(e){ showToast('Failed: '+e.message,'error'); }); return; }
+    STATE.ats.editId = id; STATE.ats.dupMatches = []; STATE.ats._resumeStash = null; STATE.ats.form = Object.assign({}, c);
     showApplicantModal();
   };
 
   window.atsFormSet = function(k,v){ STATE.ats.form[k]=v; };
+
+  // ── resume parsing: file → fields, prefilled into the form ─────────────────
+  // The file is stashed so it still attaches on save even though the modal
+  // re-render clears the file input.
+  window.atsParseResume = function(){
+    var fileEl = document.getElementById('ats_resume_file');
+    var f = fileEl && fileEl.files && fileEl.files[0];
+    if (!f && STATE.ats._resumeStash){ atsDoParse(STATE.ats._resumeStash); return; }
+    if (!f){ showToast('Choose a resume file first','error'); return; }
+    if (f.size > 4.5*1024*1024){ showToast('File too large (max ~4.5 MB)','error'); return; }
+    var r = new FileReader();
+    r.onload = function(){
+      STATE.ats._resumeStash = { name:f.name, type:f.type||'application/octet-stream', data:String(r.result) };
+      atsDoParse(STATE.ats._resumeStash);
+    };
+    r.onerror = function(){ showToast('Could not read file','error'); };
+    r.readAsDataURL(f);
+  };
+  function atsDoParse(stash){
+    showToast('Parsing resume…','info');
+    apiPost('/candidates/parse-resume', { filename:stash.name, content_type:stash.type, data_base64:stash.data })
+      .then(function(r){
+        var flds = (r&&r.fields)||{};
+        var form = STATE.ats.form;
+        // fill only fields the user hasn't already typed; resume_text always
+        Object.keys(flds).forEach(function(k){
+          if (k==='summary') return;
+          if (form[k]===undefined || form[k]===null || form[k]==='') form[k]=flds[k];
+        });
+        if (r.resume_text) form.resume_text = r.resume_text;
+        showApplicantModal();
+        showToast(r.used_ai?'Parsed with AI — review the filled fields':'Parsed (basic mode — no AI key). Review the filled fields','success');
+      })
+      .catch(function(e){ showToast('Parse failed: '+e.message,'error'); });
+  }
+  // upload from the live input, or from the stash if the input was cleared by a re-render
+  function uploadResumeFor(candId){
+    var fileEl = document.getElementById('ats_resume_file');
+    if (fileEl && fileEl.files && fileEl.files[0]) return atsUploadResumeFile(candId, fileEl);
+    var st = STATE.ats._resumeStash;
+    if (st) return apiPost('/candidates/'+candId+'/documents', { filename:st.name, content_type:st.type, doc_type:'resume', data_base64:st.data }).catch(function(){ showToast('Resume upload failed','error'); });
+    return Promise.resolve(false);
+  }
 
   function fld(label, inner, req){
     return '<div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">'+label+(req?' <span style="color:var(--red)">*</span>':'')+'</label>'+inner+'</div>';
@@ -335,9 +378,12 @@
             fld('Pay Rate', inp('pay_rate'))+
             fld('Pay Type', sel('pay_type', lk('pay_type',PAY_TYPES), true))+
             fld('Resume URL', inp('resume_url'))+
-            fld('Attach Resume', '<input type="file" id="ats_resume_file" accept=".pdf,.doc,.docx,.rtf,.txt" style="font-size:11.5px;width:100%">')+
+            fld('Attach Resume', '<input type="file" id="ats_resume_file" accept=".pdf,.doc,.docx,.rtf,.txt" style="font-size:11.5px;width:100%">'+
+              (STATE.ats._resumeStash?'<div style="font-size:10.5px;color:var(--green);margin-top:3px">✓ '+esc(STATE.ats._resumeStash.name)+' ready to attach</div>':''))+
             ownerSel+
           '</div>'+
+          '<div style="margin-top:10px"><button class="btn btn-sm btn-outline" onclick="atsParseResume()">✨ Parse &amp; fill from resume</button>'+
+            '<span style="font-size:11px;color:var(--text3);margin-left:8px">Choose a resume file above, then parse to auto-fill the form. Review before saving.</span></div>'+
           '<div style="margin-top:12px">'+fld('Skills', '<textarea class="sel" style="min-height:60px;resize:vertical" placeholder="Comma-separated skills" oninput="atsFormSet(\'skills\',this.value)">'+esc(f.skills||'')+'</textarea>')+'</div>'+
         '</div>'+
         '<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:'+(editing?'space-between':'flex-end')+';gap:8px;align-items:center">'+
@@ -356,12 +402,12 @@
     if (!f.full_name || !f.full_name.trim()){ showToast('Full name is required','error'); return; }
     var payload = Object.assign({}, f); if (force) payload.force = true;
 
-    var resumeEl = document.getElementById('ats_resume_file');
     if (STATE.ats.editId){
       var editId = STATE.ats.editId;
       apiPut('/candidates/'+editId, payload).then(function(){
-        return atsUploadResumeFile(editId, resumeEl);
+        return uploadResumeFor(editId);
       }).then(function(){
+        STATE.ats._resumeStash=null;
         showToast('Candidate updated','success'); closeModal();
         if (window.bdReloadCandidateProfile) window.bdReloadCandidateProfile();
         loadApplicants();
@@ -369,8 +415,9 @@
       return;
     }
     apiPost('/candidates', payload).then(function(c){
-      return atsUploadResumeFile(c.id, resumeEl);
+      return uploadResumeFor(c.id);
     }).then(function(){
+      STATE.ats._resumeStash=null;
       showToast('Candidate created','success'); STATE.ats.dupMatches=[]; closeModal(); STATE.ats.page=1; loadApplicants();
     }).catch(function(e){
       // 409 possible_duplicate → surface matches, keep the form open (warn-and-offer)

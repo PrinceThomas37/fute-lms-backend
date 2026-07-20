@@ -131,6 +131,8 @@ try {
   check('DELETE /sourcing/staged/x → 401 (sourcing, gated)', await req('DELETE', '/sourcing/staged/x'), 401);
   check('POST /sourcing/search → 401 (sourcing, gated)', await req('POST', '/sourcing/search'), 401);
   check('GET /recruiting-dashboard → 401 (role-aware, gated)', await req('GET', '/recruiting-dashboard'), 401);
+  check('POST /candidates/parse-resume → 401 (gated)', await req('POST', '/candidates/parse-resume'), 401);
+  check('POST /job-orders/x/posting-jd → 401 (gated)', await req('POST', '/job-orders/x/posting-jd'), 401);
   check('POST /candidates → 401 (bd-recruiter, gated)', await req('POST', '/candidates'), 401);
   check('PUT /candidates/x → 401 (bd-recruiter, gated)', await req('PUT', '/candidates/x'), 401);
   check('DELETE /candidates/x → 401 (new, gated)', await req('DELETE', '/candidates/x'), 401);
