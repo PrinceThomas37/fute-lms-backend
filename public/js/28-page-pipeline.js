@@ -21,6 +21,34 @@
   function fmtDate(s){ if(!s)return '—'; try{ var d=new Date(s); return (d.getMonth()+1)+'/'+d.getDate()+'/'+String(d.getFullYear()).slice(2); }catch(e){ return '—'; } }
   function candLoc(c){ return [c.city,c.state].filter(Boolean).join(', ') || c.current_location || '—'; }
 
+  // What a recruiter (or anyone) needs to actually work a req: description,
+  // pay, location, work auth, skills, experience — shown to EVERYONE, not
+  // gated behind the BD-only "Job details" tab which also carries BD-only
+  // controls (assign recruiter, approvals, posting JD).
+  function renderJobSummaryCard(j){
+    var loc = [j.city,j.state,j.country,j.zip].filter(Boolean).join(', ');
+    var pay = (j.pay_min||j.pay_max) ? ((j.pay_cur||'USD')+' '+(j.pay_min||'?')+'–'+(j.pay_max||'?')) : '';
+    var exp = (j.exp_min||j.exp_max) ? ((j.exp_min||'0')+'–'+(j.exp_max||'?')+' yrs') : '';
+    function dr(lbl,val){ return val?'<div style="font-size:12.5px;margin-bottom:4px"><span style="color:var(--text3)">'+esc(lbl)+': </span>'+esc(val)+'</div>':''; }
+    var grid = dr('Location',loc)+dr('Pay Rate',pay)+dr('Job Type',j.job_type)+
+      dr('Employment Level',j.emp_level)+dr('Work Authorization',j.work_auth)+dr('Remote',j.remote)+
+      dr('Priority',j.priority)+dr('Positions',j.positions)+dr('Experience',exp)+
+      dr('Primary Skills',j.primary_skills)+dr('Secondary Skills',j.secondary_skills)+dr('Industry',j.industry);
+    var descId = 'pl-jd-'+j.id;
+    var longDesc = !!(j.job_description && j.job_description.length > 320);
+    var desc = j.job_description ?
+      '<div style="margin-top:'+(grid?'12px':'0')+';padding-top:'+(grid?'12px':'0')+(grid?';border-top:1px solid var(--border)':'')+'">'+
+        '<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Job Description</div>'+
+        '<div id="'+descId+'" style="font-size:13px;line-height:1.5;white-space:pre-wrap;'+(longDesc?'max-height:110px;overflow:hidden':'')+'">'+esc(j.job_description)+'</div>'+
+        (longDesc?'<button class="btn btn-sm btn-outline" style="margin-top:8px" onclick="var el=document.getElementById(\''+descId+'\');var open=el.style.maxHeight===\'none\';el.style.maxHeight=open?\'110px\':\'none\';el.style.overflow=open?\'hidden\':\'visible\';this.textContent=open?\'Show more\':\'Show less\'">Show more</button>':'')+
+      '</div>' : '';
+    if (!grid && !desc) return '';
+    return '<div class="card" style="padding:16px 18px;margin-bottom:14px">'+
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:7px 18px">'+grid+'</div>'+
+      desc+
+    '</div>';
+  }
+
   function loadPipeline(jid){
     return apiGet('/job-orders/'+jid+'/pipeline').then(function(d){
       STATE.bd.pipeline = d||[];
@@ -29,6 +57,23 @@
       STATE.bd.submissions = (d||[]).filter(function(p){ return p.submission; })
         .map(function(p){ return Object.assign({}, p.submission, { candidate: p.candidate }); });
     }).catch(function(e){ STATE.bd.pipeline = []; showToast('Failed to load pipeline: '+e.message,'error'); });
+  }
+
+  // joById() only searches STATE.bd.jobOrders, which is populated by the
+  // My Jobs / Jobs list loader. Entry points that reach a job WITHOUT going
+  // through that list first — the All Jobs board, the recruiter dashboard's
+  // "My jobs" top-5 card — never populate it, so opening a job straight from
+  // there showed "Job not found" even though the job is real and the caller
+  // is assigned to it. Fetch the single job order directly whenever it's
+  // missing, so Candidates always has what it needs regardless of entry point.
+  function ensureJobOrder(jid){
+    if (joById(jid)) return Promise.resolve();
+    return apiGet('/job-orders/'+jid).then(function(j){
+      if (j && j.id){
+        STATE.bd.jobOrders = STATE.bd.jobOrders || [];
+        if (!STATE.bd.jobOrders.some(function(x){ return x.id===j.id; })) STATE.bd.jobOrders.push(j);
+      }
+    }).catch(function(){ /* joById() will report "Job not found" if this fails */ });
   }
 
   // ── render + routing wrap (mirrors the applicants module) ────────────────────
@@ -48,7 +93,7 @@
 
   window.bdOpenPipeline = function(jid){
     STATE.bd.view = STATE.bd.view || {}; STATE.bd.view.pipelineJoId = jid;
-    loadPipeline(jid).then(function(){ goPage('bd_pipeline'); });
+    Promise.all([ ensureJobOrder(jid), loadPipeline(jid) ]).then(function(){ goPage('bd_pipeline'); });
   };
   // The standalone "Submissions" tab (29-page-submissions.js) was merged into
   // this "Candidates" tab and removed. Kept as a thin alias so every existing
@@ -70,6 +115,12 @@
     if (!j) return '<div class="page"><div style="padding:40px;text-align:center;color:var(--text3)">Job not found.</div></div>';
     var rows = (STATE.bd.pipeline||[]).filter(function(p){ return p.job_order_id===jid; });
     var back = isBDM(u) ? 'bd_joborders' : 'bd_myjobs';
+
+    // Job details FIRST — what a recruiter needs to actually work the req:
+    // description, pay, location, work auth, skills, experience. Visible to
+    // everyone (not just BD), unlike the separate "Job details" tab which
+    // also carries BD-only controls (assign recruiter, approvals, posting JD).
+    var jobCard = renderJobSummaryCard(j);
 
     var tabs =
       '<div style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:14px">'+
@@ -150,6 +201,7 @@
         '<div style="font-size:12.5px;color:var(--text3)">'+esc(j.client||'')+'</div></div>'+
         '<button class="btn btn-primary" onclick="plOpenAdd(\''+j.id+'\')">+ Add Candidate</button>'+
       '</div>'+
+      jobCard+
       tabs+bulkBar+
       '<div class="card" style="padding:0;overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:1500px">'+
         '<thead><tr style="background:var(--bg)">'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>'+
