@@ -1328,12 +1328,21 @@ ${String(j.job_description).slice(0, 12000)}`;
       const uid = req.user.id;
 
       let jobIds = null;
+      let assignedAtByJob = {};
       if (recruiterView) {
-        jobIds = await assignedJobOrderIds(uid);
-        if (!jobIds.length) return res.json({ role: 'recruiter', jobs: { total: 0, active: 0 }, by_stage: {}, submissions_week: 0, submissions_month: 0, upcoming_interviews: [], awaiting_approval: 0 });
+        const { data: asg } = await supabase.from('recruiter_assignments')
+          .select('job_order_id, assigned_at').eq('recruiter_id', uid);
+        (asg || []).forEach(a => {
+          const prev = assignedAtByJob[a.job_order_id];
+          if (!prev || (a.assigned_at && a.assigned_at > prev)) assignedAtByJob[a.job_order_id] = a.assigned_at;
+        });
+        jobIds = Object.keys(assignedAtByJob);
+        if (!jobIds.length) return res.json({ role: 'recruiter', jobs: { total: 0, active: 0 }, jobs_assigned: { week: 0, month: 0, quarter: 0, total: 0 }, top_jobs: [], by_stage: {}, submissions_week: 0, submissions_month: 0, upcoming_interviews: [], awaiting_approval: 0 });
       }
 
-      let jq = supabase.from('job_orders').select('id,status').is('deleted_at', null);
+      let jq = supabase.from('job_orders')
+        .select('id,job_code,job_title,client,city,state,status,priority,created_at')
+        .is('deleted_at', null);
       if (recruiterView) jq = jq.in('id', jobIds);
       const { data: jobs } = await jq;
 
@@ -1361,12 +1370,53 @@ ${String(j.job_description).slice(0, 12000)}`;
       });
       upcoming.sort((a, b) => new Date(a.interview_at) - new Date(b.interview_at));
 
+      // recruiter extras: when was each job assigned to me, and which of my
+      // jobs the whole team is actively working (so the recruiter's dashboard
+      // can surface the desk's hottest jobs first)
+      let jobsAssigned, topJobs;
+      if (recruiterView) {
+        const quarterAgo = new Date(now.getTime() - 90 * 86400000);
+        jobsAssigned = { week: 0, month: 0, quarter: 0, total: jobIds.length };
+        (jobs || []).forEach(j => {
+          const t = new Date(assignedAtByJob[j.id] || j.created_at);
+          if (t >= weekAgo) jobsAssigned.week++;
+          if (t >= monthStart) jobsAssigned.month++;
+          if (t >= quarterAgo) jobsAssigned.quarter++;
+        });
+
+        // team-wide submissions on my jobs (not just mine) → activity ranking
+        const { data: teamSubs } = await supabase.from('submissions')
+          .select('job_order_id,recruiter_id,created_at,submitted_at')
+          .in('job_order_id', jobIds).is('deleted_at', null);
+        const fortnightAgo = new Date(now.getTime() - 14 * 86400000);
+        const act = {};
+        (teamSubs || []).forEach(s => {
+          const a = act[s.job_order_id] = act[s.job_order_id] || { team: 0, recent: 0, mine: 0 };
+          a.team++;
+          if (s.recruiter_id === uid) a.mine++;
+          if (new Date(s.submitted_at || s.created_at) >= fortnightAgo) a.recent++;
+        });
+        topJobs = (jobs || [])
+          .map(j => {
+            const a = act[j.id] || { team: 0, recent: 0, mine: 0 };
+            return {
+              id: j.id, job_code: j.job_code, job_title: j.job_title, client: j.client,
+              city: j.city, state: j.state, status: j.status, priority: j.priority,
+              created_at: j.created_at, assigned_at: assignedAtByJob[j.id] || null,
+              team_subs: a.team, team_subs_14d: a.recent, my_subs: a.mine
+            };
+          })
+          .sort((a, b) => (b.team_subs_14d - a.team_subs_14d) || (b.team_subs - a.team_subs) || (new Date(b.created_at) - new Date(a.created_at)))
+          .slice(0, 5);
+      }
+
       res.json({
         role: recruiterView ? 'recruiter' : 'manager',
         jobs: {
           total: (jobs || []).length,
           active: (jobs || []).filter(j => j.status === 'Active').length
         },
+        ...(recruiterView ? { jobs_assigned: jobsAssigned, top_jobs: topJobs } : {}),
         by_stage: byStage,
         submissions_week: week,
         submissions_month: month,

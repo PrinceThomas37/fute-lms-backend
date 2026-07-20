@@ -269,6 +269,57 @@ function recStageColor(s){
   return"var(--text)";
 }
 
+// "My jobs" card: how many jobs landed on my desk per timeline, the five the
+// team is most active on right now, and a jump to the full list (newest first).
+function renderRecruiterJobsCard(d){
+  var ja=d.jobs_assigned||{};
+  var top=d.top_jobs||[];
+
+  function stat(label,value){
+    return '<div style="text-align:center;padding:10px 14px;background:var(--bg);border-radius:var(--r2);min-width:88px;flex:1">'+
+      '<div style="font-family:var(--display);font-size:20px;font-weight:700;color:var(--accent)">'+(value||0)+'</div>'+
+      '<div style="font-size:10.5px;color:var(--text3);margin-top:2px;white-space:nowrap">'+label+'</div>'+
+    '</div>';
+  }
+
+  var rows=top.map(function(j){
+    var loc=[j.city,j.state].filter(Boolean).join(', ');
+    var hot=j.team_subs_14d>0;
+    var pr=j.priority&&j.priority!=='Normal'?'<span style="font-size:10px;font-weight:700;color:var(--red);background:var(--red-l);padding:2px 7px;border-radius:8px;margin-left:6px">'+htmlEsc(j.priority)+'</span>':'';
+    return '<div onclick="bdOpenSubmissions(\''+j.id+'\')" onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'transparent\'" style="display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s">'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(j.job_title||'')+pr+'</div>'+
+        '<div class="f12 text3" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEsc(j.job_code||'')+(j.client?' · '+htmlEsc(j.client):'')+(loc?' · '+htmlEsc(loc):'')+'</div>'+
+      '</div>'+
+      '<div style="text-align:center;width:88px;flex-shrink:0">'+
+        '<div style="font-family:var(--display);font-weight:700;font-size:16px;color:'+(hot?'var(--green)':'var(--text3)')+'">'+(j.team_subs_14d||0)+'</div>'+
+        '<div style="font-size:10px;color:var(--text3)">team · 14d</div>'+
+      '</div>'+
+      '<div style="text-align:center;width:70px;flex-shrink:0">'+
+        '<div style="font-family:var(--display);font-weight:700;font-size:16px;color:var(--accent)">'+(j.my_subs||0)+'</div>'+
+        '<div style="font-size:10px;color:var(--text3)">my subs</div>'+
+      '</div>'+
+      '<div style="width:16px;text-align:center;color:var(--text3);font-size:13px;flex-shrink:0">›</div>'+
+    '</div>';
+  }).join("");
+
+  return '<div class="card cp mb4">'+
+    '<div class="flex jb aic mb3">'+
+      '<div><div class="fw6">My jobs</div><div class="f12 text3">'+(ja.total||0)+' assigned to me</div></div>'+
+      '<button class="btn btn-outline btn-sm" onclick="goPage(\'bd_myjobs\')">All my jobs →</button>'+
+    '</div>'+
+    '<div class="flex gap2 flex-wrap mb3">'+
+      stat('Assigned this week',ja.week)+
+      stat('This month',ja.month)+
+      stat('This quarter',ja.quarter)+
+      stat('All time',ja.total)+
+    '</div>'+
+    (top.length?
+      '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">Most active — team submissions, last 14 days</div>'+rows
+    :'<div style="padding:12px 0;text-align:center;font-size:13px;color:var(--text3)">No jobs on your desk yet — your BD manager assigns them to you.</div>')+
+  '</div>';
+}
+
 function renderRecruiterDashboard(u){
   recDashboardLoad();
   var d=STATE._recDash||{};
@@ -336,10 +387,11 @@ function renderRecruiterDashboard(u){
       tile('Rejected',bs['Rejected']||0,'var(--red)')+
     '</div>'+
 
+    renderRecruiterJobsCard(d)+
+
     '<div class="card cp mb4">'+
       '<div class="flex jb aic mb3">'+
         '<div><div class="fw6">My candidate pipeline</div><div class="f12 text3">All my submissions by stage</div></div>'+
-        '<button class="btn btn-outline btn-sm" onclick="goPage(\'bd_myjobs\')">My Jobs →</button>'+
       '</div>'+
       '<div class="flex gap2 flex-wrap">'+(stagePills||'<div class="text3 f13">No candidates in your pipeline yet — open My Jobs to start submitting.</div>')+'</div>'+
     '</div>'+

@@ -59,6 +59,13 @@ try {
         'Interview Scheduled': 1, 'Interview Completed': 0, 'Offer': 1, 'Confirmation': 0,
         'Placement': 1, 'Rejected': 1, 'Not Joined': 0, 'On Hold': 0 },
       submissions_week: 7, submissions_month: 7,
+      jobs_assigned: { week: 1, month: 2, quarter: 2, total: 2 },
+      top_jobs: [
+        { id: 'j1', job_code: 'JO-101', job_title: 'Senior Java Developer', client: 'Acme Corp', city: 'Austin', state: 'TX',
+          status: 'Active', priority: 'High', team_subs: 9, team_subs_14d: 5, my_subs: 3, created_at: new Date().toISOString() },
+        { id: 'j2', job_code: 'JO-102', job_title: 'Data Engineer', client: 'Globex', city: 'Remote', state: '',
+          status: 'Active', priority: 'Normal', team_subs: 4, team_subs_14d: 2, my_subs: 1, created_at: new Date().toISOString() }
+      ],
       upcoming_interviews: [{ candidate: 'Jane Doe', interview_at: new Date(Date.now()+86400000).toISOString(), interview_location: 'Zoom' }],
       awaiting_approval: 0
     };
@@ -76,6 +83,19 @@ try {
   step('Candidate pipeline card renders stages', content.includes('My candidate pipeline') && content.includes('Sourced') && content.includes('Interview Scheduled'));
   step('Upcoming interviews shows candidate', content.includes('Upcoming interviews') && content.includes('Jane Doe') && content.includes('Zoom'));
   step('Reminders widget present', content.includes('Reminders'));
+
+  // My jobs card
+  step('Jobs-assigned timeline stats', content.includes('Assigned this week') && content.includes('This quarter') && content.includes('All time'));
+  step('Top active jobs listed with details', content.includes('Senior Java Developer') && content.includes('JO-101') && content.includes('Acme Corp'));
+  step('Top jobs show team + my activity', content.includes('team · 14d') && content.includes('my subs'));
+  step('Priority badge on hot job', content.includes('High'));
+  step('All my jobs button present', content.includes('All my jobs'));
+  const jobClick = await page.evaluate(() => {
+    const el = Array.from(document.querySelectorAll('#content [onclick]'))
+      .find(e => (e.getAttribute('onclick')||'').includes("bdOpenSubmissions('j1')"));
+    return !!el;
+  });
+  step('Top job row clicks through to submissions', jobClick);
 
   // BD lead-gen widgets gone
   step('No "Your Team" leads table', !content.includes('Your Team'));
