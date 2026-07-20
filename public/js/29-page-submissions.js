@@ -44,7 +44,11 @@
     return _prevGoPage.apply(this, arguments);
   };
 
+  // The standalone "Submissions" tab was merged into the unified "Candidates"
+  // tab (the superset pipeline view). Every existing entry point that opened
+  // Submissions now lands on Candidates, so nothing needs per-caller edits.
   window.bdOpenSubmissions = function(jid){
+    if (typeof bdOpenPipeline === 'function') return bdOpenPipeline(jid);
     STATE.bd.view = STATE.bd.view || {}; STATE.bd.view.submissionsJoId = jid;
     loadSubs(jid).then(function(){ goPage('bd_submissions'); });
   };

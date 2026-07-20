@@ -22,6 +22,13 @@
   };
   window.ATS_SUB_STAGES = SUB_STAGES;
 
+  // Full ordered stage list + colors — the single vocabulary every surface
+  // (pipeline, submissions grid, board, job detail) now shares.
+  var STAGE_LIST = ['Sourced','Screening','Submitted to BDM','Submitted to Client','Interview Scheduled','Interview Completed','Offer','Confirmation','Placement','Rejected','Not Joined','On Hold'];
+  window.ATS_STAGE_LIST = STAGE_LIST;
+  var STAGE_COLORS = {'Sourced':'var(--text3)','Screening':'#6b7280','Submitted to BDM':'var(--amber)','Submitted to Client':'var(--accent)','Interview Scheduled':'#2563eb','Interview Completed':'#1d4ed8','Offer':'#7c3aed','Confirmation':'#0891b2','Placement':'var(--green)','Rejected':'var(--red)','Not Joined':'#b91c1c','On Hold':'#9ca3af'};
+  window.ATS_STAGE_COLORS = STAGE_COLORS;
+
   function esc(s){ return String(s==null?'':s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
   function isInterviewStage(st){ return /^Interview/.test(st); }
 
@@ -59,14 +66,22 @@
     var subStages = SUB_STAGES[newStage] || [];
     var showInterview = isInterviewStage(newStage);
 
+    // Confirmation line: show exactly what's changing — [current] → [target] —
+    // so a stage move never happens without the user seeing where it goes.
+    var curStage = '';
+    if (ids.length === 1) { var s0 = subs.find(function(x){ return x.id===ids[0]; }); curStage = (s0 && s0.stage) || ''; }
+    var arrow = '<span style="color:var(--text3)">'+(curStage?esc(curStage):'—')+'</span>'+
+      ' <span style="color:var(--text3)">→</span> '+
+      '<span style="font-weight:700;color:'+(STAGE_COLORS[newStage]||'var(--text)')+'">'+esc(newStage)+'</span>';
+
     STATE._stageMove = { ids: ids, stage: newStage, onDone: onDone || null };
     STATE.modal =
       '<div class="modal modal-w480" onclick="event.stopPropagation()">'+
         '<div style="padding:16px 20px;border-bottom:1px solid var(--border)">'+
-          '<div style="font-weight:700;font-size:15px">Move to “'+esc(newStage)+'”</div>'+
-          '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+
-            (ids.length>1 ? ids.length+' candidates selected' : esc(names[0]||'Candidate'))+
+          '<div style="font-weight:700;font-size:15px">'+
+            (ids.length>1 ? 'Move '+ids.length+' candidates' : esc(names[0]||'Candidate'))+
           '</div>'+
+          '<div style="font-size:13px;margin-top:3px">'+arrow+'</div>'+
         '</div>'+
         '<div style="padding:16px 20px">'+
           (subStages.length?
@@ -84,8 +99,8 @@
           (newStage==='Rejected'?
             '<div style="margin-bottom:12px"><label style="font-size:11px;color:var(--red);display:block;margin-bottom:3px;font-weight:700">Reason for rejection (required)</label>'+
             '<textarea id="stg-reject" class="sel" style="min-height:56px;resize:vertical" placeholder="Client feedback, BDM decision, position closed…"></textarea></div>':'')+
-          '<div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Note</label>'+
-            '<textarea id="stg-note" class="sel" style="min-height:56px;resize:vertical" placeholder="What happened? (call summary, feedback…)"></textarea></div>'+
+          '<div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Note <span style="color:var(--red)">*</span></label>'+
+            '<textarea id="stg-note" class="sel" style="min-height:56px;resize:vertical" placeholder="Why is this candidate moving? (call summary, feedback, next step…)"></textarea></div>'+
           '<label style="font-size:12.5px;color:var(--text2);display:flex;align-items:center;gap:7px;cursor:pointer;margin-bottom:8px">'+
             '<input type="checkbox" id="stg-rem" onchange="document.getElementById(\'stg-rem-fields\').style.display=this.checked?\'grid\':\'none\'"> Set a reminder to call / follow up'+
           '</label>'+
@@ -108,7 +123,11 @@
     var mv = STATE._stageMove; if (!mv) return;
     var val = function(id){ var el=document.getElementById(id); return el?el.value:''; };
     var remOn = (document.getElementById('stg-rem')||{}).checked;
-    var payload = { stage: mv.stage, sub_stage: val('stg-sub') || undefined, note: val('stg-note') || undefined };
+    // Notes are required on every stage change (product rule) — capture the
+    // "why" behind each move so the candidate's history reads as a story.
+    var note = val('stg-note').trim();
+    if (!note) { showToast('Please add a note describing this stage change','error'); var nEl=document.getElementById('stg-note'); if(nEl)nEl.focus(); return; }
+    var payload = { stage: mv.stage, sub_stage: val('stg-sub') || undefined, note: note };
     if (mv.stage === 'Rejected') {
       var rr = val('stg-reject');
       if (!rr.trim()) { showToast('Please add the reason for rejection','error'); return; }
