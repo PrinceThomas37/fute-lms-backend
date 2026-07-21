@@ -123,6 +123,12 @@
     var j = joById(jid);
     if (!j) return '<div class="page"><div style="padding:40px;text-align:center;color:var(--text3)">Job not found.</div></div>';
     var rows = (STATE.bd.pipeline||[]).filter(function(p){ return p.job_order_id===jid; });
+    // Match scoring: best-fit candidates float to the top by default (the whole
+    // point of the feature), with a toggle back to "recently added".
+    var sortMode = STATE.bd.plSort || 'match';
+    if (sortMode === 'match' && window.matchScoreValue){
+      rows = rows.slice().sort(function(a,b){ return matchScoreValue(b.candidate||{}, j) - matchScoreValue(a.candidate||{}, j); });
+    }
 
     // Job details FIRST — what a recruiter needs to actually work the req:
     // description, pay, location, work auth, skills, experience. Visible to
@@ -147,7 +153,7 @@
 
     var allOn = rows.length && rows.every(function(p){ return sel[p.id]; });
     var head = '<th style="padding:8px 9px"><input id="pl-chk-all" type="checkbox" '+(allOn?'checked':'')+' onclick="plToggleSelAll()"></th>'+
-      ['Pipeline ID','Candidate Name','Title','Stage','Work Auth','Mobile','Email','Location','Country','Exp','Source','Resume',
+      ['Pipeline ID','Candidate Name','Title','Match','Stage','Work Auth','Mobile','Email','Location','Country','Exp','Source','Resume',
       'Bill Rate','Pay Rate','Employer','Availability','Notice','Current CTC','Tagged By','Tagged On','']
       .map(function(h){ return '<th style="text-align:left;padding:8px 9px;font-size:11px;color:var(--text3);font-weight:700;white-space:nowrap">'+h+'</th>'; }).join('');
 
@@ -180,6 +186,7 @@
         '<td style="padding:8px 9px;white-space:nowrap">'+code(p.pipeline_code||'—')+'</td>'+
         '<td style="padding:8px 9px;white-space:nowrap;font-size:12.5px"><span style="font-weight:600;cursor:pointer;color:var(--accent)" onclick="bdOpenCandidate(\''+c.id+'\')">'+esc(c.full_name||'—')+'</span> '+(c.candidate_code?'<span style="font-size:10px;color:var(--text3)">'+esc(c.candidate_code)+'</span>':'')+'</td>'+
         '<td style="padding:8px 9px;font-size:12px">'+esc(c.current_title||c.headline||'—')+'</td>'+
+        '<td style="padding:8px 9px">'+(window.matchBadge?matchBadge(matchScore(c,j)):'')+'</td>'+
         '<td style="padding:8px 9px">'+statusSel+'</td>'+
         '<td style="padding:8px 9px;font-size:12px;white-space:nowrap">'+esc(p.work_auth_snap||c.work_authorization||'—')+'</td>'+
         '<td style="padding:8px 9px;font-size:12px;white-space:nowrap">'+esc(c.phone||'—')+'</td>'+
@@ -204,7 +211,7 @@
         '</td>'+
       '</tr>';
     }).join('');
-    if (!rows.length) body = '<tr><td colspan="22" style="padding:40px;text-align:center;color:var(--text3)">No candidates on this job yet. '+
+    if (!rows.length) body = '<tr><td colspan="23" style="padding:40px;text-align:center;color:var(--text3)">No candidates on this job yet. '+
       '<span style="color:var(--accent);cursor:pointer" onclick="plOpenAdd(\''+j.id+'\')">Add a candidate →</span></td></tr>';
 
     return '<div class="page">'+
@@ -219,7 +226,12 @@
       '</div>'+
       jobCard+
       tabs+bulkBar+
-      '<div class="card" style="padding:0;overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:1500px">'+
+      (rows.length ? '<div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-bottom:8px;font-size:12px">'+
+        '<span style="color:var(--text3)">Sort by</span>'+
+        ['match','recent'].map(function(m){ var on=sortMode===m;
+          return '<button class="btn btn-sm '+(on?'btn-primary':'btn-outline')+'" onclick="plSetSort(\''+m+'\')">'+(m==='match'?'Best match':'Recently added')+'</button>'; }).join('')+
+      '</div>' : '')+
+      '<div class="card" style="padding:0;overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:1560px">'+
         '<thead><tr style="background:var(--bg)">'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>'+
     '</div>';
   };
@@ -279,6 +291,7 @@
     rows.forEach(function(p){ sel[p.id]=!allOn; }); STATE.bd.plSel=sel; plRepaintSelection();
   };
   window.plClearSel = function(){ STATE.bd.plSel={}; plRepaintSelection(); };
+  window.plSetSort = function(m){ STATE.bd.plSort=m; render(); };
   window.plSequenceSelected = function(){
     // Sequencing enrolls a submitted candidate — only promoted rows qualify.
     var promoted = plSelectedRows().filter(function(p){ return p.submission_id; });
