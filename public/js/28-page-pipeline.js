@@ -308,7 +308,7 @@
   window.plEmailJD = function(){
     var jid = STATE.bd.view && STATE.bd.view.pipelineJoId;
     var j = joById(jid) || {};
-    var recips = plSelectedRows().map(function(p){ var c=p.candidate||{}; return { name:c.full_name||'Candidate', email:(c.email||'').trim() }; });
+    var recips = plSelectedRows().map(function(p){ var c=p.candidate||{}; return { name:c.full_name||'Candidate', email:(c.email||'').trim(), candidate_id:c.id }; });
     if(!recips.length){ showToast('Select at least one candidate first','error'); return; }
     if(!recips.some(function(r){ return r.email; })){ showToast('None of the selected candidates have an email address on file','error'); return; }
     var subject = 'Job opportunity: '+(j.job_title||'')+(j.client?' — '+j.client:'');
@@ -340,14 +340,36 @@
           '<div style="margin-top:12px"><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Message</label>'+
             '<textarea id="pl-jd-body" class="sel" style="min-height:220px;resize:vertical;font-size:12.5px;line-height:1.5">'+esc(d.body)+'</textarea></div>'+
         '</div>'+
-        '<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">'+
-          '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
-          '<button class="btn btn-outline" onclick="plCopyEmailJD()">Copy message</button>'+
-          '<button class="btn btn-primary" onclick="plSendEmailJD()">Open in mail app →</button>'+
+        '<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">'+
+          '<div style="font-size:11px;color:var(--text3)">Tracked send emails from your connected mailbox and reports opens.</div>'+
+          '<div style="display:flex;gap:8px">'+
+            '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+            '<button class="btn btn-outline" onclick="plCopyEmailJD()">Copy</button>'+
+            '<button class="btn btn-outline" onclick="plSendEmailJD()">Open in mail app</button>'+
+            '<button class="btn btn-primary" onclick="plSendTracked()">✉ Send tracked through futé</button>'+
+          '</div>'+
         '</div>'+
       '</div>';
     render();
   }
+  window.plSendTracked = function(){
+    var d = STATE.bd._emailJD; if(!d) return;
+    var subject=(document.getElementById('pl-jd-subject')||{}).value||d.subject;
+    var body=(document.getElementById('pl-jd-body')||{}).value||d.body;
+    var recipients = d.recips.filter(function(r){ return r.email; }).map(function(r){ return { candidate_id:r.candidate_id||null, email:r.email, name:r.name }; });
+    if(!recipients.length){ showToast('No valid recipient emails','error'); return; }
+    showToast('Sending…','info');
+    apiPost('/candidates/email', { recipients:recipients, subject:subject, body:body, job_order_id:d.jid })
+      .then(function(r){
+        var sent=r.sent||0;
+        showToast(sent+' email'+(sent!==1?'s':'')+' sent & tracked'+(r.mailbox?' from '+r.mailbox:''),'success');
+        closeModal();
+      })
+      .catch(function(e){
+        if(/no_connected_mailbox/.test(e.message)) showToast('No connected mailbox — connect one under Email, or use "Open in mail app".','error');
+        else showToast('Send failed: '+e.message,'error');
+      });
+  };
   window.plCopyEmailJD = function(){
     var b=document.getElementById('pl-jd-body'); if(!b)return;
     (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(b.value):Promise.reject())
