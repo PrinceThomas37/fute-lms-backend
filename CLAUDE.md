@@ -118,6 +118,15 @@ Ordered by "cheapest to do now vs. most painful to retrofit":
      `candidate_email` channel; `recruiterSendingMailbox` only checks `microsoft_tokens`).
      Gmail send = a small follow-up (check `gmail_tokens` + dispatch by `platform`).
    - **Slice 3 (next):** reply detection (unique reply-to / mailbox scan) — bigger.
+   - **Interview scheduling (related, DONE):** the stage modal captures full
+     interview details — format (in-person / virtual / phone), platform + join link
+     or office address, up to 3 interviewer names — stored on `submissions`
+     (migration `025`). `POST /submissions/:id/interview-invite` emails the formatted,
+     open-tracked details to the candidate and/or the BD manager (job title, company,
+     date/time, format, interviewers auto-included). **Next:** auto-CREATE the meeting
+     — Teams via Graph needs an added `OnlineMeetings.ReadWrite` scope + re-consent
+     (we already have the Microsoft app reg); then Google Meet (Calendar scope); Zoom
+     = a new OAuth integration.
 4. **Candidate ↔ JD match scoring / ranking** — we already parse resumes and JDs; add a
    match score (AI when a key is set, rule-based fallback). On-trend differentiator.
 5. **Reporting/analytics** — funnel, time-to-fill, recruiter productivity. We already

@@ -31,6 +31,8 @@
 
   function esc(s){ return String(s==null?'':s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
   function isInterviewStage(st){ return /^Interview/.test(st); }
+  // ISO timestamp → value for a <input type="datetime-local"> (local time).
+  function toLocalInput(iso){ if(!iso) return ''; var d=new Date(iso); if(isNaN(d.getTime())) return ''; var p=function(n){return String(n).padStart(2,'0');}; return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes()); }
 
   // openStageModal(idOrIds, newStage, onDone)
   //   idOrIds — one submission id or an array (bulk change)
@@ -65,6 +67,14 @@
     var names = ids.map(function(id){ var s=subs.find(function(x){return x.id===id;})||{}; return (s.candidate&&s.candidate.full_name)||''; }).filter(Boolean);
     var subStages = SUB_STAGES[newStage] || [];
     var showInterview = isInterviewStage(newStage);
+    // Prefill the interview form from the current submission (single move only).
+    var ivSub = (ids.length===1) ? (subs.find(function(x){return x.id===ids[0];})||{}) : {};
+    var ivType0 = ivSub.interview_type || 'virtual';
+    var ivAt0 = toLocalInput(ivSub.interview_at);
+    var ivPlatform0 = ivSub.interview_platform || 'Microsoft Teams';
+    var ivLink0 = ivSub.interview_link || ivSub.interview_location || '';
+    var ivAddr0 = ivSub.interview_address || (ivSub.interview_type==='in_person'?ivSub.interview_location:'') || '';
+    var ivPeople0 = Array.isArray(ivSub.interviewers) ? ivSub.interviewers.join(', ') : '';
 
     // Confirmation line: show exactly what's changing — [current] → [target] —
     // so a stage move never happens without the user seeing where it goes.
@@ -90,11 +100,38 @@
               subStages.map(function(s){ return '<option value="'+esc(s)+'">'+esc(s)+'</option>'; }).join('')+
             '</select></div>':'')+
           (showInterview?
-            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">'+
-              '<div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Interview date &amp; time</label>'+
-                '<input id="stg-iv-at" type="datetime-local" class="sel"></div>'+
-              '<div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Location / meeting link</label>'+
-                '<input id="stg-iv-loc" class="sel" placeholder="Office, Zoom link, phone…"></div>'+
+            '<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px">'+
+              '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">INTERVIEW DETAILS</div>'+
+              '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
+                '<div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Date &amp; time</label>'+
+                  '<input id="stg-iv-at" type="datetime-local" class="sel" value="'+esc(ivAt0)+'"></div>'+
+                '<div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Format</label>'+
+                  '<select id="stg-iv-type" class="sel" onchange="stgIvTypeToggle()">'+
+                    ['in_person|In person','virtual|Virtual','phone|Phone'].map(function(o){ var kv=o.split('|'); return '<option value="'+kv[0]+'"'+(ivType0===kv[0]?' selected':'')+'>'+kv[1]+'</option>'; }).join('')+
+                  '</select></div>'+
+              '</div>'+
+              '<div id="stg-iv-virtual" style="display:'+(ivType0==='virtual'?'grid':'none')+';grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">'+
+                '<div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Platform</label>'+
+                  '<select id="stg-iv-platform" class="sel">'+
+                    ['Microsoft Teams','Google Meet','Zoom','Other'].map(function(p){ return '<option'+(ivPlatform0===p?' selected':'')+'>'+esc(p)+'</option>'; }).join('')+
+                  '</select></div>'+
+                '<div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Join link / meeting ID</label>'+
+                  '<input id="stg-iv-link" class="sel" placeholder="https://… or meeting ID" value="'+esc(ivType0==='virtual'?ivLink0:'')+'"></div>'+
+              '</div>'+
+              '<div id="stg-iv-inperson" style="display:'+(ivType0==='in_person'?'block':'none')+';margin-top:10px">'+
+                '<label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Office address</label>'+
+                '<input id="stg-iv-address" class="sel" placeholder="Street, suite, city…" value="'+esc(ivType0==='in_person'?ivAddr0:'')+'"></div>'+
+              '<div id="stg-iv-phone" style="display:'+(ivType0==='phone'?'block':'none')+';margin-top:10px">'+
+                '<label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Phone number</label>'+
+                '<input id="stg-iv-phone-num" class="sel" placeholder="+1 …" value="'+esc(ivType0==='phone'?ivLink0:'')+'"></div>'+
+              '<div style="margin-top:10px"><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Interviewer name(s) — up to 3</label>'+
+                '<input id="stg-iv-people" class="sel" placeholder="e.g. Jane Smith, Raj Patel" value="'+esc(ivPeople0)+'"></div>'+
+              '<div style="margin-top:11px;font-size:11.5px;color:var(--text2);font-weight:600">Email these details to:</div>'+
+              '<div style="display:flex;gap:16px;margin-top:5px">'+
+                '<label style="font-size:12.5px;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="stg-iv-notify-cand"> Candidate</label>'+
+                '<label style="font-size:12.5px;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="stg-iv-notify-bd"> BD Manager</label>'+
+              '</div>'+
+              '<div style="font-size:11px;color:var(--text3);margin-top:5px">Job title, company, date/time, format &amp; interviewers are added automatically. Sent (and open-tracked) from your connected mailbox.</div>'+
             '</div>':'')+
           (newStage==='Rejected'?
             '<div style="margin-bottom:12px"><label style="font-size:11px;color:var(--red);display:block;margin-bottom:3px;font-weight:700">Reason for rejection (required)</label>'+
@@ -119,10 +156,19 @@
     render();
   };
 
+  window.stgIvTypeToggle = function(){
+    var t = (document.getElementById('stg-iv-type')||{}).value;
+    var set = function(id,on,disp){ var el=document.getElementById(id); if(el) el.style.display = on ? disp : 'none'; };
+    set('stg-iv-virtual', t==='virtual', 'grid');
+    set('stg-iv-inperson', t==='in_person', 'block');
+    set('stg-iv-phone', t==='phone', 'block');
+  };
+
   window.stgApply = function () {
     var mv = STATE._stageMove; if (!mv) return;
     var val = function(id){ var el=document.getElementById(id); return el?el.value:''; };
     var remOn = (document.getElementById('stg-rem')||{}).checked;
+    var notifyCand = false, notifyBd = false;
     // Notes are required on every stage change (product rule) — capture the
     // "why" behind each move so the candidate's history reads as a story.
     var note = val('stg-note').trim();
@@ -135,7 +181,25 @@
     }
     if (document.getElementById('stg-iv-at')) {
       payload.interview_at = val('stg-iv-at') || undefined;
-      payload.interview_location = val('stg-iv-loc') || undefined;
+      var ivType = val('stg-iv-type') || undefined;
+      payload.interview_type = ivType;
+      var loc = '';
+      if (ivType === 'virtual') {
+        payload.interview_platform = val('stg-iv-platform') || undefined;
+        payload.interview_link = val('stg-iv-link') || undefined;
+        loc = val('stg-iv-link');
+      } else if (ivType === 'in_person') {
+        payload.interview_address = val('stg-iv-address') || undefined;
+        loc = val('stg-iv-address');
+      } else if (ivType === 'phone') {
+        payload.interview_link = val('stg-iv-phone-num') || undefined;
+        loc = val('stg-iv-phone-num');
+      }
+      payload.interview_location = loc || undefined;   // keep the legacy field for the board chip
+      var people = (val('stg-iv-people')||'').split(',').map(function(x){ return x.trim(); }).filter(Boolean).slice(0,3);
+      payload.interviewers = people.length ? people : undefined;
+      notifyCand = !!(document.getElementById('stg-iv-notify-cand')||{}).checked;
+      notifyBd = !!(document.getElementById('stg-iv-notify-bd')||{}).checked;
     }
     if (remOn && val('stg-rem-date')) { payload.reminder_date = val('stg-rem-date'); payload.reminder_note = val('stg-rem-note') || undefined; }
 
@@ -148,6 +212,21 @@
       if (STATE.bd && STATE.bd.submissions) {
         STATE.bd.submissions = STATE.bd.submissions.map(function(s){
           var u = updated.find(function(x){ return x.id===s.id; }); return u || s;
+        });
+      }
+      // If the scheduler opted to email the interview details, send them now
+      // (the stage PATCH has already stored the details on the submission).
+      var recips = [];
+      if (notifyCand) recips.push('candidate');
+      if (notifyBd) recips.push('bd_manager');
+      if (recips.length) {
+        updated.forEach(function(s){
+          apiPost('/submissions/'+s.id+'/interview-invite', { recipients: recips })
+            .then(function(r){ if (r && r.sent) showToast(r.sent+' interview invite'+(r.sent>1?'s':'')+' sent','success'); })
+            .catch(function(e){
+              if (/no_connected_mailbox/.test(e.message)) showToast('Interview saved — connect a mailbox to email the invite','error');
+              else showToast('Interview saved; invite email failed: '+e.message,'error');
+            });
         });
       }
       if (mv.onDone) mv.onDone(updated);

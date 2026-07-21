@@ -2790,6 +2790,100 @@ app.post('/candidates/email', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+function firstNameOf(name) { return String(name || '').trim().split(/\s+/)[0] || 'there'; }
+
+// Build the interview-invitation message (plain text; buildHtmlEmailBody wraps it).
+function buildInterviewInviteText(sub, candidate, job, role) {
+  const dt = sub.interview_at ? new Date(sub.interview_at) : null;
+  const when = dt ? dt.toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'To be confirmed';
+  const type = sub.interview_type || (sub.interview_link ? 'virtual' : (sub.interview_address ? 'in_person' : ''));
+  const lines = [];
+  lines.push('Hi ' + firstNameOf(role === 'candidate' ? candidate.full_name : (job.bd_manager && job.bd_manager.name)) + ',', '');
+  lines.push(role === 'candidate'
+    ? 'Your interview has been scheduled. Here are the details:'
+    : ('An interview has been scheduled for ' + (candidate.full_name || 'the candidate') + ':'), '');
+  lines.push('Position: ' + (job.job_title || '—'));
+  const company = job.client || (job.company && job.company.name);
+  if (company) lines.push('Company: ' + company);
+  if (role !== 'candidate') lines.push('Candidate: ' + (candidate.full_name || '—'));
+  lines.push('Date & time: ' + when);
+  if (type === 'virtual') {
+    lines.push('Format: Virtual' + (sub.interview_platform ? ' (' + sub.interview_platform + ')' : ''));
+    if (sub.interview_link) lines.push('Join link / meeting ID: ' + sub.interview_link);
+  } else if (type === 'in_person') {
+    lines.push('Format: In person');
+    if (sub.interview_address) lines.push('Address: ' + sub.interview_address);
+    else if (job.city || job.state) lines.push('Location: ' + [job.city, job.state].filter(Boolean).join(', '));
+  } else if (type === 'phone') {
+    lines.push('Format: Phone call');
+    if (sub.interview_link) lines.push('Number: ' + sub.interview_link);
+  } else if (sub.interview_location) {
+    lines.push('Location: ' + sub.interview_location);
+  }
+  const ivs = Array.isArray(sub.interviewers) ? sub.interviewers.filter(Boolean) : [];
+  if (ivs.length) lines.push('Interviewer' + (ivs.length > 1 ? 's' : '') + ': ' + ivs.join(', '));
+  lines.push('', 'Please let us know if you have any questions or need to reschedule.', '', 'Best regards');
+  return lines.join('\n');
+}
+
+// Email the interview details to the candidate and/or the BD manager.
+app.post('/submissions/:id/interview-invite', auth, async (req, res) => {
+  try {
+    if (req.user.isGuest) return res.status(403).json({ error: 'Guests cannot send email.' });
+    const b = req.body || {};
+    const roles = Array.isArray(b.recipients) ? b.recipients : [];
+    const wantCandidate = roles.includes('candidate') || b.candidate === true;
+    const wantBd = roles.includes('bd_manager') || b.bd_manager === true;
+    if (!wantCandidate && !wantBd) return res.status(400).json({ error: 'Pick at least one recipient.' });
+
+    const { data: sub, error } = await supabase.from('submissions')
+      .select('id, interview_at, interview_location, interview_type, interview_platform, interview_link, interview_address, interviewers, candidate_id, job_order_id, candidate:candidates(id,full_name,email), job:job_orders(id,job_title,client,city,state,company:companies(name), bd_manager:users!bd_manager_id(id,name,email))')
+      .eq('id', req.params.id).single();
+    if (error || !sub) return res.status(404).json({ error: 'Submission not found' });
+
+    const candidate = sub.candidate || {}, job = sub.job || {}, bd = job.bd_manager || {};
+    const targets = [];
+    if (wantCandidate) {
+      if (!candidate.email) return res.status(400).json({ error: 'The candidate has no email on file.' });
+      targets.push({ email: candidate.email, role: 'candidate', candidate_id: candidate.id });
+    }
+    if (wantBd) {
+      if (!bd.email) return res.status(400).json({ error: 'This job has no BD manager email on file.' });
+      targets.push({ email: bd.email, role: 'bd_manager', candidate_id: null });
+    }
+
+    const mailbox = await recruiterSendingMailbox(req.user.id);
+    if (!mailbox) return res.status(409).json({ error: 'no_connected_mailbox' });
+    const signature = await getMailboxSignature(mailbox.id, req.user.id).catch(() => '');
+    const subject = 'Interview scheduled: ' + (candidate.full_name || 'Candidate') + ' — ' + (job.job_title || 'Role');
+    const orgId = req.orgId || null;
+    const results = [];
+    for (const t of targets) {
+      if (!emailSyntaxValid(t.email)) { results.push({ email: t.email, role: t.role, status: 'skipped', reason: 'invalid_email' }); continue; }
+      const token = newTrackToken();
+      const htmlBody = injectTrackPixel(buildHtmlEmailBody(buildInterviewInviteText(sub, candidate, job, t.role), signature), token);
+      try {
+        await sendMicrosoftNewMessage(mailbox.id, { to: t.email, subject, htmlBody });
+        await supabase.from('email_tracking').insert({
+          token, channel: 'interview', candidate_id: t.candidate_id, job_order_id: sub.job_order_id,
+          to_email: t.email, subject, sent_by: req.user.id, mailbox_email: mailbox.email_address || null,
+          ...(orgId ? { org_id: orgId } : {})
+        });
+        results.push({ email: t.email, role: t.role, status: 'sent' });
+      } catch (e) { results.push({ email: t.email, role: t.role, status: 'failed', reason: e.message }); }
+    }
+    const sentCount = results.filter(x => x.status === 'sent').length;
+    if (sentCount) {
+      const { data: sendLog } = await supabase.from('email_send_log').select('id,emails_sent').eq('send_date', today()).eq('user_email_id', mailbox.id).maybeSingle();
+      await supabase.from('email_send_log').upsert(
+        { user_email_id: mailbox.id, send_date: today(), emails_sent: (sendLog?.emails_sent || 0) + sentCount },
+        { onConflict: 'user_email_id,send_date' }
+      );
+    }
+    res.json({ mailbox: mailbox.email_address, sent: sentCount, results });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // recruiter_task — a dated task for the recruiter (call the candidate, collect
 // docs, schedule an interview …), recorded as a reminder + submission activity.
 wfEngine.registerChannel('recruiter_task', async ({ step, enrollment, context }) => {
