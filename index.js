@@ -849,24 +849,40 @@ app.post('/emails/queue-all', auth, async (req, res) => {
     const totalCount = pendingEmails.length;
     const userId = req.user.id;
     res.json({ success: true, queued: totalCount });
-    await setSendProgress(userId, { active: true, total: totalCount, sent: 0, failed: 0, current: '', failDetails: [], startedAt: new Date().toISOString() });
 
-    console.log(`[SendAll] Starting loop for ${totalCount} emails, userId=${userId}`);
-    const { sent, failed, skippedWindow, skippedQuota, skippedDomain, failDetails, sentContactIds, sentJobIds, sendWindow } = await processPendingEmailSends(userId, pendingEmails, { autoSend: false });
-    const uniqueContactIds = [...new Set(sentContactIds.filter(Boolean))];
-    if (uniqueContactIds.length) await supabase.from('contacts').update({ email_sent_at: today() }).in('id', uniqueContactIds);
-    const uniqueJobIds = [...new Set(sentJobIds.filter(Boolean))];
-    for (const jid of uniqueJobIds) await logActivity(jid, null, userId, 'emails_sent', `${sent} email(s) sent via Microsoft`, null, null);
-    const deferredTotal = skippedWindow + skippedQuota + skippedDomain;
-    await setSendProgress(userId, {
-      active: false, done: true, total: totalCount, sent, failed, deferred: deferredTotal,
-      deferredWindow: skippedWindow, deferredQuota: skippedQuota, deferredDomain: skippedDomain,
-      failDetails,
-      deferredNote: buildDeferredNote({ skippedWindow, skippedQuota, skippedDomain, sendWindow }),
-      completedAt: new Date().toISOString()
-    });
-    setTimeout(() => clearSendProgress(userId), 300000);
-    console.log(`[SendAll] Completed: ${sent} sent, ${failed} failed, deferred window=${skippedWindow} quota=${skippedQuota} domain=${skippedDomain}`); console.log(`[SendAll] FailDetails:`, JSON.stringify(failDetails.slice(0,3)));
+    // Concurrency guard: never run two send loops for the same user at once
+    // (a double-click, or this manual send-all overlapping the auto-send/retry
+    // loop). Without this the same pending rows were dispatched twice. The
+    // per-email atomic claim in processPendingEmailSends is the hard guarantee;
+    // this just avoids starting redundant work. If a send is already running,
+    // those pending emails will be handled by that run (or the deferred retry).
+    if (activeSendByUser.has(userId)) {
+      console.log(`[SendAll] A send is already in progress for user ${userId} — skipping duplicate loop`);
+      return;
+    }
+    activeSendByUser.add(userId);
+    try {
+      await setSendProgress(userId, { active: true, total: totalCount, sent: 0, failed: 0, current: '', failDetails: [], startedAt: new Date().toISOString() });
+
+      console.log(`[SendAll] Starting loop for ${totalCount} emails, userId=${userId}`);
+      const { sent, failed, skippedWindow, skippedQuota, skippedDomain, failDetails, sentContactIds, sentJobIds, sendWindow } = await processPendingEmailSends(userId, pendingEmails, { autoSend: false });
+      const uniqueContactIds = [...new Set(sentContactIds.filter(Boolean))];
+      if (uniqueContactIds.length) await supabase.from('contacts').update({ email_sent_at: today() }).in('id', uniqueContactIds);
+      const uniqueJobIds = [...new Set(sentJobIds.filter(Boolean))];
+      for (const jid of uniqueJobIds) await logActivity(jid, null, userId, 'emails_sent', `${sent} email(s) sent via Microsoft`, null, null);
+      const deferredTotal = skippedWindow + skippedQuota + skippedDomain;
+      await setSendProgress(userId, {
+        active: false, done: true, total: totalCount, sent, failed, deferred: deferredTotal,
+        deferredWindow: skippedWindow, deferredQuota: skippedQuota, deferredDomain: skippedDomain,
+        failDetails,
+        deferredNote: buildDeferredNote({ skippedWindow, skippedQuota, skippedDomain, sendWindow }),
+        completedAt: new Date().toISOString()
+      });
+      setTimeout(() => clearSendProgress(userId), 300000);
+      console.log(`[SendAll] Completed: ${sent} sent, ${failed} failed, deferred window=${skippedWindow} quota=${skippedQuota} domain=${skippedDomain}`); console.log(`[SendAll] FailDetails:`, JSON.stringify(failDetails.slice(0,3)));
+    } finally {
+      activeSendByUser.delete(userId);
+    }
   } catch (err) { console.error('[SendAll] Error:', err.message); }
 });
 
@@ -1475,6 +1491,22 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
 
     try {
       sendAttempts++;
+      // ── ATOMIC CLAIM (prevents duplicate sends) ───────────────────────────
+      // Flip pending→sending in ONE conditional update. If any other run
+      // (a second /emails/queue-all from a double-click, the 20-min deferred
+      // retry, or auto-send after lead assignment) already claimed this row,
+      // zero rows come back and we skip — so a single email row can never be
+      // dispatched to the provider twice. Status is only marked 'sent' after a
+      // successful send; a genuine failure sets 'failed' below, and a deferred
+      // follow-up is released back to 'pending' in the catch.
+      const { data: claimedRows, error: claimErr } = await supabase
+        .from('emails').update({ status: 'sending' })
+        .eq('id', email.id).eq('status', 'pending').select('id');
+      if (claimErr) throw claimErr;
+      if (!claimedRows || !claimedRows.length) {
+        console.log(`[SendGuard] email ${email.id} (${email.to_email}) already claimed by another run — skipping to avoid a duplicate send`);
+        continue;
+      }
       const sigTemplate = resolveSignatureHtml(email._sigHtml || mailboxSignatures[userEmailId]);
       const graph = await deliverOutboundEmail(email, userEmailId, sigTemplate, sendingEmail);
       await supabase.from('emails').update({ status: 'sent', sent_at: today() }).eq('id', email.id);
@@ -1497,8 +1529,9 @@ async function processPendingEmailSends(userId, pendingEmails, opts = {}) {
       await setSendProgress(userId, { ...progressBase, sent, current: email.to_email });
     } catch (e) {
       if (e && e.deferFollowup) {
-        // Thread parent not resolvable yet — leave the row pending so a later
-        // run can send it as a true reply, rather than failing it or faking a thread.
+        // Thread parent not resolvable yet — release the claim back to pending
+        // so a later run can send it as a true reply (it was NOT dispatched).
+        try { await supabase.from('emails').update({ status: 'pending' }).eq('id', email.id).eq('status', 'sending'); } catch (_) {}
         skippedThread++;
         await setSendProgress(userId, { ...progressBase, current: `${email.to_email} (follow-up waiting for thread)` });
         continue;
