@@ -210,7 +210,9 @@ try {
   // ── 7: resume-format overlay (letterhead preview + downloads) ────────────
   await page.evaluate(() => {
     window.apiPost = function(p, b){
-      if (p === '/candidates/parse-resume') return Promise.resolve({ fields: { name: 'Peter Parker', email: 'pp@example.com', skills: ['React', 'Node'] }, used_ai: false, resume_text: 'Resume body text here' });
+      // Mirror the REAL parser output: full_name (not name) and skills as a
+      // comma-separated STRING (not an array) — regression for f.skills.map.
+      if (p === '/candidates/parse-resume') return Promise.resolve({ fields: { full_name: 'Peter Parker', email: 'pp@example.com', current_title: 'Frontend Engineer', experience_years: 6, skills: 'React, Node, TypeScript' }, used_ai: false, resume_text: 'Resume body text here' });
       return Promise.reject(new Error('unstubbed ' + p));
     };
     const file = new File(['dummy resume content'], 'peter_resume.txt', { type: 'text/plain' });
@@ -218,13 +220,15 @@ try {
   });
   await page.waitForTimeout(300);
   const overlayHtml = await page.evaluate(() => { const o = document.getElementById('ats-fmt-overlay'); return o ? o.innerHTML : null; });
-  step('Format overlay opens with a preview frame', !!overlayHtml && overlayHtml.includes('ats-fmt-frame'));
+  step('Format overlay opens with a preview frame (string skills do not crash)', !!overlayHtml && overlayHtml.includes('ats-fmt-frame'));
   step('Overlay offers Word + PDF download buttons', !!overlayHtml && overlayHtml.includes('Download Word') && overlayHtml.includes('Download PDF'));
-  const frameHasLetterhead = await page.evaluate(() => {
+  const frame = await page.evaluate(() => {
     const f = document.getElementById('ats-fmt-frame');
-    try { return /futé|Candidate Submission/i.test(f.contentDocument.body.innerHTML) && f.contentDocument.body.innerHTML.includes('Peter Parker'); } catch(e){ return false; }
+    try { return f.contentDocument.body.innerHTML; } catch(e){ return ''; }
   });
-  step('Preview shows letterhead + parsed candidate name', frameHasLetterhead);
+  step('Preview shows letterhead + real parsed name (full_name)', /futé|Candidate Submission/i.test(frame) && frame.includes('Peter Parker'));
+  step('Preview renders string skills split into a list', frame.includes('React') && frame.includes('TypeScript') && frame.includes('Key Skills'));
+  step('No "f.skills.map is not a function" page error', !pageErrors.some(e => /skills\.map/.test(e)));
 
   step('No JS page errors', pageErrors.length === 0, pageErrors.join('; ').slice(0, 400));
 } finally {

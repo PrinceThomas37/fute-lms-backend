@@ -57,12 +57,12 @@ try {
     const patched = [];
     window.apiGet = function(p){
       if (p === '/candidates/candX') return Promise.resolve({ id: 'candX', full_name: 'Daniel Estimator', first_name: 'Daniel', last_name: 'Estimator', email: 'daniel@x.com', phone: '555' });
-      if (p === '/candidates/parse-resume') return Promise.resolve({ fields: { name: 'Daniel', skills: ['Estimating'] }, resume_text: 'Resume text body' });
+      if (p === '/candidates/parse-resume') return Promise.resolve({ fields: { full_name: 'Daniel', skills: 'Estimating, Cost Controls' }, resume_text: 'Resume text body' });
       return Promise.reject(new Error('unstubbed GET ' + p));
     };
     window.apiPost = function(p, b){
       if (/\/candidates\/candX\/documents$/.test(p)) { posted.push(b); return Promise.resolve({ id: 'doc' + posted.length }); }
-      if (p === '/candidates/parse-resume') return Promise.resolve({ fields: { name: 'Daniel', skills: ['Estimating'] }, resume_text: 'Resume text body' });
+      if (p === '/candidates/parse-resume') return Promise.resolve({ fields: { full_name: 'Daniel', skills: 'Estimating, Cost Controls' }, resume_text: 'Resume text body' });
       return Promise.reject(new Error('unstubbed POST ' + p));
     };
     window.apiPatch = function(p, b){ if (/\/submissions\/subX\/stage$/.test(p)) { patched.push(b); return Promise.resolve({ id: 'subX', stage: 'Submitted to BDM' }); } return Promise.reject(new Error('unstubbed PATCH ' + p)); };
