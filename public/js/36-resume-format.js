@@ -22,19 +22,34 @@
       'futé · Recruiting &amp; Staffing · '+esc(FUTE_ADDRESS)+
     '</div>';
 
+  // The parse endpoint may return skills as an array, a comma/newline-delimited
+  // string, or null — normalize to a clean array so .map never blows up.
+  function skillsArray(s){
+    if (Array.isArray(s)) return s.filter(function(x){ return x!=null && String(x).trim(); }).map(function(x){ return String(x).trim(); });
+    if (typeof s === 'string') return s.split(/[,;\n|]+/).map(function(x){ return x.trim(); }).filter(Boolean);
+    return [];
+  }
+
   function docHtml(fields, text, filename){
     var f = fields || {};
+    // The parser returns full_name / experience_years; keep the old aliases as
+    // fallbacks so either shape renders the real name (not "Candidate").
+    var name = f.full_name || f.name || '';
+    var yrs = (f.experience_years != null ? f.experience_years : f.years_experience);
+    var title = f.current_title || '';
     var contact = [f.email, f.phone, [f.city,f.state].filter(Boolean).join(', ')].filter(Boolean).join(' · ');
-    var skills = (f.skills && f.skills.length)
+    var sk = skillsArray(f.skills);
+    var skills = sk.length
       ? '<div style="margin:10px 0 2px;font-weight:700;font-size:12px;color:#2E7D32;text-transform:uppercase;letter-spacing:.06em">Key Skills</div>'+
-        '<div style="font-size:12px;line-height:1.6">'+f.skills.map(esc).join(' · ')+'</div>'
+        '<div style="font-size:12px;line-height:1.6">'+sk.map(esc).join(' · ')+'</div>'
       : '';
-    var exp = f.years_experience ? '<span style="font-size:12px;color:#555"> · '+esc(String(f.years_experience))+' yrs experience</span>' : '';
-    return '<!doctype html><html><head><meta charset="utf-8"><title>'+esc(f.name||filename||'Submission')+'</title></head>'+
+    var exp = (yrs!=null && yrs!=='' && isFinite(Number(yrs))) ? '<span style="font-size:12px;color:#555"> · '+esc(String(yrs))+' yrs experience</span>' : '';
+    return '<!doctype html><html><head><meta charset="utf-8"><title>'+esc(name||filename||'Submission')+'</title></head>'+
       '<body style="font-family:Calibri,Arial,sans-serif;color:#222;max-width:750px;margin:0 auto;padding:0 28px 20px">'+
         LETTERHEAD_TOP+
         '<div style="margin-top:16px">'+
-          '<div style="font-size:20px;font-weight:700">'+esc(f.name||'Candidate')+exp+'</div>'+
+          '<div style="font-size:20px;font-weight:700">'+esc(name||'Candidate')+exp+'</div>'+
+          (title?'<div style="font-size:13px;color:#333;margin-top:1px">'+esc(title)+'</div>':'')+
           (contact?'<div style="font-size:12px;color:#555;margin-top:2px">'+esc(contact)+'</div>':'')+
           (f.linkedin_url?'<div style="font-size:12px;color:#555">'+esc(f.linkedin_url)+'</div>':'')+
           skills+
@@ -66,8 +81,9 @@
     reader.onload = function(){
       apiPost('/candidates/parse-resume', { filename: file.name, data_base64: String(reader.result) })
         .then(function(r){
-          var html = docHtml((r&&r.fields)||{}, (r&&r.resume_text)||'', file.name);
-          var name = (r&&r.fields&&r.fields.name)||file.name;
+          var flds = (r&&r.fields)||{};
+          var html = docHtml(flds, (r&&r.resume_text)||'', file.name);
+          var name = flds.full_name || flds.name || file.name;
           if (opts.onFormatted) { try { opts.onFormatted(html, name); } catch(e){} }
           if (opts.preview !== false) openPreview(html, name);
         })
