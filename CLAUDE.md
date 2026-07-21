@@ -100,6 +100,17 @@ Ordered by "cheapest to do now vs. most painful to retrofit":
 3. **App-tracked candidate email** (not just `mailto:`): route candidate emails through
    the sending subsystem we already have → open/reply tracking = a real selling point,
    no new infra.
+   - **Slice 1 DONE** (migration `024`): open-tracking *infrastructure* — an
+     `email_tracking` table (org-scoped), a public pixel endpoint `GET /o/:token.gif`
+     (records opens, returns a 1×1 gif, never errors), a `GET /candidates/:id/
+     email-activity` read endpoint, and pure helpers in `email-tracking.js`
+     (`newToken`/`pixelHtml`/`injectPixel`). Wired into `routes/tracking.js`. Nothing
+     writes tracking rows yet — the live send path is untouched.
+   - **Slice 2 (next):** a tracked candidate-send that reuses the existing provider
+     send fns (`sendMicrosoftNewMessage` / gmail `sendNewMessage`) + `buildHtmlEmailBody`,
+     injects the pixel, records an `email_tracking` row; frontend "Email JD" gains a
+     "Send tracked through futé" option; show "opened ✓" on the candidate profile.
+   - **Slice 3:** reply detection (unique reply-to / mailbox scan) — bigger, later.
 4. **Candidate ↔ JD match scoring / ranking** — we already parse resumes and JDs; add a
    match score (AI when a key is set, rule-based fallback). On-trend differentiator.
 5. **Reporting/analytics** — funnel, time-to-fill, recruiter productivity. We already

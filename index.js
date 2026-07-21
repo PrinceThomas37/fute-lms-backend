@@ -2487,6 +2487,7 @@ app.use(require('./routes/jobs')(routeCtx));
 app.use(require('./routes/emails')(routeCtx));
 app.use(require('./routes/lookups')(routeCtx));
 app.use(require('./routes/distribution')(routeCtx));
+app.use(require('./routes/tracking')(routeCtx));
 
 require('./bd_recruiter_routes')(app, { supabase, auth, hasRole, notGuest, today, orgIdFor });
 
