@@ -212,8 +212,9 @@
               '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
                 '<label class="btn btn-sm btn-outline" style="cursor:pointer;margin:0">Attach file<input type="file" accept=".pdf,.doc,.docx,.txt,.rtf" style="display:none" onchange="sbdmPickFile(this)"></label>'+
                 '<span id="sbdm-file-name" style="font-size:12px;color:var(--text3)"></span>'+
-                '<button class="btn btn-sm btn-outline" onclick="sbdmFormat()" title="Convert the attached resume to the company submission format">Format resume</button>'+
+                '<button class="btn btn-sm btn-outline" onclick="sbdmFormat()" title="Convert the attached resume to the company letterhead format">✨ Format resume</button>'+
               '</div>'+
+              '<div id="sbdm-fmt-status" style="font-size:11.5px;color:var(--green);margin-top:7px"></div>'+
             '</div>'+
           '</div>'+
           '<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">'+
@@ -235,8 +236,14 @@
   window.sbdmFormat = function(){
     var st = STATE._sbdm;
     if (!st || !st.file) { showToast('Attach a resume file first, then click Format','error'); return; }
-    if (window.atsFormatResumeFile) window.atsFormatResumeFile(st.file);
-    else showToast('Formatter not loaded','error');
+    if (!window.atsFormatResumeFile) { showToast('Formatter not loaded','error'); return; }
+    // Format → open the preview (with Word/PDF download) AND stash the formatted
+    // doc so it's attached to the packet when the recruiter submits.
+    window.atsFormatResumeFile(st.file, { onFormatted: function(html, name){
+      st.formattedHtml = html; st.formattedName = name;
+      var el = document.getElementById('sbdm-fmt-status');
+      if (el) el.textContent = '✓ Formatted on the futé letterhead — it will be attached to this submission.';
+    }});
   };
 
   window.sbdmSubmit = function(){
@@ -251,6 +258,11 @@
     };
     if (!details.first_name || !details.email) { showToast('First name and email are required','error'); return; }
     if (!details.comment) { showToast('The submission comment is important — please add it','error'); return; }
+
+    // Record which resume files ride along with the packet so the BDM's
+    // submission view can point straight at them.
+    if (st.formattedName) details.formatted_resume = st.formattedName + '_Submission.doc';
+    if (st.file) details.original_resume = st.file.name;
 
     var patchStage = function(){
       apiPatch('/submissions/'+st.subId+'/stage', { stage:'Submitted to BDM', submission_details: details, note: details.comment })
@@ -267,16 +279,24 @@
         .catch(function(e){ showToast(e.message||'Could not submit','error'); });
     };
 
-    if (st.file) {
-      var f = st.file, reader = new FileReader();
-      reader.onload = function(){
-        apiPost('/candidates/'+st.candId+'/documents', { filename:f.name, content_type:f.type||'application/octet-stream', doc_type:'resume', data_base64:String(reader.result) })
-          .then(patchStage)
-          .catch(function(e){ showToast('Resume upload failed: '+e.message,'error'); });
-      };
-      reader.onerror = function(){ showToast('Could not read the resume file','error'); };
-      reader.readAsDataURL(f);
-    } else patchStage();
+    var uploadDoc = function(filename, contentType, dataUri){
+      return apiPost('/candidates/'+st.candId+'/documents',
+        { filename:filename, content_type:contentType, doc_type:'resume', data_base64:dataUri });
+    };
+    var readFile = function(f){ return new Promise(function(res,rej){
+      var r=new FileReader(); r.onload=function(){res(String(r.result));}; r.onerror=function(){rej(new Error('Could not read the resume file'));}; r.readAsDataURL(f);
+    }); };
+
+    // Attach the resume(s) to the packet BEFORE moving the stage: the original
+    // file (raw source) and the formatted futé-letterhead copy when present.
+    var uploads = [];
+    if (st.file) uploads.push(readFile(st.file).then(function(d){ return uploadDoc(st.file.name, st.file.type||'application/octet-stream', d); }));
+    if (st.formattedHtml && window.atsFormattedDocDataUri) {
+      var fName = (st.formattedName || details.first_name || 'candidate').replace(/[^A-Za-z0-9 _-]/g,'').trim().replace(/\s+/g,'_') || 'candidate';
+      uploads.push(uploadDoc(fName + '_Submission.doc', 'application/msword', window.atsFormattedDocDataUri(st.formattedHtml)));
+    }
+    if (!uploads.length) { patchStage(); return; }
+    Promise.all(uploads).then(patchStage).catch(function(e){ showToast('Resume upload failed: '+(e.message||e),'error'); });
   };
 
 })();

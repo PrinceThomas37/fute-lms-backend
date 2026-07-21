@@ -36,15 +36,19 @@
       dr('Primary Skills',j.primary_skills)+dr('Secondary Skills',j.secondary_skills)+dr('Industry',j.industry);
     var descId = 'pl-jd-'+j.id;
     var longDesc = !!(j.job_description && j.job_description.length > 320);
-    var desc = j.job_description ?
+    // Always show a Job Description block (placeholder if the BDM left it
+    // empty) — recruiters kept landing on candidates with no req context, so
+    // this section must never silently disappear.
+    var descBody = j.job_description
+      ? '<div id="'+descId+'" style="font-size:13px;line-height:1.5;white-space:pre-wrap;'+(longDesc?'max-height:110px;overflow:hidden':'')+'">'+esc(j.job_description)+'</div>'+
+        (longDesc?'<button class="btn btn-sm btn-outline" style="margin-top:8px" onclick="var el=document.getElementById(\''+descId+'\');var open=el.style.maxHeight===\'none\';el.style.maxHeight=open?\'110px\':\'none\';el.style.overflow=open?\'hidden\':\'visible\';this.textContent=open?\'Show more\':\'Show less\'">Show more</button>':'')
+      : '<div style="font-size:12.5px;color:var(--text3);font-style:italic">No job description was provided by the BD team yet.</div>';
+    var desc =
       '<div style="margin-top:'+(grid?'12px':'0')+';padding-top:'+(grid?'12px':'0')+(grid?';border-top:1px solid var(--border)':'')+'">'+
-        '<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Job Description</div>'+
-        '<div id="'+descId+'" style="font-size:13px;line-height:1.5;white-space:pre-wrap;'+(longDesc?'max-height:110px;overflow:hidden':'')+'">'+esc(j.job_description)+'</div>'+
-        (longDesc?'<button class="btn btn-sm btn-outline" style="margin-top:8px" onclick="var el=document.getElementById(\''+descId+'\');var open=el.style.maxHeight===\'none\';el.style.maxHeight=open?\'110px\':\'none\';el.style.overflow=open?\'hidden\':\'visible\';this.textContent=open?\'Show more\':\'Show less\'">Show more</button>':'')+
-      '</div>' : '';
-    if (!grid && !desc) return '';
+        '<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Job Description</div>'+descBody+
+      '</div>';
     return '<div class="card" style="padding:16px 18px;margin-bottom:14px">'+
-      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:7px 18px">'+grid+'</div>'+
+      (grid?'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:7px 18px">'+grid+'</div>':'')+
       desc+
     '</div>';
   }
@@ -312,28 +316,36 @@
     }).catch(function(e){ showToast('Failed: '+e.message,'error'); });
   };
 
-  // ── add to pipeline: search the pool or quick-create (with dedup) ────────────
+  // ── add a candidate: create new (default), or search to reuse an existing one
   window.plOpenAdd = function(jid){
-    STATE.bd._plAddJob = jid; STATE.bd._plSearchQ=''; STATE.bd._plDup=[];
-    apiGet('/candidates').then(function(pool){ STATE.bd._plPool = pool||[]; plShowAddModal(jid); })
-      .catch(function(){ STATE.bd._plPool=[]; plShowAddModal(jid); });
+    // Do NOT pre-load the whole candidate pool — the modal opens straight on the
+    // "create new" form. Existing candidates only surface if the recruiter
+    // actively searches (which still guards against duplicates).
+    STATE.bd._plAddJob = jid; STATE.bd._plSearchQ=''; STATE.bd._plDup=[]; STATE.bd._plPool=[];
+    plShowAddModal(jid);
   };
   window.plSearch = function(jid, q){
     STATE.bd._plSearchQ = q;
-    apiGet('/candidates'+(q?'?q='+encodeURIComponent(q):'')).then(function(pool){ STATE.bd._plPool=pool||[]; plShowAddModal(jid); })
+    q = (q||'').trim();
+    if (q.length < 2) { STATE.bd._plPool=[]; plShowAddModal(jid); return; }
+    apiGet('/candidates?q='+encodeURIComponent(q)).then(function(pool){ STATE.bd._plPool=pool||[]; plShowAddModal(jid); })
       .catch(function(){ STATE.bd._plPool=[]; plShowAddModal(jid); });
   };
   function plShowAddModal(jid){
     var taggedCids = (STATE.bd.pipeline||[]).filter(function(p){ return p.job_order_id===jid; }).map(function(p){ return p.candidate_id; });
-    var pool = (STATE.bd._plPool||[]).filter(function(c){ return taggedCids.indexOf(c.id)<0; });
-    var q = STATE.bd._plSearchQ||'';
-    var poolHtml = pool.map(function(c){
-      return '<div style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:8px;padding:8px 11px;margin-bottom:6px">'+
-        '<div><div style="font-weight:600;font-size:13px">'+esc(c.full_name)+' '+code(c.candidate_code||'')+'</div>'+
-        '<div style="font-size:11px;color:var(--text3)">'+esc(c.current_title||c.headline||'')+(c.email?' · '+esc(c.email):'')+'</div></div>'+
-        '<button class="btn btn-sm btn-primary" onclick="plTag(\''+jid+'\',\''+c.id+'\')">Tag</button>'+
-      '</div>';
-    }).join('') || '<div style="color:var(--text3);font-size:12.5px;padding:8px">No matching candidates.</div>';
+    var q = (STATE.bd._plSearchQ||'').trim();
+    // Only show results when the recruiter is actively searching — no default
+    // dump of every existing candidate.
+    var pool = q.length>=2 ? (STATE.bd._plPool||[]).filter(function(c){ return taggedCids.indexOf(c.id)<0; }) : [];
+    var poolHtml = q.length<2
+      ? '<div style="color:var(--text3);font-size:12px;padding:6px 2px">Type a name or email to reuse an existing candidate, or just create a new one below.</div>'
+      : (pool.map(function(c){
+          return '<div style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:8px;padding:8px 11px;margin-bottom:6px">'+
+            '<div><div style="font-weight:600;font-size:13px">'+esc(c.full_name)+' '+code(c.candidate_code||'')+'</div>'+
+            '<div style="font-size:11px;color:var(--text3)">'+esc(c.current_title||c.headline||'')+(c.email?' · '+esc(c.email):'')+'</div></div>'+
+            '<button class="btn btn-sm btn-primary" onclick="plTag(\''+jid+'\',\''+c.id+'\')">Tag</button>'+
+          '</div>';
+        }).join('') || '<div style="color:var(--text3);font-size:12.5px;padding:8px">No matching candidates — create a new one below.</div>');
 
     var dup = (STATE.bd._plDup&&STATE.bd._plDup.length) ? (
       '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px;margin-bottom:12px">'+
@@ -346,26 +358,28 @@
 
     STATE.modal =
       '<div class="modal modal-w640" onclick="event.stopPropagation()">'+
-        '<div style="padding:16px 20px;border-bottom:1px solid var(--border);font-weight:700;font-size:16px">Add to Pipeline</div>'+
+        '<div style="padding:16px 20px;border-bottom:1px solid var(--border);font-weight:700;font-size:16px">Add Candidate</div>'+
         '<div style="padding:18px 20px">'+
           dup+
-          '<input class="sel" placeholder="Search name, email, CN- code…" value="'+esc(q)+'" oninput="plSearch(\''+jid+'\',this.value)" style="margin-bottom:12px">'+
-          '<div style="max-height:30vh;overflow-y:auto">'+poolHtml+'</div>'+
-          '<div style="border-top:1px solid var(--border);margin-top:12px;padding-top:12px">'+
-            '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">OR CREATE NEW</div>'+
-            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+
-              '<input id="pl_name" class="sel" placeholder="Full name *">'+
-              '<input id="pl_email" class="sel" placeholder="Email">'+
-              '<input id="pl_phone" class="sel" placeholder="Phone number">'+
-              '<input id="pl_title" class="sel" placeholder="Current title">'+
-              '<input id="pl_city" class="sel" placeholder="City">'+
-              '<input id="pl_state" class="sel" placeholder="State">'+
-            '</div>'+
-            '<div style="display:flex;align-items:center;gap:10px;margin-top:8px">'+
-              '<label style="font-size:11.5px;color:var(--text2);white-space:nowrap">Resume:</label>'+
-              '<input id="pl_resume" type="file" accept=".pdf,.doc,.docx,.rtf,.txt" style="font-size:11.5px">'+
-            '</div>'+
-            '<button class="btn btn-primary btn-sm" style="margin-top:9px" onclick="plQuickCreate(\''+jid+'\',false)">Create & Tag</button>'+
+          // Create-new is the primary action — no default candidate list.
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+
+            '<input id="pl_name" class="sel" placeholder="Full name *">'+
+            '<input id="pl_email" class="sel" placeholder="Email">'+
+            '<input id="pl_phone" class="sel" placeholder="Phone number">'+
+            '<input id="pl_title" class="sel" placeholder="Current title">'+
+            '<input id="pl_city" class="sel" placeholder="City">'+
+            '<input id="pl_state" class="sel" placeholder="State">'+
+          '</div>'+
+          '<div style="display:flex;align-items:center;gap:10px;margin-top:8px">'+
+            '<label style="font-size:11.5px;color:var(--text2);white-space:nowrap">Resume:</label>'+
+            '<input id="pl_resume" type="file" accept=".pdf,.doc,.docx,.rtf,.txt" style="font-size:11.5px">'+
+          '</div>'+
+          '<button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="plQuickCreate(\''+jid+'\',false)">Create &amp; Add</button>'+
+          // Reuse an existing candidate — secondary, only shows matches on search.
+          '<div style="border-top:1px solid var(--border);margin-top:16px;padding-top:12px">'+
+            '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">ALREADY IN THE SYSTEM? SEARCH TO REUSE</div>'+
+            '<input class="sel" placeholder="Search name, email, CN- code…" value="'+esc(q)+'" oninput="plSearch(\''+jid+'\',this.value)" style="margin-bottom:10px">'+
+            '<div style="max-height:26vh;overflow-y:auto">'+poolHtml+'</div>'+
           '</div>'+
         '</div>'+
         '<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">'+
