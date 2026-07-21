@@ -251,12 +251,19 @@
   window.atsGoPage = function(p){ if(p<1)return; STATE.ats.page=p; loadApplicants(); };
 
   // ── add / edit modal ─────────────────────────────────────────────────────────
-  window.atsOpenNew = function(){
+  // The ONE add-candidate window used everywhere — the Candidates database AND
+  // every job's "+ Add Candidate". Pass a jobCtx ({jobId,jobTitle,jobCode}) to
+  // additionally tag the candidate to that job after creating (or to search an
+  // existing candidate to add), so there is a single consistent form.
+  window.atsOpenNew = function(jobCtx){
     STATE.ats.editId = null; STATE.ats.dupMatches = []; STATE.ats._resumeStash = null;
+    STATE.ats._jobCtx = (jobCtx && jobCtx.jobId) ? jobCtx : null;
+    STATE.ats._jobTagQ = ''; STATE.ats._jobTagPool = [];
     STATE.ats.form = { applicant_status:'New lead', source:'Manual', pay_currency:'USD' };
     showApplicantModal();
   };
   window.atsOpenEdit = function(id){
+    STATE.ats._jobCtx = null; STATE.ats._jobTagQ = ''; STATE.ats._jobTagPool = [];
     var c = STATE.ats.rows.find(function(x){ return x.id===id; });
     if(!c){ apiGet('/candidates/'+id).then(function(d){ STATE.ats.editId=id; STATE.ats.dupMatches=[]; STATE.ats._resumeStash=null; STATE.ats.form=Object.assign({},d); showApplicantModal(); }).catch(function(e){ showToast('Failed: '+e.message,'error'); }); return; }
     STATE.ats.editId = id; STATE.ats.dupMatches = []; STATE.ats._resumeStash = null; STATE.ats.form = Object.assign({}, c);
@@ -264,6 +271,30 @@
   };
 
   window.atsFormSet = function(k,v){ STATE.ats.form[k]=v; };
+
+  // ── job-context: search an existing candidate to add to this job ────────────
+  window.atsJobTagSearch = function(q){
+    STATE.ats._jobTagQ = q; q = (q||'').trim();
+    if (q.length < 2){ STATE.ats._jobTagPool = []; showApplicantModal(); return; }
+    apiGet('/candidates?q='+encodeURIComponent(q)).then(function(pool){ STATE.ats._jobTagPool = pool||[]; showApplicantModal(); })
+      .catch(function(){ STATE.ats._jobTagPool = []; showApplicantModal(); });
+  };
+  window.atsJobTagPick = function(cid){
+    var ctx = STATE.ats._jobCtx; if(!ctx) return;
+    apiPost('/pipeline', { candidate_id:cid, job_order_id:ctx.jobId }).then(function(){ atsAfterJobAdd(ctx); })
+      .catch(function(e){
+        if (/already tagged/i.test(e.message)) showToast('Already on this job','error');
+        else showToast('Failed: '+e.message,'error');
+      });
+  };
+  function atsAfterJobAdd(ctx){
+    STATE.ats._jobCtx = null; STATE.ats._jobTagPool = []; STATE.ats._jobTagQ = '';
+    closeModal();
+    showToast('Candidate added to '+((ctx && ctx.jobTitle) || 'the job'),'success');
+    // Refresh whichever job view is open so the new candidate shows immediately.
+    if (STATE.page==='bd_pipeline' && window.bdReloadPipeline) return bdReloadPipeline();
+    if ((STATE.page==='bd_kanban' || STATE.page==='bd_jodetail') && window.bdOpenPipeline) return bdOpenPipeline(ctx.jobId);
+  }
 
   // ── resume parsing: file → fields, prefilled into the form ─────────────────
   // The file is stashed so it still attaches on save even though the modal
@@ -321,6 +352,34 @@
   function showApplicantModal(){
     var f = STATE.ats.form, editing = !!STATE.ats.editId;
     var u = STATE.user;
+    var jobCtx = STATE.ats._jobCtx;
+
+    // When adding from a job, offer to reuse an existing candidate (search-to-add)
+    // before falling back to creating a brand-new one via the form below.
+    var jobTag = '';
+    if (jobCtx && !editing){
+      var jq = (STATE.ats._jobTagQ||'').trim();
+      var jpool = jq.length>=2 ? (STATE.ats._jobTagPool||[]) : [];
+      var jpoolHtml = jq.length<2
+        ? '<div style="color:var(--text3);font-size:12px;padding:4px 2px">Type a name, email or CN- code to add someone already in the system.</div>'
+        : (jpool.map(function(c){
+            return '<div style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:8px;padding:7px 10px;margin-bottom:5px">'+
+              '<div><div style="font-weight:600;font-size:12.5px">'+esc(c.full_name)+' '+code(c.candidate_code||'')+'</div>'+
+              '<div style="font-size:11px;color:var(--text3)">'+esc(c.current_title||c.headline||'')+(c.email?' · '+esc(c.email):'')+'</div></div>'+
+              '<button class="btn btn-sm btn-primary" onclick="atsJobTagPick(\''+c.id+'\')">Add</button>'+
+            '</div>';
+          }).join('') || '<div style="color:var(--text3);font-size:12px;padding:4px 2px">No matches — fill the form below to create a new candidate.</div>');
+      jobTag =
+        '<div style="border:1px solid var(--border);border-radius:8px;padding:11px 13px;margin-bottom:16px;background:var(--bg)">'+
+          '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:7px">ALREADY IN THE SYSTEM? SEARCH TO ADD TO THIS JOB</div>'+
+          '<input class="sel" placeholder="Search name, email, CN- code…" value="'+esc(STATE.ats._jobTagQ||'')+'" oninput="atsJobTagSearch(this.value)">'+
+          '<div style="max-height:22vh;overflow-y:auto;margin-top:8px">'+jpoolHtml+'</div>'+
+          '<div style="font-size:11px;color:var(--text3);margin-top:7px;border-top:1px dashed var(--border);padding-top:7px">…or create a brand-new candidate below.</div>'+
+        '</div>';
+    }
+    var modalTitle = editing ? ('Edit Candidate'+(f.candidate_code?' '+code(f.candidate_code):''))
+      : (jobCtx ? ('Add Candidate'+(jobCtx.jobTitle?' — '+esc(jobCtx.jobTitle):'')) : 'New Candidate');
+    var saveLabel = editing ? 'Save changes' : (jobCtx ? 'Create & add to job' : 'Create candidate');
     var ownerSel = '';
     if (isBDMlike(u)) {
       var owners = (STATE.users||[]).filter(function(x){ return userHasAnyRole(x,'admin','bd','bd_lead','recruiter'); });
@@ -349,10 +408,11 @@
     STATE.modal =
       '<div class="modal modal-w720" onclick="event.stopPropagation()">'+
         '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'+
-          '<div style="font-weight:700;font-size:16px">'+(editing?'Edit Candidate':'New Candidate')+(editing&&f.candidate_code?' '+code(f.candidate_code):'')+'</div>'+
+          '<div style="font-weight:700;font-size:16px">'+modalTitle+'</div>'+
           '<span style="cursor:pointer;color:var(--text3)" onclick="closeModal()">✕</span>'+
         '</div>'+
         '<div style="padding:18px 20px;max-height:66vh;overflow-y:auto">'+
+          jobTag+
           dup+
           '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">'+
             fld('Full Name', inp('full_name','Jane Doe'), true)+
@@ -390,7 +450,7 @@
           (editing?'<button class="btn btn-sm btn-outline" style="color:var(--red)" onclick="atsDeleteApplicant(\''+STATE.ats.editId+'\')">Delete</button>':'')+
           '<div style="display:flex;gap:8px">'+
             '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
-            '<button class="btn btn-primary" onclick="atsSaveApplicant(false)">'+(editing?'Save changes':'Create candidate')+'</button>'+
+            '<button class="btn btn-primary" onclick="atsSaveApplicant(false)">'+saveLabel+'</button>'+
           '</div>'+
         '</div>'+
       '</div>';
@@ -414,11 +474,17 @@
       }).catch(function(e){ showToast('Failed: '+e.message,'error'); });
       return;
     }
+    var ctx = STATE.ats._jobCtx;
     apiPost('/candidates', payload).then(function(c){
-      return uploadResumeFor(c.id);
-    }).then(function(){
-      STATE.ats._resumeStash=null;
-      showToast('Candidate created','success'); STATE.ats.dupMatches=[]; closeModal(); STATE.ats.page=1; loadApplicants();
+      return uploadResumeFor(c.id).then(function(){ return c; });
+    }).then(function(c){
+      STATE.ats._resumeStash=null; STATE.ats.dupMatches=[];
+      if (ctx){
+        return apiPost('/pipeline', { candidate_id:c.id, job_order_id:ctx.jobId })
+          .then(function(){ atsAfterJobAdd(ctx); })
+          .catch(function(e){ showToast('Candidate created, but adding to the job failed: '+e.message,'error'); closeModal(); });
+      }
+      showToast('Candidate created','success'); closeModal(); STATE.ats.page=1; loadApplicants();
     }).catch(function(e){
       // 409 possible_duplicate → surface matches, keep the form open (warn-and-offer)
       if (/possible_duplicate/i.test(e.message)){

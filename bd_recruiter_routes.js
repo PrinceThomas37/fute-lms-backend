@@ -314,7 +314,11 @@ module.exports = function (app, deps) {
   app.put('/job-orders/:id', auth, async (req, res) => {
     try {
       if (notGuest(req, res)) return;
-      if (!isBDM(req)) return res.status(403).json({ error: 'Only BD Managers can edit job orders.' });
+      // BD managers can edit any job order; recruiters can edit a job they are
+      // assigned to (so the people actually working the req can keep it current).
+      if (!isBDM(req) && !(isRecruiter(req) && await recruiterCanTouchJob(req, req.params.id))) {
+        return res.status(403).json({ error: 'Only BD Managers or an assigned recruiter can edit this job order.' });
+      }
       const b = req.body || {};
       const updates = Object.assign({ updated_at: new Date() }, pickJobFields(b));
       if (b.bd_manager_id !== undefined) updates.bd_manager_id = b.bd_manager_id || null;
@@ -1041,7 +1045,8 @@ ${String(j.job_description).slice(0, 12000)}`;
   // static "Moved to Submission".
   const PIPELINE_SELECT =
     '*, candidate:candidates(id,candidate_code,full_name,email,phone,work_authorization,' +
-    'city,state,country,current_location,experience_years,source,resume_url), ' +
+    'current_title,headline,city,state,country,current_location,experience_years,' +
+    'availability,notice_period,current_ctc,bill_rate,pay_rate,source,resume_url), ' +
     'tagger:users!tagged_by(id,name,employee_id), ' +
     'submission:submissions!candidate_pipeline_submission_id_fkey(id,submission_code,stage,sub_stage)';
 

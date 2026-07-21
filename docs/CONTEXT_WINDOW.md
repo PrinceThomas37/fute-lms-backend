@@ -1,5 +1,11 @@
 # FUTE LMS Backend — Context Window (Session 2)
 
+> **Read `CLAUDE.md` at the repo root first** — it holds the durable, must-carry
+> context: who the owner is (a product owner who doesn't read code or use git — I
+> own everything technical and show them the running app, not code) and what we're
+> building (a commercial ATS to sell; spend nothing now, architect to scale later).
+
+
 **Updated**: 2026-07-21 · **Repo**: PrinceThomas37/fute-lms-backend · **Branch**: main
 **Dev branch this session**: `claude/continue-previous-session-20021c` (rebased onto main each PR)
 **Supabase project**: `teiqievahzhllojvgsku` · **Deploy**: Render (fute-lms-backend.onrender.com)

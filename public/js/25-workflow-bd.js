@@ -308,6 +308,36 @@
     renderNewJobModal();
   };
 
+  // Edit an existing job order — reuses the SAME multi-tab form, populated from
+  // the job order. Available to BD managers and assigned recruiters (backend
+  // enforces the permission).
+  window.bdOpenEditJob=function(jid){
+    var j=joById(jid);
+    if(!j){
+      apiGet('/job-orders/'+jid).then(function(jo){
+        STATE.bd.jobOrders=STATE.bd.jobOrders||[];
+        if(!STATE.bd.jobOrders.some(function(x){return x.id===jo.id;})) STATE.bd.jobOrders.push(jo);
+        bdOpenEditJob(jid);
+      }).catch(function(e){ showToast('Failed to load job: '+e.message,'error'); });
+      return;
+    }
+    var f={ tab:'details', _editId:jid, source_lead_id:null, lead_code:j.lead_code||'',
+      recruiter_ids:(j.recruiters||[]).map(function(r){ return (r.recruiter&&r.recruiter.id)||r.recruiter_id; }).filter(Boolean) };
+    ['job_title','client','client_job_id','client_manager','end_client','status','job_type','emp_level',
+     'work_auth','priority','remote','clearance','country','state','city','zip','pay_cur','pay_min','pay_max',
+     'start_date','end_date','duration','placement_fee','req_docs','primary_skills','secondary_skills',
+     'exp_min','exp_max','industry','domain','degree','languages','job_category','positions',
+     'job_description','comments'].forEach(function(k){
+      var v=j[k];
+      if((k==='start_date'||k==='end_date') && v) v=String(v).slice(0,10);
+      f[k]=(v!=null?v:'');
+    });
+    if(!f.pay_cur) f.pay_cur='USD';
+    if(!f.status) f.status='Active';
+    STATE.bd.form=f;
+    renderNewJobModal();
+  };
+
   function fld(label,inner,req){return '<div style="margin-bottom:12px"><label style="font-size:11.5px;color:var(--text2);display:block;margin-bottom:3px">'+label+(req?' <span style="color:var(--red)">*</span>':'')+'</label>'+inner+'</div>';}
   function inp(key,ph){return '<input class="sel" value="'+esc(STATE.bd.form[key]||'')+'" placeholder="'+(ph||'')+'" oninput="bdFormSet(\''+key+'\',this.value)">';}
   function selF(key,opts){return '<select class="sel" onchange="bdFormSet(\''+key+'\',this.value)">'+opts.map(function(o){return '<option value="'+esc(o)+'"'+(STATE.bd.form[key]===o?' selected':'')+'>'+esc(o||'Select')+'</option>';}).join("")+'</select>';}
@@ -386,7 +416,7 @@
     var queueNote=STATE.bd._convertQueue&&STATE.bd._convertQueue.length?STATE.bd._convertQueue.length+' more lead(s) queued after this':'';
     STATE.modal='<div class="modal modal-w860" onclick="event.stopPropagation()" style="width:min(900px,95vw)">'+
       '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'+
-        '<div style="font-weight:700;font-size:16px">New Job'+(f.source_lead_id?' — from lead '+esc(f.lead_code):'')+'</div>'+
+        '<div style="font-weight:700;font-size:16px">'+(f._editId?'Edit Job':'New Job')+(f._editId?'':(f.source_lead_id?' — from lead '+esc(f.lead_code):''))+'</div>'+
       '</div>'+
       '<div style="padding:0 20px;border-bottom:1px solid var(--border);display:flex;gap:4px">'+tabBtn('details','Job Details')+tabBtn('skills','Skills')+tabBtn('org','Organizational')+'</div>'+
       '<div style="padding:18px 20px;max-height:62vh;overflow-y:auto">'+body+'</div>'+
@@ -394,7 +424,7 @@
         '<div style="font-size:11.5px;color:var(--text3)">'+queueNote+'</div>'+
         '<div style="display:flex;gap:8px">'+
           '<button class="btn btn-outline" onclick="bdCancelNewJob()">Cancel</button>'+
-          '<button class="btn btn-primary" onclick="bdSaveNewJob()">Save Job</button>'+
+          '<button class="btn btn-primary" onclick="bdSaveNewJob()">'+(f._editId?'Save changes':'Save Job')+'</button>'+
         '</div>'+
       '</div>'+
     '</div>';
@@ -423,6 +453,7 @@
     var f=STATE.bd.form;
     if(!(f.job_title||'').trim()){showToast('Job Title is required','error');STATE.bd.form.tab='details';renderNewJobModal();return;}
     if(!(f.client||'').trim()){showToast('Client is required','error');STATE.bd.form.tab='details';renderNewJobModal();return;}
+    if(f._editId){ bdSaveEditJob(f); return; }
     var body;
     if(f.source_lead_id){
       // convert-from-lead: flat body with job fields
@@ -439,6 +470,27 @@
       }).catch(function(e){showToast('Failed to create job: '+e.message,'error');});
     }
   };
+
+  function bdSaveEditJob(f){
+    var id=f._editId;
+    var body=Object.assign({},f);
+    delete body.tab; delete body._editId; delete body.recruiter_ids;
+    delete body.source_lead_id; delete body.lead_code;
+    apiPut('/job-orders/'+id,body).then(function(jo){
+      var arr=STATE.bd.jobOrders=STATE.bd.jobOrders||[];
+      var idx=arr.findIndex(function(x){return x.id===id;});
+      if(idx>-1)arr[idx]=jo; else arr.push(jo);
+      var finish=function(){ closeModal(); showToast('Job updated','success'); render(); };
+      // Only BD managers may (re)assign recruiters; recruiters just edit fields.
+      if(isBDM(STATE.user)){
+        apiPost('/job-orders/'+id+'/recruiters',{recruiter_ids:f.recruiter_ids||[]}).then(function(){
+          apiGet('/job-orders/'+id).then(function(j2){
+            var i2=arr.findIndex(function(x){return x.id===id;}); if(i2>-1)arr[i2]=j2; finish();
+          }).catch(finish);
+        }).catch(finish);
+      } else finish();
+    }).catch(function(e){ showToast('Failed to save job: '+e.message,'error'); });
+  }
 
   function bdAfterSave(jo,f){
     // assign recruiters if any were selected
@@ -535,7 +587,7 @@
     function dr(lbl,val){return val?'<div style="font-size:12.5px;margin-bottom:4px"><span style="color:var(--text3)">'+lbl+': </span>'+esc(val)+'</div>':'';}
 
     return '<div class="page">'+
-      '<div style="margin-bottom:6px"><span onclick="goPage(\'bd_joborders\')" style="cursor:pointer;font-size:12.5px;color:var(--accent)">← Jobs</span></div>'+
+      (window.navBar?navBar():'<div style="margin-bottom:6px"><span onclick="goPage(\'bd_joborders\')" style="cursor:pointer;font-size:12.5px;color:var(--accent)">← Jobs</span></div>')+
       '<div class="card" style="padding:18px 20px;margin-bottom:16px">'+
         '<div style="display:flex;justify-content:space-between;align-items:start">'+
           '<div>'+
@@ -547,6 +599,7 @@
             '<button class="btn btn-sm btn-outline" onclick="bdOpenPipeline(\''+j.id+'\')">Candidates</button>'+
             '<button class="btn btn-sm btn-outline" onclick="bdOpenKanban(\''+j.id+'\')">Board</button>'+
             '<button class="btn btn-sm btn-outline" onclick="bdOpenPostingJD(\''+j.id+'\')">'+(j.posting_description?'Posting JD ✓':'Posting JD')+'</button>'+
+            '<button class="btn btn-sm btn-outline" onclick="bdOpenEditJob(\''+j.id+'\')">Edit job</button>'+
           '</div>'+
         '</div>'+
         '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">'+
@@ -683,7 +736,7 @@
       '</div>';
     }).join("");
     return '<div class="page">'+
-      '<div style="margin-bottom:6px"><span onclick="bdBackFromKanban()" style="cursor:pointer;font-size:12.5px;color:var(--accent)">← Back</span></div>'+
+      (window.navBar?navBar():'<div style="margin-bottom:6px"><span onclick="bdBackFromKanban()" style="cursor:pointer;font-size:12.5px;color:var(--accent)">← Back</span></div>')+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
         '<div><div style="display:flex;gap:8px;align-items:center">'+code(j.job_code)+'<span style="font-weight:700;font-size:16px">'+esc(j.job_title||'')+'</span></div>'+
         '<div style="font-size:12.5px;color:var(--text3)">'+esc(j.client||'')+'</div></div>'+
@@ -816,87 +869,16 @@
     }).catch(function(e){showToast('Failed: '+e.message,'error');});
   };
 
-  // ── add candidate to pipeline ─────────────────────────────────────────────
+  // ── add candidate ─────────────────────────────────────────────────────────
+  // Routes to the ONE unified add-candidate window (27-page-applicants.js),
+  // scoped to this job. Adding tags the candidate to the job's pipeline as
+  // "Added" (they become "Submitted" only once moved to Submitted to BDM), so
+  // after adding we land the user on the Candidates tab where added candidates
+  // live rather than the submissions board.
   window.bdOpenAddCandidate=function(jid){
-    STATE.bd._addCandJob=jid;
-    STATE.bd._candSearchQ='';
-    loadCandidates('').then(function(pool){
-      STATE.bd._candPool=pool;
-      bdShowAddCandModal(jid);
-    });
-  };
-  window.bdCandSearch=function(jid,q){
-    STATE.bd._candSearchQ=q;
-    loadCandidates(q).then(function(pool){
-      STATE.bd._candPool=pool;
-      bdShowAddCandModal(jid);
-    });
-  };
-  function bdShowAddCandModal(jid){
-    var existingCids=(STATE.bd.submissions||[]).filter(function(s){return s.job_order_id===jid;}).map(function(s){return s.candidate_id;});
-    var pool=(STATE.bd._candPool||[]).filter(function(c){return existingCids.indexOf(c.id)<0;});
-    var q=STATE.bd._candSearchQ||'';
-    var poolHtml=pool.map(function(c){
-      return '<div style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:8px;padding:9px 11px;margin-bottom:6px">'+
-        '<div><div style="font-weight:600;font-size:13px">'+esc(c.full_name)+' '+code(c.candidate_code||'')+'</div>'+
-        '<div style="font-size:11px;color:var(--text3)">'+esc(c.current_title||'')+' · '+esc(c.skills||'')+'</div></div>'+
-        '<button class="btn btn-sm btn-primary" onclick="bdAddSub(\''+jid+'\',\''+c.id+'\')">Add</button>'+
-      '</div>';
-    }).join("");
-    STATE.modal='<div class="modal modal-w640" onclick="event.stopPropagation()">'+
-      '<div style="padding:18px 20px;border-bottom:1px solid var(--border);font-weight:700;font-size:16px">Add Candidate to Pipeline</div>'+
-      '<div style="padding:18px 20px">'+
-        '<input class="sel" placeholder="Search by name, email, CN- code…" value="'+esc(q)+'" oninput="bdCandSearch(\''+jid+'\',this.value)" style="margin-bottom:12px">'+
-        '<div style="max-height:32vh;overflow-y:auto">'+(poolHtml||'<div style="color:var(--text3);font-size:12.5px;padding:8px">No matching candidates.</div>')+'</div>'+
-        '<div style="border-top:1px solid var(--border);margin-top:12px;padding-top:12px">'+
-          '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">OR CREATE NEW</div>'+
-          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+
-            '<input id="nc_name" class="sel" placeholder="Full name *">'+
-            '<input id="nc_email" class="sel" placeholder="Email">'+
-            '<input id="nc_phone" class="sel" placeholder="Phone number">'+
-            '<input id="nc_title" class="sel" placeholder="Current title">'+
-            '<input id="nc_city" class="sel" placeholder="City">'+
-            '<input id="nc_state" class="sel" placeholder="State">'+
-          '</div>'+
-          '<input id="nc_skills" class="sel" placeholder="Skills" style="margin-top:8px">'+
-          '<div style="display:flex;align-items:center;gap:10px;margin-top:8px">'+
-            '<label style="font-size:11.5px;color:var(--text2);white-space:nowrap">Resume:</label>'+
-            '<input id="nc_resume" type="file" accept=".pdf,.doc,.docx,.rtf,.txt" style="font-size:11.5px">'+
-          '</div>'+
-          '<button class="btn btn-primary btn-sm" style="margin-top:9px" onclick="bdCreateCandAndAdd(\''+jid+'\')">Create & Add</button>'+
-        '</div>'+
-      '</div>'+
-      '<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">'+
-        '<button class="btn btn-outline" onclick="closeModal()">Close</button>'+
-      '</div>'+
-    '</div>';render();
-  }
-  window.bdAddSub=function(jid,cid){
-    apiPost('/submissions',{candidate_id:cid,job_order_id:jid}).then(function(sub){
-      STATE.bd.submissions=(STATE.bd.submissions||[]).concat([sub]);
-      closeModal();showToast('Candidate added to pipeline','success');
-      if(STATE.page==='bd_kanban')render();
-    }).catch(function(e){
-      if(e.message&&e.message.indexOf('already')>-1)showToast('Candidate already in this job','error');
-      else showToast('Failed: '+e.message,'error');
-    });
-  };
-  window.bdCreateCandAndAdd=function(jid){
-    var g=function(id){return (document.getElementById(id)||{}).value||'';};
-    var name=g('nc_name');
-    if(!name.trim()){showToast('Name required','error');return;}
-    var resumeEl=document.getElementById('nc_resume');
-    apiPost('/candidates',{
-      full_name:name, email:g('nc_email'), phone:g('nc_phone'),
-      current_title:g('nc_title'), city:g('nc_city'), state:g('nc_state'),
-      skills:g('nc_skills'), source:'Manual'
-    }).then(function(c){
-      var attach=(window.atsUploadResumeFile?atsUploadResumeFile(c.id,resumeEl):Promise.resolve(false));
-      attach.then(function(){bdAddSub(jid,c.id);});
-    }).catch(function(e){
-      if(/possible_duplicate/i.test(e.message))showToast('Possible duplicate — search for the candidate above instead','error');
-      else showToast('Failed: '+e.message,'error');
-    });
+    var j=joById(jid)||{};
+    if(window.atsOpenNew) return atsOpenNew({ jobId:jid, jobTitle:j.job_title||'', jobCode:j.job_code||'' });
+    showToast('Candidate form not loaded','error');
   };
 
   // ── stage moves + BDM gate ────────────────────────────────────────────────

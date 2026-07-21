@@ -15,6 +15,11 @@
   function esc(s){ return String(s==null?'':s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
   function code(t){ return '<span style="font-family:var(--mono);font-size:10.5px;color:var(--text3);font-weight:600">'+esc(t)+'</span>'; }
   var SUBSTAGE_COLORS={"Sourced":"var(--text3)","Screening":"#6b7280","Submitted to BDM":"var(--amber)","Submitted to Client":"var(--accent)","Interview Scheduled":"#2563eb","Interview Completed":"#1d4ed8","Offer":"#7c3aed","Confirmation":"#0891b2","Placement":"var(--green)","Rejected":"var(--red)","Not Joined":"#b91c1c","On Hold":"#9ca3af"};
+  // Stage ranking used to decide when a candidate has actually been *submitted*.
+  // A candidate is only "Submitted" once they reach "Submitted to BDM" (i.e. sent
+  // to the BD team) — before that they are merely Added/Sourced/Screening.
+  var STAGE_RANK={"Sourced":0,"Screening":1,"Submitted to BDM":2,"Submitted to Client":3,"Interview Scheduled":4,"Interview Completed":5,"Offer":6,"Confirmation":7,"Placement":8};
+  var SUBMITTED_RANK=2;
   function isBDM(u){ return userHasAnyRole(u,'admin','bd','bd_lead'); }
   function isRec(u){ return userHasRole(u,'recruiter'); }
   function joById(id){ return (STATE.bd.jobOrders||[]).find(function(j){ return j.id===id; }); }
@@ -118,7 +123,6 @@
     var j = joById(jid);
     if (!j) return '<div class="page"><div style="padding:40px;text-align:center;color:var(--text3)">Job not found.</div></div>';
     var rows = (STATE.bd.pipeline||[]).filter(function(p){ return p.job_order_id===jid; });
-    var back = isBDM(u) ? 'bd_joborders' : 'bd_myjobs';
 
     // Job details FIRST — what a recruiter needs to actually work the req:
     // description, pay, location, work auth, skills, experience. Visible to
@@ -134,20 +138,16 @@
       '</div>';
 
     // multi-select bulk bar (ported from the old Submissions tab): sequence
-    // the promoted candidates, or email the JD to the selected ones.
+    // the promoted candidates, or email the JD to the selected ones. Wrapped in a
+    // stable #pl-bulkbar container so toggling a checkbox can repaint JUST the bar
+    // (via plRepaintSelection) instead of re-rendering the whole page — which was
+    // resetting the scroll position to the top on every checkbox click.
     var sel = STATE.bd.plSel || {};
-    var selRows = rows.filter(function(p){ return sel[p.id]; });
-    var bulkBar = selRows.length ?
-      '<div class="card" style="padding:9px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
-        '<span style="font-size:12.5px;color:var(--text2)"><b>'+selRows.length+'</b> selected</span>'+
-        '<button class="btn btn-sm btn-primary" onclick="plSequenceSelected()">▶ Start sequence</button>'+
-        '<button class="btn btn-sm btn-outline" onclick="plEmailJD()">✉ Email JD</button>'+
-        '<button class="btn btn-sm btn-outline" onclick="plClearSel()">Clear</button>'+
-      '</div>' : '';
+    var bulkBar = '<div id="pl-bulkbar">'+plBulkBarInner(rows.filter(function(p){ return sel[p.id]; }).length)+'</div>';
 
     var allOn = rows.length && rows.every(function(p){ return sel[p.id]; });
-    var head = '<th style="padding:8px 9px"><input type="checkbox" '+(allOn?'checked':'')+' onclick="plToggleSelAll()"></th>'+
-      ['Pipeline ID','Candidate Name','Stage','Work Auth','Mobile','Location','Country','Exp','Source','Resume',
+    var head = '<th style="padding:8px 9px"><input id="pl-chk-all" type="checkbox" '+(allOn?'checked':'')+' onclick="plToggleSelAll()"></th>'+
+      ['Pipeline ID','Candidate Name','Title','Stage','Work Auth','Mobile','Email','Location','Country','Exp','Source','Resume',
       'Bill Rate','Pay Rate','Employer','Availability','Notice','Current CTC','Tagged By','Tagged On','']
       .map(function(h){ return '<th style="text-align:left;padding:8px 9px;font-size:11px;color:var(--text3);font-weight:700;white-space:nowrap">'+h+'</th>'; }).join('');
 
@@ -159,6 +159,13 @@
       // candidate (materializes the submission) and opens the notes modal.
       var promoted = !!p.submission_id;
       var curStage = p.submission ? (p.submission.stage||'') : '';
+      // "Submitted" must mean actually sent to the BD team (stage ≥ Submitted to
+      // BDM) — NOT merely tagged/promoted. A freshly added candidate reads
+      // "Added"; an early-stage one shows nothing extra (the Stage cell says it).
+      var isSubmitted = promoted && STAGE_RANK[curStage]!=null && STAGE_RANK[curStage] >= SUBMITTED_RANK;
+      var statusMark = !promoted
+        ? '<span style="font-size:11px;color:var(--text3);font-weight:700;background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:10px;margin-right:4px">Added</span>'
+        : (isSubmitted ? '<span style="font-size:11px;color:var(--green);font-weight:700;margin-right:4px">✓ Submitted</span>' : '');
       var stageOpts = (window.ATS_STAGE_LIST||[]).map(function(x){
         return '<option value="'+esc(x)+'"'+(curStage===x?' selected':'')+'>'+esc(x)+'</option>'; }).join('');
       var statusSel =
@@ -169,12 +176,14 @@
         (p.submission&&p.submission.sub_stage?'<div style="font-size:10px;color:var(--text3);margin-top:2px">'+esc(p.submission.sub_stage)+'</div>':'');
       var resume = c.resume_url ? '<a href="'+esc(c.resume_url)+'" target="_blank" rel="noopener" style="color:var(--accent)">↗</a>' : '—';
       return '<tr style="border-top:1px solid var(--border)">'+
-        '<td style="padding:8px 9px"><input type="checkbox" '+(sel[p.id]?'checked':'')+' onclick="plToggleSel(\''+p.id+'\')"></td>'+
+        '<td style="padding:8px 9px"><input id="pl-chk-'+p.id+'" type="checkbox" '+(sel[p.id]?'checked':'')+' onclick="plToggleSel(\''+p.id+'\')"></td>'+
         '<td style="padding:8px 9px;white-space:nowrap">'+code(p.pipeline_code||'—')+'</td>'+
         '<td style="padding:8px 9px;white-space:nowrap;font-size:12.5px"><span style="font-weight:600;cursor:pointer;color:var(--accent)" onclick="bdOpenCandidate(\''+c.id+'\')">'+esc(c.full_name||'—')+'</span> '+(c.candidate_code?'<span style="font-size:10px;color:var(--text3)">'+esc(c.candidate_code)+'</span>':'')+'</td>'+
+        '<td style="padding:8px 9px;font-size:12px">'+esc(c.current_title||c.headline||'—')+'</td>'+
         '<td style="padding:8px 9px">'+statusSel+'</td>'+
         '<td style="padding:8px 9px;font-size:12px;white-space:nowrap">'+esc(p.work_auth_snap||c.work_authorization||'—')+'</td>'+
         '<td style="padding:8px 9px;font-size:12px;white-space:nowrap">'+esc(c.phone||'—')+'</td>'+
+        '<td style="padding:8px 9px;font-size:12px">'+(c.email?'<a href="mailto:'+esc(c.email)+'" style="color:var(--accent)">'+esc(c.email)+'</a>':'—')+'</td>'+
         '<td style="padding:8px 9px;font-size:12px">'+esc(candLoc(c))+'</td>'+
         '<td style="padding:8px 9px;font-size:12px;white-space:nowrap">'+esc(c.country||'—')+'</td>'+
         '<td style="padding:8px 9px;font-size:12px;white-space:nowrap">'+esc(c.experience_years!=null?c.experience_years:'—')+'</td>'+
@@ -189,21 +198,24 @@
         '<td style="padding:8px 9px;font-size:12px;white-space:nowrap">'+esc((p.tagger&&p.tagger.name)||'—')+'</td>'+
         '<td style="padding:8px 9px;font-size:12px;color:var(--text3);white-space:nowrap">'+fmtDate(p.tagged_at)+'</td>'+
         '<td style="padding:8px 9px;white-space:nowrap">'+
-          (promoted?'<span style="font-size:11px;color:var(--green);font-weight:700;margin-right:4px">✓ Submitted</span>':'')+
+          statusMark+
           '<button class="btn btn-sm btn-outline" onclick="plOpenEdit(\''+p.id+'\')">Edit</button>'+
           ' <button class="btn btn-sm btn-outline" style="color:var(--red)" onclick="plRemove(\''+p.id+'\')">✕</button>'+
         '</td>'+
       '</tr>';
     }).join('');
-    if (!rows.length) body = '<tr><td colspan="20" style="padding:40px;text-align:center;color:var(--text3)">No candidates on this job yet. '+
+    if (!rows.length) body = '<tr><td colspan="22" style="padding:40px;text-align:center;color:var(--text3)">No candidates on this job yet. '+
       '<span style="color:var(--accent);cursor:pointer" onclick="plOpenAdd(\''+j.id+'\')">Add a candidate →</span></td></tr>';
 
     return '<div class="page">'+
-      '<div style="margin-bottom:6px"><span onclick="goPage(\''+back+'\')" style="cursor:pointer;font-size:12.5px;color:var(--accent)">← Jobs</span></div>'+
+      (window.navBar?navBar():'')+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'+
         '<div><div style="display:flex;gap:8px;align-items:center">'+code(j.job_code)+'<span style="font-weight:700;font-size:17px">'+esc(j.job_title||'')+'</span></div>'+
         '<div style="font-size:12.5px;color:var(--text3)">'+esc(j.client||'')+'</div></div>'+
-        '<button class="btn btn-primary" onclick="plOpenAdd(\''+j.id+'\')">+ Add Candidate</button>'+
+        '<div style="display:flex;gap:8px">'+
+          '<button class="btn btn-outline" onclick="bdOpenEditJob(\''+j.id+'\')">Edit job</button>'+
+          '<button class="btn btn-primary" onclick="plOpenAdd(\''+j.id+'\')">+ Add Candidate</button>'+
+        '</div>'+
       '</div>'+
       jobCard+
       tabs+bulkBar+
@@ -241,13 +253,32 @@
     return (STATE.bd.pipeline||[]).filter(function(p){ return p.job_order_id===jid; });
   }
   function plSelectedRows(){ var sel=STATE.bd.plSel||{}; return plCurrentRows().filter(function(p){ return sel[p.id]; }); }
-  window.plToggleSel = function(id){ STATE.bd.plSel=STATE.bd.plSel||{}; STATE.bd.plSel[id]=!STATE.bd.plSel[id]; render(); };
+  // The selection bulk-bar html (empty when nothing is selected).
+  function plBulkBarInner(count){
+    if(!count) return '';
+    return '<div class="card" style="padding:9px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
+      '<span style="font-size:12.5px;color:var(--text2)"><b>'+count+'</b> selected</span>'+
+      '<button class="btn btn-sm btn-primary" onclick="plSequenceSelected()">▶ Start sequence</button>'+
+      '<button class="btn btn-sm btn-outline" onclick="plEmailJD()">✉ Email JD to candidates</button>'+
+      '<button class="btn btn-sm btn-outline" onclick="plClearSel()">Clear</button>'+
+    '</div>';
+  }
+  // Repaint ONLY the checkboxes + the bulk bar in place — never a full render() —
+  // so ticking a candidate keeps the current scroll position instead of jumping
+  // back to the top of the list.
+  function plRepaintSelection(){
+    var rows=plCurrentRows(), sel=STATE.bd.plSel||{};
+    rows.forEach(function(p){ var el=document.getElementById('pl-chk-'+p.id); if(el) el.checked=!!sel[p.id]; });
+    var allEl=document.getElementById('pl-chk-all'); if(allEl) allEl.checked=!!(rows.length && rows.every(function(p){ return sel[p.id]; }));
+    var bar=document.getElementById('pl-bulkbar'); if(bar) bar.innerHTML=plBulkBarInner(rows.filter(function(p){ return sel[p.id]; }).length);
+  }
+  window.plToggleSel = function(id){ STATE.bd.plSel=STATE.bd.plSel||{}; STATE.bd.plSel[id]=!STATE.bd.plSel[id]; plRepaintSelection(); };
   window.plToggleSelAll = function(){
     var rows=plCurrentRows(); var sel=STATE.bd.plSel||{};
     var allOn=rows.length && rows.every(function(p){ return sel[p.id]; });
-    rows.forEach(function(p){ sel[p.id]=!allOn; }); STATE.bd.plSel=sel; render();
+    rows.forEach(function(p){ sel[p.id]=!allOn; }); STATE.bd.plSel=sel; plRepaintSelection();
   };
-  window.plClearSel = function(){ STATE.bd.plSel={}; render(); };
+  window.plClearSel = function(){ STATE.bd.plSel={}; plRepaintSelection(); };
   window.plSequenceSelected = function(){
     // Sequencing enrolls a submitted candidate — only promoted rows qualify.
     var promoted = plSelectedRows().filter(function(p){ return p.submission_id; });
@@ -258,18 +289,66 @@
     var items = promoted.map(function(p){ var c=p.candidate||{}; return { entity_id:p.submission_id, label:c.full_name||'Candidate' }; });
     wfStartSequence('submission', items, { anyStage:true });
   };
+  // Email the job description to the SELECTED candidates as a one-shot invitation
+  // (separate from the automated sequence). Opens a compose modal so the BD can
+  // review/edit the subject + message before sending.
   window.plEmailJD = function(){
     var jid = STATE.bd.view && STATE.bd.view.pipelineJoId;
     var j = joById(jid) || {};
-    var emails = plSelectedRows().map(function(p){ return (p.candidate||{}).email; }).filter(Boolean);
-    if(!emails.length){ showToast('No email addresses on the selected candidates','error'); return; }
+    var recips = plSelectedRows().map(function(p){ var c=p.candidate||{}; return { name:c.full_name||'Candidate', email:(c.email||'').trim() }; });
+    if(!recips.length){ showToast('Select at least one candidate first','error'); return; }
+    if(!recips.some(function(r){ return r.email; })){ showToast('None of the selected candidates have an email address on file','error'); return; }
     var subject = 'Job opportunity: '+(j.job_title||'')+(j.client?' — '+j.client:'');
-    var body = 'Hi,\n\nI would like to share this opportunity with you:\n\n'+
-      (j.job_title||'')+(j.client?' at '+j.client:'')+'\n'+
-      [j.city,j.state].filter(Boolean).join(', ')+'\n\n'+
-      String(j.job_description||'').slice(0,1300)+
-      '\n\nPlease reply if you are interested and we can discuss the details.\n';
-    window.open('mailto:'+encodeURIComponent(emails.join(','))+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body), '_self');
+    var body = 'Hi,\n\nI wanted to share an opportunity that may be a good fit for you:\n\n'+
+      (j.job_title||'')+(j.client?' — '+j.client:'')+'\n'+
+      ([j.city,j.state].filter(Boolean).join(', '))+'\n\n'+
+      String(j.job_description||'').slice(0,1600)+
+      '\n\nIf this looks interesting, reply and we can set up a quick call to discuss the details.\n\nBest regards,';
+    STATE.bd._emailJD = { jid:jid, subject:subject, body:body, recips:recips };
+    plShowEmailJDModal();
+  };
+  function plShowEmailJDModal(){
+    var d = STATE.bd._emailJD; if(!d) return;
+    var withEmail = d.recips.filter(function(r){ return r.email; });
+    var noEmail = d.recips.filter(function(r){ return !r.email; });
+    var chips = withEmail.map(function(r){ return '<span style="background:var(--accent-l,rgba(30,122,60,.1));border:1px solid var(--border);border-radius:12px;padding:2px 9px;font-size:11.5px">'+esc(r.name)+' · '+esc(r.email)+'</span>'; }).join(' ');
+    var warn = noEmail.length ? '<div style="font-size:11.5px;color:var(--amber);margin-top:8px">⚠ '+noEmail.length+' selected candidate'+(noEmail.length>1?'s have':' has')+' no email on file and will be skipped: '+esc(noEmail.map(function(r){return r.name;}).join(', '))+'</div>' : '';
+    STATE.modal =
+      '<div class="modal modal-w720" onclick="event.stopPropagation()">'+
+        '<div style="padding:16px 20px;border-bottom:1px solid var(--border)">'+
+          '<div style="font-weight:700;font-size:16px">Email the job to '+withEmail.length+' candidate'+(withEmail.length>1?'s':'')+'</div>'+
+          '<div style="font-size:11.5px;color:var(--text3);margin-top:2px">Review the invitation, then open it in your mail app. Candidates are BCC\'d so they can\'t see each other.</div>'+
+        '</div>'+
+        '<div style="padding:16px 20px">'+
+          '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:6px">RECIPIENTS</div>'+
+          '<div style="display:flex;flex-wrap:wrap;gap:5px">'+(chips||'<span style="color:var(--text3);font-size:12px">None</span>')+'</div>'+warn+
+          '<div style="margin-top:14px"><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Subject</label>'+
+            '<input id="pl-jd-subject" class="sel" value="'+esc(d.subject)+'"></div>'+
+          '<div style="margin-top:12px"><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Message</label>'+
+            '<textarea id="pl-jd-body" class="sel" style="min-height:220px;resize:vertical;font-size:12.5px;line-height:1.5">'+esc(d.body)+'</textarea></div>'+
+        '</div>'+
+        '<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">'+
+          '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+          '<button class="btn btn-outline" onclick="plCopyEmailJD()">Copy message</button>'+
+          '<button class="btn btn-primary" onclick="plSendEmailJD()">Open in mail app →</button>'+
+        '</div>'+
+      '</div>';
+    render();
+  }
+  window.plCopyEmailJD = function(){
+    var b=document.getElementById('pl-jd-body'); if(!b)return;
+    (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(b.value):Promise.reject())
+      .then(function(){ showToast('Message copied','success'); })
+      .catch(function(){ b.select(); document.execCommand('copy'); showToast('Copied','success'); });
+  };
+  window.plSendEmailJD = function(){
+    var d=STATE.bd._emailJD; if(!d) return;
+    var subject=(document.getElementById('pl-jd-subject')||{}).value||d.subject;
+    var body=(document.getElementById('pl-jd-body')||{}).value||d.body;
+    var emails=d.recips.map(function(r){return r.email;}).filter(Boolean);
+    if(!emails.length){ showToast('No valid recipient emails','error'); return; }
+    window.open('mailto:?bcc='+encodeURIComponent(emails.join(','))+'&subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body), '_self');
+    closeModal();
   };
 
   window.plRemove = function(id){
@@ -316,109 +395,14 @@
     }).catch(function(e){ showToast('Failed: '+e.message,'error'); });
   };
 
-  // ── add a candidate: create new (default), or search to reuse an existing one
+  // ── add a candidate ─────────────────────────────────────────────────────────
+  // ONE unified add-candidate window (the same full form used by the Candidates
+  // database), pre-scoped to this job so the created/selected candidate is tagged
+  // to its pipeline. Defined in 27-page-applicants.js.
   window.plOpenAdd = function(jid){
-    // Do NOT pre-load the whole candidate pool — the modal opens straight on the
-    // "create new" form. Existing candidates only surface if the recruiter
-    // actively searches (which still guards against duplicates).
-    STATE.bd._plAddJob = jid; STATE.bd._plSearchQ=''; STATE.bd._plDup=[]; STATE.bd._plPool=[];
-    plShowAddModal(jid);
-  };
-  window.plSearch = function(jid, q){
-    STATE.bd._plSearchQ = q;
-    q = (q||'').trim();
-    if (q.length < 2) { STATE.bd._plPool=[]; plShowAddModal(jid); return; }
-    apiGet('/candidates?q='+encodeURIComponent(q)).then(function(pool){ STATE.bd._plPool=pool||[]; plShowAddModal(jid); })
-      .catch(function(){ STATE.bd._plPool=[]; plShowAddModal(jid); });
-  };
-  function plShowAddModal(jid){
-    var taggedCids = (STATE.bd.pipeline||[]).filter(function(p){ return p.job_order_id===jid; }).map(function(p){ return p.candidate_id; });
-    var q = (STATE.bd._plSearchQ||'').trim();
-    // Only show results when the recruiter is actively searching — no default
-    // dump of every existing candidate.
-    var pool = q.length>=2 ? (STATE.bd._plPool||[]).filter(function(c){ return taggedCids.indexOf(c.id)<0; }) : [];
-    var poolHtml = q.length<2
-      ? '<div style="color:var(--text3);font-size:12px;padding:6px 2px">Type a name or email to reuse an existing candidate, or just create a new one below.</div>'
-      : (pool.map(function(c){
-          return '<div style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:8px;padding:8px 11px;margin-bottom:6px">'+
-            '<div><div style="font-weight:600;font-size:13px">'+esc(c.full_name)+' '+code(c.candidate_code||'')+'</div>'+
-            '<div style="font-size:11px;color:var(--text3)">'+esc(c.current_title||c.headline||'')+(c.email?' · '+esc(c.email):'')+'</div></div>'+
-            '<button class="btn btn-sm btn-primary" onclick="plTag(\''+jid+'\',\''+c.id+'\')">Tag</button>'+
-          '</div>';
-        }).join('') || '<div style="color:var(--text3);font-size:12.5px;padding:8px">No matching candidates — create a new one below.</div>');
-
-    var dup = (STATE.bd._plDup&&STATE.bd._plDup.length) ? (
-      '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px;margin-bottom:12px">'+
-        '<div style="font-weight:700;font-size:12px;color:#b45309;margin-bottom:6px">⚠ Possible existing candidate — tag one instead of creating a copy</div>'+
-        STATE.bd._plDup.map(function(m){ return '<div style="display:flex;justify-content:space-between;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:7px;padding:7px 10px;margin-bottom:5px">'+
-          '<div style="font-size:12.5px"><b>'+esc(m.full_name)+'</b> '+code(m.candidate_code||'')+'<div style="font-size:11px;color:var(--text3)">'+esc(m.email||'')+(m.phone?' · '+esc(m.phone):'')+'</div></div>'+
-          '<button class="btn btn-sm btn-primary" onclick="plTag(\''+jid+'\',\''+m.id+'\')">Tag</button></div>'; }).join('')+
-        '<div style="display:flex;justify-content:flex-end;margin-top:4px"><button class="btn btn-sm btn-outline" onclick="plQuickCreate(\''+jid+'\',true)">Create anyway</button></div>'+
-      '</div>') : '';
-
-    STATE.modal =
-      '<div class="modal modal-w640" onclick="event.stopPropagation()">'+
-        '<div style="padding:16px 20px;border-bottom:1px solid var(--border);font-weight:700;font-size:16px">Add Candidate</div>'+
-        '<div style="padding:18px 20px">'+
-          dup+
-          // Create-new is the primary action — no default candidate list.
-          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+
-            '<input id="pl_name" class="sel" placeholder="Full name *">'+
-            '<input id="pl_email" class="sel" placeholder="Email">'+
-            '<input id="pl_phone" class="sel" placeholder="Phone number">'+
-            '<input id="pl_title" class="sel" placeholder="Current title">'+
-            '<input id="pl_city" class="sel" placeholder="City">'+
-            '<input id="pl_state" class="sel" placeholder="State">'+
-          '</div>'+
-          '<div style="display:flex;align-items:center;gap:10px;margin-top:8px">'+
-            '<label style="font-size:11.5px;color:var(--text2);white-space:nowrap">Resume:</label>'+
-            '<input id="pl_resume" type="file" accept=".pdf,.doc,.docx,.rtf,.txt" style="font-size:11.5px">'+
-          '</div>'+
-          '<button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="plQuickCreate(\''+jid+'\',false)">Create &amp; Add</button>'+
-          // Reuse an existing candidate — secondary, only shows matches on search.
-          '<div style="border-top:1px solid var(--border);margin-top:16px;padding-top:12px">'+
-            '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">ALREADY IN THE SYSTEM? SEARCH TO REUSE</div>'+
-            '<input class="sel" placeholder="Search name, email, CN- code…" value="'+esc(q)+'" oninput="plSearch(\''+jid+'\',this.value)" style="margin-bottom:10px">'+
-            '<div style="max-height:26vh;overflow-y:auto">'+poolHtml+'</div>'+
-          '</div>'+
-        '</div>'+
-        '<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">'+
-          '<button class="btn btn-outline" onclick="closeModal()">Close</button>'+
-        '</div>'+
-      '</div>';
-    render();
-  }
-  window.plTag = function(jid, cid){
-    apiPost('/pipeline', { candidate_id:cid, job_order_id:jid }).then(function(){
-      showToast('Tagged to pipeline','success'); STATE.bd._plDup=[]; closeModal(); bdReloadPipeline();
-    }).catch(function(e){
-      if (/already tagged/i.test(e.message)) showToast('Already in this pipeline','error');
-      else showToast('Failed: '+e.message,'error');
-    });
-  };
-  window.plQuickCreate = function(jid, force){
-    var g=function(id){return (document.getElementById(id)||{}).value||'';};
-    var name=g('pl_name')||STATE.bd._plNewName||'';
-    var email=g('pl_email')||STATE.bd._plNewEmail||'';
-    var phone=g('pl_phone')||STATE.bd._plNewPhone||'';
-    var title=g('pl_title');
-    if (!name.trim()){ showToast('Name required','error'); return; }
-    STATE.bd._plNewName=name; STATE.bd._plNewEmail=email; STATE.bd._plNewPhone=phone;   // preserve across dup re-render
-    var resumeEl=document.getElementById('pl_resume');
-    var payload = { full_name:name, email:email, phone:phone, current_title:title,
-      city:g('pl_city'), state:g('pl_state'), source:'Manual' };
-    if (force) payload.force = true;
-    apiPost('/candidates', payload).then(function(c){
-      STATE.bd._plDup=[]; STATE.bd._plNewName=STATE.bd._plNewEmail=STATE.bd._plNewPhone='';
-      var attach=(window.atsUploadResumeFile?atsUploadResumeFile(c.id,resumeEl):Promise.resolve(false));
-      attach.then(function(){ plTag(jid, c.id); });
-    }).catch(function(e){
-      if (/possible_duplicate/i.test(e.message)){
-        apiGet('/candidates/check-duplicate?full_name='+encodeURIComponent(name)+'&email='+encodeURIComponent(email)+'&phone='+encodeURIComponent(phone))
-          .then(function(r){ STATE.bd._plDup=(r&&r.duplicates)||[]; plShowAddModal(jid); showToast('Possible duplicate — review','info'); })
-          .catch(function(){ showToast('Duplicate check failed','error'); });
-      } else showToast('Failed: '+e.message,'error');
-    });
+    var j = joById(jid) || {};
+    if (window.atsOpenNew) return atsOpenNew({ jobId:jid, jobTitle:j.job_title||'', jobCode:j.job_code||'' });
+    showToast('Candidate form not loaded','error');
   };
 
 })();
