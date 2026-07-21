@@ -21,6 +21,9 @@ module.exports = function (app, deps) {
   // keeps single-tenant behaviour intact.
   const orgIdFor = deps.orgIdFor || function (req) { return (req && req.orgId) || null; };
   function orgStamp(req) { const o = orgIdFor(req); return o ? { org_id: o } : {}; }
+  // Scope a read to the caller's org (no-op if no org context is resolved yet,
+  // which keeps behaviour safe during the single-tenant transition).
+  function withOrg(query, req) { const o = orgIdFor(req); return o ? query.eq('org_id', o) : query; }
 
   // ── pipeline stage definitions ───────────────────────────────────────────
   // Canonical submission lifecycle = the Ceipal application status. `stage` holds
@@ -228,7 +231,7 @@ module.exports = function (app, deps) {
 
   app.get('/job-orders', auth, async (req, res) => {
     try {
-      let query = supabase.from('job_orders').select(JOB_ORDER_SELECT).is('deleted_at', null);
+      let query = withOrg(supabase.from('job_orders').select(JOB_ORDER_SELECT).is('deleted_at', null), req);
 
       // recruiters only see job orders they are assigned to
       if (isRecruiter(req) && !isBDM(req)) {
@@ -264,9 +267,9 @@ module.exports = function (app, deps) {
   app.get('/job-orders/browse', auth, async (req, res) => {
     try {
       if (!isRecruiter(req) && !isBDM(req)) return res.status(403).json({ error: 'Recruiting roles only.' });
-      const { data: jobs, error } = await supabase.from('job_orders')
+      const { data: jobs, error } = await withOrg(supabase.from('job_orders')
         .select('id,job_code,job_title,client,city,state,country,status,priority,positions,job_type,emp_level,remote,primary_skills,created_at,company:companies(id,name,industry)')
-        .is('deleted_at', null).order('created_at', { ascending: false });
+        .is('deleted_at', null), req).order('created_at', { ascending: false });
       if (error) throw error;
       const list = jobs || [];
       const ids = list.map(j => j.id);
@@ -579,9 +582,9 @@ ${String(j.job_description).slice(0, 12000)}`;
     try {
       const paged = req.query.page !== undefined;
       const q = (req.query.q || '').trim().replace(/[,()]/g, ' ').trim();  // strip or()-structural chars
-      let query = supabase.from('candidates')
+      let query = withOrg(supabase.from('candidates')
         .select(CANDIDATE_SELECT, paged ? { count: 'exact' } : undefined)
-        .is('deleted_at', null);
+        .is('deleted_at', null), req);
       if (q) query = query.or(
         `full_name.ilike.%${q}%,email.ilike.%${q}%,candidate_code.ilike.%${q}%,phone.ilike.%${q}%,current_title.ilike.%${q}%`
       );
