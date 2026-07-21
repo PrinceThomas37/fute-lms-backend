@@ -45,16 +45,32 @@
       '</body></html>';
   }
 
+  // A .doc data-URI from the formatted HTML — HTML with a .doc name opens
+  // natively in Word, and this is what gets attached to the submission packet.
+  // UTF-8 safe (btoa alone breaks on accented chars like the é in futé).
+  window.atsFormattedDocDataUri = function(html){
+    var bytes = new TextEncoder().encode('﻿' + html);
+    var bin = ''; for (var i=0;i<bytes.length;i++) bin += String.fromCharCode(bytes[i]);
+    return 'data:application/msword;base64,' + btoa(bin);
+  };
+
   // Format from a File object (used by the Submit-to-BDM modal and anywhere
-  // else a resume file is at hand).
-  window.atsFormatResumeFile = function(file){
+  // else a resume file is at hand). opts.onFormatted(html, name) receives the
+  // formatted document so the caller can stash it (e.g. attach to the packet).
+  window.atsFormatResumeFile = function(file, opts){
+    opts = opts || {};
     if (!file) return;
     if (file.size > 4.5*1024*1024) { showToast('File too large (max ~4.5 MB)','error'); return; }
     showToast('Formatting resume…','success');
     var reader = new FileReader();
     reader.onload = function(){
       apiPost('/candidates/parse-resume', { filename: file.name, data_base64: String(reader.result) })
-        .then(function(r){ openPreview(docHtml((r&&r.fields)||{}, (r&&r.resume_text)||'', file.name), (r&&r.fields&&r.fields.name)||file.name); })
+        .then(function(r){
+          var html = docHtml((r&&r.fields)||{}, (r&&r.resume_text)||'', file.name);
+          var name = (r&&r.fields&&r.fields.name)||file.name;
+          if (opts.onFormatted) { try { opts.onFormatted(html, name); } catch(e){} }
+          if (opts.preview !== false) openPreview(html, name);
+        })
         .catch(function(e){ showToast('Could not parse the resume: '+e.message,'error'); });
     };
     reader.onerror = function(){ showToast('Could not read the file','error'); };

@@ -524,8 +524,9 @@
       pending.map(function(s){
         var c=s.candidate||{};
         return '<div style="display:flex;justify-content:space-between;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:6px">'+
-          '<div><b>'+esc(c.full_name||'')+'</b> '+code(c.candidate_code||'')+'</div>'+
+          '<div style="cursor:pointer" onclick="bdViewSubmission(\''+s.id+'\')"><b style="color:var(--accent)">'+esc(c.full_name||'')+'</b> '+code(c.candidate_code||'')+'<div style="font-size:11px;color:var(--text3)">Click to review the submission details</div></div>'+
           '<div style="display:flex;gap:6px">'+
+            '<button class="btn btn-sm btn-outline" onclick="bdViewSubmission(\''+s.id+'\')">View</button>'+
             '<button class="btn btn-sm btn-primary" onclick="bdApproveSub(\''+s.id+'\')">Approve → Client</button>'+
             '<button class="btn btn-sm btn-outline" onclick="bdSetStage(\''+s.id+'\',\'Rejected\')">Reject</button>'+
           '</div></div>';
@@ -908,6 +909,64 @@
   };
   window.bdSetStage=function(sid,stage){bdMoveStage(sid,stage);};
   window.bdApproveSub=function(sid){bdMoveStage(sid,BDM_GATED);};
+
+  // ── BDM: review a submission before approving ──────────────────────────────
+  // The recruiter's submission_details (the packet they filled) + the attached
+  // resume(s), with Approve → Client / Reject right inside — so the BDM reads
+  // what they're approving instead of a blind "Approve".
+  window.bdViewSubmission=function(sid){
+    var s=(STATE.bd.submissions||[]).find(function(x){return x.id===sid;});
+    if(!s){showToast('Submission not found','error');return;}
+    var c=s.candidate||{};
+    var d=s.submission_details||{};
+    function row(lbl,val){return '<div style="display:grid;grid-template-columns:170px 1fr;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px"><span style="color:var(--text3)">'+esc(lbl)+'</span><span>'+esc(val||'—')+'</span></div>';}
+    var hasDetails=d && (d.first_name||d.comment||d.email);
+    var detailRows=hasDetails?
+      row('Applicant First Name',d.first_name)+row('Applicant Last Name',d.last_name)+
+      row('Applicant Email Address',d.email)+row('Mobile Number',d.mobile)+
+      row('Home Phone',d.home_phone)+row('Work Authorization',d.work_auth)+
+      row('Current Location',d.current_location)+row('Relocation',d.relocation)+
+      row('Availability',d.availability)+
+      '<div style="padding:10px 0 2px"><div style="font-size:11px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Submission Comment</div>'+
+        '<div style="font-size:13px;line-height:1.5;white-space:pre-wrap;background:var(--bg);border-radius:8px;padding:10px 12px">'+esc(d.comment||'—')+'</div></div>'
+      :'<div style="font-size:13px;color:var(--text3);padding:10px 0">No structured submission details were captured for this candidate. Basic profile shown below.</div>'+
+        row('Name',c.full_name)+row('Email',c.email)+row('Mobile',c.phone)+row('Work Authorization',c.work_authorization);
+
+    STATE.modal=
+      '<div class="modal" style="width:640px;max-width:94vw" onclick="event.stopPropagation()">'+
+        '<div style="padding:16px 20px;border-bottom:1px solid var(--border)">'+
+          '<div style="font-weight:700;font-size:15px">Review submission — '+esc(c.full_name||'Candidate')+'</div>'+
+          '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+code(s.submission_code||'')+' · submitted by '+esc((s.submitter&&s.submitter.name)||(s.recruiter&&s.recruiter.name)||'—')+'</div>'+
+        '</div>'+
+        '<div style="padding:16px 20px;max-height:60vh;overflow:auto">'+
+          detailRows+
+          '<div id="bd-sub-docs" style="margin-top:14px"><div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Resume / documents</div>'+
+            '<div style="font-size:12.5px;color:var(--text3)">Loading…</div></div>'+
+        '</div>'+
+        '<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">'+
+          '<button class="btn btn-outline" onclick="closeModal()">Close</button>'+
+          '<button class="btn btn-outline" style="color:var(--red)" onclick="closeModal();bdSetStage(\''+s.id+'\',\'Rejected\')">Reject</button>'+
+          '<button class="btn btn-primary" onclick="closeModal();bdApproveSub(\''+s.id+'\')">Approve → Client</button>'+
+        '</div>'+
+      '</div>';
+    render();
+
+    // fetch the candidate's documents (short-lived signed URLs) for the packet
+    var cid=(c.id)||s.candidate_id;
+    if(cid){
+      apiGet('/candidates/'+cid+'/documents').then(function(docs){
+        var box=document.getElementById('bd-sub-docs'); if(!box)return;
+        var rows=(docs||[]).map(function(dc){
+          return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">'+
+            '<div style="min-width:0"><div style="font-size:13px;font-weight:600">'+(dc.url?'<a href="'+esc(dc.url)+'" target="_blank" rel="noopener" style="color:var(--accent)">'+esc(dc.filename)+'</a>':esc(dc.filename))+'</div>'+
+              '<div style="font-size:11px;color:var(--text3)">'+esc(dc.doc_type||'')+' · '+esc((dc.uploader&&dc.uploader.name)||'')+'</div></div>'+
+            (dc.url?'<a class="btn btn-sm btn-outline" href="'+esc(dc.url)+'" target="_blank" rel="noopener" download>Download</a>':'')+
+          '</div>';
+        }).join('')||'<div style="font-size:12.5px;color:var(--text3)">No documents attached.</div>';
+        box.innerHTML='<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Resume / documents</div>'+rows;
+      }).catch(function(){ var box=document.getElementById('bd-sub-docs'); if(box)box.innerHTML='<div style="font-size:12.5px;color:var(--text3)">Could not load documents.</div>'; });
+    }
+  };
 
 })();
 
