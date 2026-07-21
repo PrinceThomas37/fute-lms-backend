@@ -129,12 +129,12 @@ try {
     return { html: STATE.modal || '', listFetched };
   });
   step('Add modal opens without fetching the candidate pool', addModal.listFetched === false);
-  step('Add modal default shows the create form (name field)', addModal.html.includes('id="pl_name"') && addModal.html.includes('Create'));
-  step('Add modal shows a search-to-reuse hint, not a candidate list', addModal.html.includes('SEARCH TO REUSE') && !addModal.html.includes('Existing Person'));
+  step('Add opens the ONE unified candidate form, scoped to the job', /Add Candidate — HVAC/.test(addModal.html) && addModal.html.includes('Work Authorization'));
+  step('Unified add form offers search-to-add, not a candidate dump', addModal.html.includes('SEARCH TO ADD TO THIS JOB') && !addModal.html.includes('Existing Person'));
 
-  // typing a query surfaces matches
-  const searched = await page.evaluate(async () => { plSearch('j1', 'exist'); await new Promise(r => setTimeout(r, 200)); return STATE.modal || ''; });
-  step('Searching surfaces existing candidates (dedup still works)', searched.includes('Existing Person') && searched.includes('>Tag<'));
+  // typing a query surfaces matches (add an existing candidate to the job)
+  const searched = await page.evaluate(async () => { atsJobTagSearch('exist'); await new Promise(r => setTimeout(r, 200)); return STATE.modal || ''; });
+  step('Searching surfaces existing candidates to add', searched.includes('Existing Person') && searched.includes('>Add<'));
   await page.evaluate(() => { try{ closeModal(); }catch(e){} });
 
   step('No JS page errors', pageErrors.length === 0, pageErrors.join('; ').slice(0, 400));

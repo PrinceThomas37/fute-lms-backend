@@ -85,6 +85,7 @@
     return labels[(back&&back.page)||''] || 'Candidates';
   }
   window.cpGoBack = function(){
+    if (window.navBack && STATE.nav && STATE.nav.stack && STATE.nav.stack.length>1) return navBack();
     var back = (STATE.bd.profile && STATE.bd.profile.back) || {};
     if (back.joId){
       if (back.page==='bd_pipeline') return bdOpenPipeline(back.joId);
@@ -291,7 +292,7 @@
     }
 
     return '<div class="page">'+
-      '<div style="margin-bottom:6px"><span onclick="cpGoBack()" style="cursor:pointer;font-size:12.5px;color:var(--accent)">← '+esc(backLabel(pr.back))+'</span></div>'+
+      (window.navBar?navBar():'<div style="margin-bottom:6px"><span onclick="cpGoBack()" style="cursor:pointer;font-size:12.5px;color:var(--accent)">← '+esc(backLabel(pr.back))+'</span></div>')+
       header + lifecycle + resumeCard + jobsCard + notesCard + docsCard + actCard +
     '</div>';
   };
