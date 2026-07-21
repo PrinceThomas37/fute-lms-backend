@@ -24,7 +24,7 @@ router.post('/auth/login', async (req, res) => {
     if (!valid) return res.status(401).json({ error: 'Invalid email or password' });
     const roles = user.roles || (user.role ? [user.role] : []);
     const token = jwt.sign(
-      { id: user.id, email: user.email, roles, role: roles[0] || 'ra', name: user.name },
+      { id: user.id, email: user.email, roles, role: roles[0] || 'ra', name: user.name, org_id: user.org_id || null },
       process.env.JWT_SECRET, { expiresIn: '8h' }
     );
     const { password_hash, ...safeUser } = user;
@@ -73,10 +73,13 @@ router.post('/users', auth, async (req, res) => {
     if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
     const userRoles = roles || (role ? [role] : ['ra']);
     const hash = await bcrypt.hash(password || 'Fute@2024', 10);
+    // New staff belong to the creating admin's organization (multi-tenant).
+    const orgId = ctx.orgIdFor ? ctx.orgIdFor(req) : (req.orgId || null);
     const { data, error } = await supabase.from('users').insert({
       name, email: email.toLowerCase().trim(), password_hash: hash,
       role: userRoles[0] || 'ra', roles: userRoles,
-      employee_id, designation, platform: platform || 'Gmail'
+      employee_id, designation, platform: platform || 'Gmail',
+      ...(orgId ? { org_id: orgId } : {})
     }).select(USER_COLS).single();
     if (error) throw error;
     res.status(201).json({ ...data, roles: data.roles || userRoles });

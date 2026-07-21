@@ -16,6 +16,11 @@ const { parseResume } = require('./resume-parser');
 
 module.exports = function (app, deps) {
   const { supabase, auth, hasRole, notGuest, today } = deps;
+  // Multi-tenant: stamp new rows with the caller's org. Returns {} when there is
+  // no org context so the column DEFAULT (the platform's default org) applies —
+  // keeps single-tenant behaviour intact.
+  const orgIdFor = deps.orgIdFor || function (req) { return (req && req.orgId) || null; };
+  function orgStamp(req) { const o = orgIdFor(req); return o ? { org_id: o } : {}; }
 
   // ── pipeline stage definitions ───────────────────────────────────────────
   // Canonical submission lifecycle = the Ceipal application status. `stage` holds
@@ -137,7 +142,7 @@ module.exports = function (app, deps) {
         status: 'Active',
         bd_manager_id: b.bd_manager_id || req.user.id,
         created_by: req.user.id
-      }, pickJobFields(b));
+      }, pickJobFields(b), orgStamp(req));
       // never let the client blank out the inherited title
       if (!jobRow.job_title) jobRow.job_title = lead.position;
       const { data: jobOrder, error } = await supabase.from('job_orders')
@@ -207,7 +212,7 @@ module.exports = function (app, deps) {
         status: 'Active',
         bd_manager_id: job.bd_manager_id || req.user.id,
         created_by: req.user.id
-      }, pickJobFields(job));
+      }, pickJobFields(job), orgStamp(req));
       if (!jobRow.job_title) jobRow.job_title = leadRow.position;
       const { data: jobOrder, error } = await supabase.from('job_orders')
         .insert(jobRow).select(JOB_ORDER_SELECT).single();
@@ -672,7 +677,7 @@ ${String(j.job_description).slice(0, 12000)}`;
         applicant_status: b.applicant_status || 'New lead',
         owner_id: b.owner_id || req.user.id,
         created_by: req.user.id
-      });
+      }, orgStamp(req));
       if (Array.isArray(b.tags)) row.tags = b.tags;
       const { data, error } = await supabase.from('candidates').insert(row).select(CANDIDATE_SELECT).single();
       if (error) throw error;
@@ -885,6 +890,7 @@ ${String(j.job_description).slice(0, 12000)}`;
       const c = cand || {};
       const pick = (k, fb) => (b[k] !== undefined ? b[k] : (fb || null));
       const { data, error } = await supabase.from('submissions').insert({
+        ...orgStamp(req),
         submission_code: await nextId('SB'),
         candidate_id: b.candidate_id, job_order_id: b.job_order_id,
         recruiter_id: b.recruiter_id || req.user.id,
@@ -1099,6 +1105,7 @@ ${String(j.job_description).slice(0, 12000)}`;
         notes: b.notes || null,
         tagged_by: req.user.id
       };
+      Object.assign(row, orgStamp(req));
       const { data, error } = await supabase.from('candidate_pipeline').insert(row).select(PIPELINE_SELECT).single();
       if (error) {
         if (error.code === '23505') return res.status(409).json({ error: 'This candidate is already tagged to this job.' });
@@ -1166,6 +1173,7 @@ ${String(j.job_description).slice(0, 12000)}`;
       const targetStage = req.body.stage || 'Submitted to BDM';
       let submission;
       const { data: sub, error } = await supabase.from('submissions').insert({
+        ...orgStamp(req),
         submission_code: await nextId('SB'),
         candidate_id: pl.candidate_id, job_order_id: pl.job_order_id,
         recruiter_id: req.user.id, stage: targetStage,

@@ -77,6 +77,16 @@ Ordered by "cheapest to do now vs. most painful to retrofit":
    companies: a tenant/`org_id` on every ATS table + query scoping. Free to add now,
    very expensive to retrofit — and it's the thing that makes futé *sellable* to more
    than one customer. Highest-leverage architectural bet.
+   - **Slice 1 DONE** (migration `022`): `org_id` on 33 tenant tables, backfilled to
+     the default org "Fute Global", with a column DEFAULT so nothing breaks. Backend
+     resolves `req.orgId` (JWT carries `org_id`; falls back to the default org), and
+     the core creates (candidates, job orders, pipeline, submissions, new users)
+     stamp it. Behaviour is unchanged for the single existing org.
+   - **Slice 2 (next):** scope every *read* by `req.orgId` (add `.eq('org_id', …)`
+     across index.js + route modules), stamp the remaining inserts, then org
+     signup/switch + per-org `id_sequences`. **Slice 3:** enforce (NOT NULL, drop the
+     transitional default) + RLS policies keyed on org. Do these as careful, tested
+     slices — never a big-bang change on the live app.
 2. **Configurable roles & permissions per org** — we already have roles; make them
    data so different customers can mirror their own org charts.
 3. **App-tracked candidate email** (not just `mailto:`): route candidate emails through

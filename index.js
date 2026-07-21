@@ -58,17 +58,36 @@ const supabase = createClient(config.supabaseUrl, config.supabaseServiceKey);
 app.use(cors({ origin: '*', methods: ['GET','POST','PUT','PATCH','DELETE'], allowedHeaders: ['Content-Type','Authorization'] }));
 app.use(express.json({ limit: '5mb' }));
 
+// ── Multi-tenant context ───────────────────────────────────────
+// Every request carries an org context (req.orgId). Until every user record and
+// token carries an org_id, we fall back to the platform's default (first) org so
+// single-tenant behaviour is unchanged. DEFAULT_ORG_ID is resolved once at boot.
+let DEFAULT_ORG_ID = process.env.DEFAULT_ORG_ID || null;
+async function resolveDefaultOrg() {
+  if (DEFAULT_ORG_ID) return DEFAULT_ORG_ID;
+  try {
+    const { data } = await supabase.from('organizations').select('id').order('created_at', { ascending: true }).limit(1).single();
+    if (data && data.id) DEFAULT_ORG_ID = data.id;
+  } catch (_) { /* organizations table absent — leave null, column defaults cover it */ }
+  return DEFAULT_ORG_ID;
+}
+resolveDefaultOrg();
+// Exposed so route modules can stamp/scope by the caller's org.
+function orgIdFor(req) { return (req && req.user && req.user.org_id) || DEFAULT_ORG_ID || null; }
+
 function auth(req, res, next) {
   const header = req.headers.authorization;
   if (!header) return res.status(401).json({ error: 'No token' });
   const token = header.replace('Bearer ', '');
   // Guest bypass — read-only portfolio access
   if (token === 'guest') {
-    req.user = { id: 'guest', name: 'Guest User', email: 'guest@futeglobal.com', role: 'bd', roles: ['bd'], isGuest: true };
+    req.user = { id: 'guest', name: 'Guest User', email: 'guest@futeglobal.com', role: 'bd', roles: ['bd'], isGuest: true, org_id: DEFAULT_ORG_ID };
+    req.orgId = DEFAULT_ORG_ID;
     return next();
   }
   try {
     req.user = jwt.verify(token, process.env.JWT_SECRET);
+    req.orgId = orgIdFor(req);
     next();
   } catch { res.status(401).json({ error: 'Invalid token' }); }
 }
@@ -2442,7 +2461,7 @@ function buildHtmlEmailBody(plainText, signatureHtml, includeFooter = true) {
 // Shared helpers/middleware stay defined above; routers receive them via ctx so
 // their closures and behaviour are identical to the original inline routes.
 const routeCtx = {
-  supabase, auth, hasRole, notGuest, today,
+  supabase, auth, hasRole, notGuest, today, orgIdFor,
   loadMailboxSignatures, getMailboxSignature, getMicrosoftToken, buildHtmlEmailBody,
   MS_TENANT, MS_CLIENT, MS_SECRET, MS_REDIRECT, MS_SCOPES,
   logActivity, INDUSTRIES, normInd,
@@ -2469,7 +2488,7 @@ app.use(require('./routes/emails')(routeCtx));
 app.use(require('./routes/lookups')(routeCtx));
 app.use(require('./routes/distribution')(routeCtx));
 
-require('./bd_recruiter_routes')(app, { supabase, auth, hasRole, notGuest, today });
+require('./bd_recruiter_routes')(app, { supabase, auth, hasRole, notGuest, today, orgIdFor });
 
 // ── Event-bus subscribers (the "react" half of the spherical structure) ─────
 // Registered after the work functions above exist; emitters elsewhere just
