@@ -106,11 +106,18 @@ Ordered by "cheapest to do now vs. most painful to retrofit":
      email-activity` read endpoint, and pure helpers in `email-tracking.js`
      (`newToken`/`pixelHtml`/`injectPixel`). Wired into `routes/tracking.js`. Nothing
      writes tracking rows yet — the live send path is untouched.
-   - **Slice 2 (next):** a tracked candidate-send that reuses the existing provider
-     send fns (`sendMicrosoftNewMessage` / gmail `sendNewMessage`) + `buildHtmlEmailBody`,
-     injects the pixel, records an `email_tracking` row; frontend "Email JD" gains a
-     "Send tracked through futé" option; show "opened ✓" on the candidate profile.
-   - **Slice 3:** reply detection (unique reply-to / mailbox scan) — bigger, later.
+   - **Slice 2 DONE:** `POST /candidates/email` sends the invite to selected
+     candidates via the recruiter's connected mailbox (reuses `recruiterSendingMailbox`
+     + `sendMicrosoftNewMessage` + `buildHtmlEmailBody`), injects the pixel, records an
+     `email_tracking` row per recipient, bumps `email_send_log`; returns 409
+     `no_connected_mailbox` so the UI falls back to the mail app. Frontend: the
+     "Email JD" modal's **"✉ Send tracked through futé"** button (mail-app kept as
+     fallback); the candidate profile shows an **Email activity** card ("✓ Opened · N×"
+     / "Sent · not opened yet") from `GET /candidates/:id/email-activity`.
+     **Caveat:** send path is Microsoft-only for now (mirrors the existing
+     `candidate_email` channel; `recruiterSendingMailbox` only checks `microsoft_tokens`).
+     Gmail send = a small follow-up (check `gmail_tokens` + dispatch by `platform`).
+   - **Slice 3 (next):** reply detection (unique reply-to / mailbox scan) — bigger.
 4. **Candidate ↔ JD match scoring / ranking** — we already parse resumes and JDs; add a
    match score (AI when a key is set, rule-based fallback). On-trend differentiator.
 5. **Reporting/analytics** — funnel, time-to-fill, recruiter productivity. We already

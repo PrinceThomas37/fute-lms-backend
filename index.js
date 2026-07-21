@@ -44,6 +44,7 @@ const { loadConfig } = require('./config/env');
 const settingsConfig = require('./config/settings');
 const { createWarmupEngine, WARMUP_HEADER } = require('./warmup-engine');
 const { createGmailProvider } = require('./gmail-provider');
+const { newToken: newTrackToken, injectPixel: injectTrackPixel } = require('./email-tracking');
 
 // Validate environment and centralize config at startup (fails fast with a
 // clear message if a required secret is missing).
@@ -2735,6 +2736,59 @@ wfEngine.registerChannel('candidate_email', async ({ step, enrollment, context }
     return { outcome: 'done', detail: { to: candidate.email, graph_message_id: r.graphMessageId } };
   } catch (e) { return { outcome: 'failed', detail: { error: e.message } }; }
 }, { entity_types: ['submission'], label: 'Email the candidate', domains: ['recruiting'] });
+
+// One-off TRACKED candidate email (not the sequence): send the job/invite to the
+// selected candidates through the recruiter's connected mailbox, embedding an
+// open-tracking pixel and recording an email_tracking row per recipient. Returns
+// a clear 409 (no_connected_mailbox) so the UI can fall back to the mail app.
+app.post('/candidates/email', auth, async (req, res) => {
+  try {
+    if (req.user.isGuest) return res.status(403).json({ error: 'Guests cannot send email.' });
+    const b = req.body || {};
+    const recipients = Array.isArray(b.recipients) ? b.recipients : [];
+    const subject = String(b.subject || '').trim();
+    const bodyText = String(b.body || '');
+    if (!recipients.length) return res.status(400).json({ error: 'No recipients.' });
+    if (!subject) return res.status(400).json({ error: 'Subject is required.' });
+
+    const mailbox = await recruiterSendingMailbox(req.user.id);
+    if (!mailbox) return res.status(409).json({ error: 'no_connected_mailbox' });
+
+    const signature = await getMailboxSignature(mailbox.id, req.user.id).catch(() => '');
+    const suppressed = await loadSuppressedSet(recipients.map(r => r.email).filter(Boolean));
+    const orgId = req.orgId || null;
+    const results = [];
+    for (const r of recipients) {
+      const to = String(r.email || '').trim();
+      if (!to || !emailSyntaxValid(to)) { results.push({ email: to, status: 'skipped', reason: 'invalid_email' }); continue; }
+      if (suppressed.has(to.toLowerCase())) { results.push({ email: to, status: 'skipped', reason: 'suppressed' }); continue; }
+      const token = newTrackToken();
+      const htmlBody = injectTrackPixel(buildHtmlEmailBody(bodyText, signature), token);
+      try {
+        await sendMicrosoftNewMessage(mailbox.id, { to, subject, htmlBody });
+        await supabase.from('email_tracking').insert({
+          token, channel: 'candidate', candidate_id: r.candidate_id || null,
+          job_order_id: b.job_order_id || null, to_email: to, subject,
+          sent_by: req.user.id, mailbox_email: mailbox.email_address || null,
+          ...(orgId ? { org_id: orgId } : {})
+        });
+        results.push({ email: to, status: 'sent', candidate_id: r.candidate_id || null });
+      } catch (e) {
+        results.push({ email: to, status: 'failed', reason: e.message });
+      }
+    }
+    const sentCount = results.filter(x => x.status === 'sent').length;
+    if (sentCount) {
+      const { data: sendLog } = await supabase.from('email_send_log')
+        .select('id,emails_sent').eq('send_date', today()).eq('user_email_id', mailbox.id).maybeSingle();
+      await supabase.from('email_send_log').upsert(
+        { user_email_id: mailbox.id, send_date: today(), emails_sent: (sendLog?.emails_sent || 0) + sentCount },
+        { onConflict: 'user_email_id,send_date' }
+      );
+    }
+    res.json({ mailbox: mailbox.email_address, sent: sentCount, results });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // recruiter_task — a dated task for the recruiter (call the candidate, collect
 // docs, schedule an interview …), recorded as a reminder + submission activity.

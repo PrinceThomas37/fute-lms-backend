@@ -41,9 +41,10 @@
     else if (STATE.page==='bd_kanban') back.joId = v.kanbanJoId;
     else if (STATE.page==='bd_jodetail') back.joId = v.joId;
     Promise.all([ apiGet('/candidates/'+id), apiGet('/candidates/'+id+'/history'),
-      apiGet('/candidates/'+id+'/notes').catch(emptyArr), apiGet('/candidates/'+id+'/documents').catch(emptyArr) ]).then(function(r){
+      apiGet('/candidates/'+id+'/notes').catch(emptyArr), apiGet('/candidates/'+id+'/documents').catch(emptyArr),
+      apiGet('/candidates/'+id+'/email-activity').catch(emptyArr) ]).then(function(r){
       var hist = r[1] || { pipeline:[], submissions:[], activity:[] };
-      STATE.bd.profile = { id:id, candidate:r[0]||{}, history:hist, notes:r[2]||[], documents:r[3]||[], selJob:null, noteTab:'applicant_reference', back:back };
+      STATE.bd.profile = { id:id, candidate:r[0]||{}, history:hist, notes:r[2]||[], documents:r[3]||[], emailActivity:r[4]||[], selJob:null, noteTab:'applicant_reference', back:back };
       // make sure jobs referenced by the history are navigable
       STATE.bd = STATE.bd || {}; STATE.bd.jobOrders = STATE.bd.jobOrders || [];
       (hist.pipeline||[]).concat(hist.submissions||[]).forEach(function(x){
@@ -291,9 +292,26 @@
         '</div>';
     }
 
+    // Email activity — tracked sends and whether the candidate opened them.
+    var ea = pr.emailActivity || [];
+    var eaRows = ea.map(function(e){
+      var opened = !!e.opened_at;
+      var badge = opened
+        ? '<span style="font-size:11px;font-weight:700;color:var(--green);background:rgba(0,0,0,.04);padding:2px 8px;border-radius:10px">✓ Opened'+((e.open_count>1)?' · '+e.open_count+'×':'')+'</span>'
+        : '<span style="font-size:11px;font-weight:700;color:var(--text3);background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:10px">Sent · not opened yet</span>';
+      return '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--border)">'+
+        '<div style="min-width:0">'+
+          '<div style="font-size:13px;font-weight:600">'+esc(e.subject||'(no subject)')+'</div>'+
+          '<div style="font-size:11px;color:var(--text3)">to '+esc(e.to_email||'')+' · '+esc(fmtDT(e.sent_at))+(e.opened_at?' · opened '+esc(fmtDT(e.opened_at)):'')+'</div>'+
+        '</div>'+badge+
+      '</div>';
+    }).join('') || '<div style="padding:10px 4px;color:var(--text3);font-size:12.5px">No tracked emails yet. Use “Send tracked through futé” from a job’s Candidates tab.</div>';
+    var emailCard = '<div class="card" style="padding:16px;margin-bottom:16px">'+
+      '<div style="font-weight:600;font-size:14px;margin-bottom:8px">Email activity</div>'+eaRows+'</div>';
+
     return '<div class="page">'+
       (window.navBar?navBar():'<div style="margin-bottom:6px"><span onclick="cpGoBack()" style="cursor:pointer;font-size:12.5px;color:var(--accent)">← '+esc(backLabel(pr.back))+'</span></div>')+
-      header + lifecycle + resumeCard + jobsCard + notesCard + docsCard + actCard +
+      header + lifecycle + resumeCard + jobsCard + emailCard + notesCard + docsCard + actCard +
     '</div>';
   };
 
