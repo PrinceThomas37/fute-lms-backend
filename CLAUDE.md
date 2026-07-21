@@ -82,11 +82,19 @@ Ordered by "cheapest to do now vs. most painful to retrofit":
      resolves `req.orgId` (JWT carries `org_id`; falls back to the default org), and
      the core creates (candidates, job orders, pipeline, submissions, new users)
      stamp it. Behaviour is unchanged for the single existing org.
-   - **Slice 2 (next):** scope every *read* by `req.orgId` (add `.eq('org_id', …)`
-     across index.js + route modules), stamp the remaining inserts, then org
-     signup/switch + per-org `id_sequences`. **Slice 3:** enforce (NOT NULL, drop the
-     transitional default) + RLS policies keyed on org. Do these as careful, tested
-     slices — never a big-bang change on the live app.
+   - **Slice 2 IN PROGRESS:** the core ATS collection reads are now org-scoped via
+     a `withOrg(query, req)` helper — `GET /candidates`, `GET /job-orders`,
+     `GET /job-orders/browse`. Still to scope: the recruiting dashboard aggregates,
+     single-record long tail, and the **leads engine** (`jobs` table via the shared
+     cached `loadAllJobs` + the email subsystem in index.js) — deliberately deferred
+     because it's the live, actively-used email system and needs its own careful pass.
+   - **Slice 3a DONE** (migration `023`): `org_id` is now `NOT NULL` on all tenant
+     tables (safe — every row backfilled + column DEFAULT).
+   - **Slice 3b DEFERRED by owner decision:** enabling RLS (row-level security) with
+     org-keyed / service-role policies to close the anon-key exposure. Proven-safe
+     pattern (already live on 8 tables; frontend is API-only) but touches the live
+     prod DB, so hold it until closer to onboarding a second org. **Do NOT enable RLS
+     on the live DB without an explicit, fresh go-ahead.**
 2. **Configurable roles & permissions per org** — we already have roles; make them
    data so different customers can mirror their own org charts.
 3. **App-tracked candidate email** (not just `mailto:`): route candidate emails through
