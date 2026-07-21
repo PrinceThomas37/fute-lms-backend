@@ -1054,7 +1054,7 @@ ${String(j.job_description).slice(0, 12000)}`;
   // static "Moved to Submission".
   const PIPELINE_SELECT =
     '*, candidate:candidates(id,candidate_code,full_name,email,phone,work_authorization,' +
-    'current_title,headline,city,state,country,current_location,experience_years,' +
+    'current_title,headline,skills,city,state,country,current_location,experience_years,' +
     'availability,notice_period,current_ctc,bill_rate,pay_rate,source,resume_url), ' +
     'tagger:users!tagged_by(id,name,employee_id), ' +
     'submission:submissions!candidate_pipeline_submission_id_fkey(id,submission_code,stage,sub_stage)';
