@@ -1599,6 +1599,81 @@ ${String(j.job_description).slice(0, 12000)}`;
   // ==========================================================================
 
   // per-recruiter performance
+  // Consolidated recruiting report — funnel, per-recruiter productivity, an
+  // 8-week submission trend, time-to-fill, top clients and headline totals.
+  // Org-scoped; recruiters see only their own numbers, BD/admin the whole desk.
+  app.get('/reports/recruiting', auth, async (req, res) => {
+    try {
+      if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
+      const recruiterView = isRecruiter(req) && !isBDM(req);
+
+      let sq = withOrg(supabase.from('submissions')
+        .select('id,stage,created_at,submitted_at,stage_updated_at,job_order_id,recruiter_id,recruiter:users!recruiter_id(id,name)')
+        .is('deleted_at', null), req);
+      if (recruiterView) sq = sq.eq('recruiter_id', req.user.id);
+      let jq = withOrg(supabase.from('job_orders').select('id,client,status,created_at,placement_fee').is('deleted_at', null), req);
+      let pq = withOrg(supabase.from('candidate_pipeline').select('id,tagged_by').is('deleted_at', null), req);
+      if (recruiterView) pq = pq.eq('tagged_by', req.user.id);
+
+      const [{ data: subs }, { data: jobs }, { data: pipe }] = await Promise.all([sq, jq, pq]);
+      const S = subs || [], J = jobs || [], P = pipe || [];
+      const jobById = {}; J.forEach(j => { jobById[j.id] = j; });
+
+      const funnel = {}; STAGES.forEach(s => { funnel[s] = 0; });
+      S.forEach(s => { if (funnel[s.stage] !== undefined) funnel[s.stage]++; });
+
+      const SUBMITTED = ['Submitted to BDM', 'Submitted to Client', 'Interview Scheduled', 'Interview Completed', 'Offer', 'Confirmation', 'Placement'];
+      const INTERVIEWED = ['Interview Scheduled', 'Interview Completed', 'Offer', 'Confirmation', 'Placement'];
+      const feeByJob = {}; J.forEach(j => { const n = parseFloat(String(j.placement_fee || '').replace(/[^0-9.]/g, '')); feeByJob[j.id] = isNaN(n) ? 0 : n; });
+      const rec = {};
+      S.forEach(s => {
+        const id = s.recruiter_id || 'none';
+        const r = rec[id] || (rec[id] = { recruiter: (s.recruiter && s.recruiter.name) || 'Unassigned', total: 0, submitted: 0, interviews: 0, placements: 0, revenue: 0 });
+        r.total++;
+        if (SUBMITTED.includes(s.stage)) r.submitted++;
+        if (INTERVIEWED.includes(s.stage)) r.interviews++;
+        if (s.stage === 'Placement') { r.placements++; r.revenue += feeByJob[s.job_order_id] || 0; }
+      });
+      const by_recruiter = Object.values(rec).map(r => Object.assign({}, r, { fill_rate: r.total ? Math.round((r.placements / r.total) * 100) : 0 }))
+        .sort((a, b) => b.placements - a.placements || b.total - a.total);
+
+      const now = Date.now();
+      const trend = [];
+      for (let i = 7; i >= 0; i--) trend.push({ week: i === 0 ? 'This wk' : (i + 'w ago'), count: 0 });
+      S.forEach(s => {
+        const t = new Date(s.submitted_at || s.created_at).getTime();
+        const wa = Math.floor((now - t) / (7 * 86400000));
+        if (wa >= 0 && wa < 8) trend[7 - wa].count++;
+      });
+
+      const ttf = [];
+      S.forEach(s => {
+        if (s.stage === 'Placement') {
+          const d = (new Date(s.stage_updated_at || s.created_at) - new Date(s.created_at)) / 86400000;
+          if (d >= 0) ttf.push(d);
+        }
+      });
+      const avg_time_to_fill = ttf.length ? Math.round(ttf.reduce((a, b) => a + b, 0) / ttf.length) : null;
+
+      const byClient = {};
+      S.forEach(s => { const c = (jobById[s.job_order_id] && jobById[s.job_order_id].client) || '—'; byClient[c] = (byClient[c] || 0) + 1; });
+      const top_clients = Object.keys(byClient).map(c => ({ client: c, count: byClient[c] })).sort((a, b) => b.count - a.count).slice(0, 6);
+
+      const closedish = st => { st = String(st || '').toLowerCase(); return st === 'closed' || st === 'filled' || st === 'cancelled'; };
+      const totals = {
+        candidates_added: P.length,
+        submissions: S.filter(s => SUBMITTED.includes(s.stage)).length,
+        interviews: funnel['Interview Scheduled'] + funnel['Interview Completed'],
+        placements: funnel['Placement'],
+        open_jobs: J.filter(j => !closedish(j.status)).length,
+        total_jobs: J.length,
+        revenue: by_recruiter.reduce((a, r) => a + r.revenue, 0)
+      };
+
+      res.json({ role: recruiterView ? 'recruiter' : 'manager', funnel, stages: STAGES, by_recruiter, trend, avg_time_to_fill, top_clients, totals });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   app.get('/bd-analytics/recruiters', auth, async (req, res) => {
     try {
       if (!isBDM(req)) return res.status(403).json({ error: 'BD Manager only.' });

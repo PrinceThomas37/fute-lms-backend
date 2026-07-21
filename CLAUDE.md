@@ -131,6 +131,12 @@ Ordered by "cheapest to do now vs. most painful to retrofit":
    match score (AI when a key is set, rule-based fallback). On-trend differentiator.
 5. **Reporting/analytics** — funnel, time-to-fill, recruiter productivity. We already
    store the data; surfacing it is a sales lever.
+   - **DONE:** a **Reports** page (`39-page-reports.js`, nav item) from one org-scoped
+     endpoint `GET /reports/recruiting` — headline totals, pipeline funnel, 8-week
+     submission trend, recruiter-productivity table (with fill % + placement-fee
+     revenue), avg time-to-fill and top clients. Managers see the whole desk;
+     recruiters see only their own. (Legacy `/bd-analytics/*` endpoints still exist,
+     un-org-scoped — fold in later.)
 6. **CSV import/export + a small public API** — buyers need to migrate in and integrate.
 7. **Audit trail everywhere** — generalize the submission activity log; buyers want
    accountability.
