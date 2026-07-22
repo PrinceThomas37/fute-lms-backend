@@ -19,7 +19,7 @@
 // is identical until MICROSOFT_REDIRECT_URI is set in the environment.
 const DEFAULT_MICROSOFT_REDIRECT_URI = 'https://fute-lms-backend.onrender.com/auth/microsoft/callback';
 // Protocol constant, not a per-deployment secret — safe to keep in code.
-const MICROSOFT_SCOPES = 'Mail.Send Mail.ReadWrite offline_access User.Read';
+const MICROSOFT_SCOPES = 'Mail.Send Mail.ReadWrite OnlineMeetings.ReadWrite offline_access User.Read';
 
 // Gmail / Google Workspace — same shape as Microsoft, fully OPTIONAL. Sending
 // stays unavailable for Gmail mailboxes until these are set + Google approves

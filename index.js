@@ -2884,6 +2884,53 @@ app.post('/submissions/:id/interview-invite', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Auto-create a Microsoft Teams meeting for an interview and return the join URL.
+// Needs the OnlineMeetings.ReadWrite scope on the mailbox token — mailboxes
+// connected before that scope was added need a one-time reconnect, so we surface
+// a clear 409 the UI can explain instead of a raw Graph error.
+app.post('/submissions/:id/create-meeting', auth, async (req, res) => {
+  try {
+    if (req.user.isGuest) return res.status(403).json({ error: 'Guests cannot create meetings.' });
+    const b = req.body || {};
+    const { data: sub } = await supabase.from('submissions')
+      .select('id, interview_at, candidate:candidates(full_name), job:job_orders(job_title)')
+      .eq('id', req.params.id).single();
+    if (!sub) return res.status(404).json({ error: 'Submission not found' });
+
+    const startRaw = b.start || sub.interview_at;
+    if (!startRaw) return res.status(400).json({ error: 'Set the interview date & time first.' });
+    const start = new Date(startRaw);
+    if (isNaN(start.getTime())) return res.status(400).json({ error: 'Invalid date/time.' });
+    const minutes = Math.min(240, Math.max(15, parseInt(b.minutes, 10) || 45));
+    const end = new Date(start.getTime() + minutes * 60000);
+    const subject = b.subject || ('Interview: ' + ((sub.candidate && sub.candidate.full_name) || 'Candidate') + ' — ' + ((sub.job && sub.job.job_title) || 'Role'));
+
+    const mailbox = await recruiterSendingMailbox(req.user.id);
+    if (!mailbox) return res.status(409).json({ error: 'no_connected_mailbox' });
+    const accessToken = await getMicrosoftToken(mailbox.id);
+    let meeting;
+    try {
+      meeting = await graphMailRequest(accessToken, '/me/onlineMeetings', {
+        method: 'POST',
+        body: JSON.stringify({ startDateTime: start.toISOString(), endDateTime: end.toISOString(), subject })
+      });
+    } catch (e) {
+      if (/scope|permission|Authorization_RequestDenied|forbidden|AccessDenied|InvalidAuthenticationToken/i.test(String(e.message))) {
+        return res.status(409).json({ error: 'meetings_permission_missing' });
+      }
+      throw e;
+    }
+    const joinUrl = meeting && meeting.joinUrl;
+    if (!joinUrl) return res.status(502).json({ error: 'No join link returned by Microsoft.' });
+
+    await supabase.from('submissions').update({
+      interview_link: joinUrl, interview_platform: 'Microsoft Teams', interview_type: 'virtual'
+    }).eq('id', req.params.id);
+
+    res.json({ joinUrl, platform: 'Microsoft Teams' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // recruiter_task — a dated task for the recruiter (call the candidate, collect
 // docs, schedule an interview …), recorded as a reminder + submission activity.
 wfEngine.registerChannel('recruiter_task', async ({ step, enrollment, context }) => {

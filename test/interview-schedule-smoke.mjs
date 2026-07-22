@@ -58,6 +58,19 @@ try {
   step('In-person: office address field', modal.includes('stg-iv-address'));
   step('Interviewer name(s) field', modal.includes('stg-iv-people'));
   step('"Email these details to" Candidate + BD Manager', modal.includes('stg-iv-notify-cand') && modal.includes('stg-iv-notify-bd'));
+  step('"Generate Teams meeting link" button offered', modal.includes('Generate Teams meeting link'));
+
+  const teams = await page.evaluate(async () => {
+    document.getElementById('stg-iv-type').value = 'virtual'; window.stgIvTypeToggle();
+    document.getElementById('stg-iv-at').value = '2026-08-01T10:00';
+    let posted = null;
+    window.apiPost = function (url, body) { posted = { url, body }; return Promise.resolve({ joinUrl: 'https://teams.microsoft.com/l/meetup-join/xyz', platform: 'Microsoft Teams' }); };
+    window.stgGenTeams('s1');
+    await new Promise(r => setTimeout(r, 60));
+    return { posted, link: (document.getElementById('stg-iv-link') || {}).value };
+  });
+  step('Generate Teams posts to /submissions/:id/create-meeting', teams.posted && teams.posted.url === '/submissions/s1/create-meeting' && !!teams.posted.body.start);
+  step('The returned Teams join link fills the link field', /teams\.microsoft/.test(teams.link));
 
   const toggle = await page.evaluate(() => {
     document.getElementById('stg-iv-type').value = 'in_person'; window.stgIvTypeToggle();

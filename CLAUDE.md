@@ -123,10 +123,14 @@ Ordered by "cheapest to do now vs. most painful to retrofit":
      or office address, up to 3 interviewer names — stored on `submissions`
      (migration `025`). `POST /submissions/:id/interview-invite` emails the formatted,
      open-tracked details to the candidate and/or the BD manager (job title, company,
-     date/time, format, interviewers auto-included). **Next:** auto-CREATE the meeting
-     — Teams via Graph needs an added `OnlineMeetings.ReadWrite` scope + re-consent
-     (we already have the Microsoft app reg); then Google Meet (Calendar scope); Zoom
-     = a new OAuth integration.
+     date/time, format, interviewers auto-included).
+   - **Teams meeting auto-create DONE:** `POST /submissions/:id/create-meeting`
+     creates a Microsoft Teams meeting via Graph `/me/onlineMeetings` and stores the
+     joinUrl on the submission; the interview modal's **"Generate Teams meeting
+     link"** button fills it in. Added `OnlineMeetings.ReadWrite` to the MS OAuth
+     scopes — **mailboxes connected before this need a one-time reconnect**; until
+     then the endpoint returns 409 `meetings_permission_missing` and the UI says so.
+     **Next:** Google Meet (needs a Google Calendar scope/connection); Zoom (new OAuth).
 4. **Candidate ↔ JD match scoring / ranking** — we already parse resumes and JDs; add a
    match score (AI when a key is set, rule-based fallback). On-trend differentiator.
 5. **Reporting/analytics** — funnel, time-to-fill, recruiter productivity. We already
