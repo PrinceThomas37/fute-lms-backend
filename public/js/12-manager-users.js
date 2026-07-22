@@ -821,11 +821,12 @@ window.toggleBDAssign=function(role){
   if(wrap)wrap.style.display=role==="ra"?"":"none";
 };
 window.openAddUser=function(){
-  var managers=STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead'||x.role==='admin';});
   var roleOpts=['ra','ra_lead','bd','bd_lead','associate_director','director','admin','recruiter'].map(function(r){
     var labels={ra:'Research Analyst',ra_lead:'RA Team Lead',bd:'Manager',bd_lead:'BD Team Lead',associate_director:'Associate Director',director:'Director',admin:'Admin',recruiter:'Recruiter'};
     return '<option value="'+r+'">'+labels[r]+'</option>';
   }).join('');
+  var reportsToOpts='<option value="">— No manager —</option>'+
+    (STATE.users||[]).map(function(x){return '<option value="'+x.id+'">'+htmlEsc(x.name)+' ('+roleLabel(x.role)+')</option>';}).join('');
   STATE.modal='<div class="modal modal-w480">'+
     '<div class="mh"><div class="mt">Add new user</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
     '<div class="mb_">'+
@@ -841,6 +842,7 @@ window.openAddUser=function(){
         '<div class="fgrp"><label class="flbl">Role</label><select class="sel" id="u-role">'+roleOpts+'</select></div>'+
         '<div class="fgrp"><label class="flbl">Platform</label><select class="sel" id="u-plt"><option>Gmail</option><option>Outlook</option></select></div>'+
       '</div>'+
+      '<div class="fgrp mb3"><label class="flbl">Reports to</label><select class="sel" id="u-manager">'+reportsToOpts+'</select></div>'+
       '<div style="font-size:12px;color:var(--text3);padding:8px 10px;background:var(--bg);border-radius:var(--r)">Default password: <strong>Fute@2024</strong></div>'+
     '</div>'+
     '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
@@ -871,7 +873,8 @@ window.saveUser=function(existingId){
   var eid=(document.getElementById('u-eid')||{}).value||'';
   var desig=(document.getElementById('u-desig')||{}).value||'';
   var plt=(document.getElementById('u-plt')||{}).value||'Gmail';
-  var payload={name:name,email:email,role:role,employee_id:eid||undefined,designation:desig||undefined,platform:plt};
+  var managerId=(document.getElementById('u-manager')||{}).value||undefined;
+  var payload={name:name,email:email,role:role,employee_id:eid||undefined,designation:desig||undefined,platform:plt,manager_id:managerId};
   apiPost('/users',payload).then(function(u){
     STATE.users.push(normaliseUser(u));
     closeModal();
