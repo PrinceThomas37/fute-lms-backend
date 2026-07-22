@@ -20,7 +20,7 @@
       loading:false, rows:[], total:0, page:1, limit:25,
       q:'', filters:{ applicant_status:'', source:'', state:'', work_authorization:'',
         availability:'', experience_min:'', experience_max:'', created_from:'', created_to:'', has_resume:'' },
-      advOpen:false, form:{}, editId:null, dupMatches:[], sel:{}
+      advOpen:false, form:{}, editId:null, dupMatches:[], sel:{}, view:'grid'
     };
   }
   if (!STATE.ats.sel) STATE.ats.sel = {};
@@ -108,8 +108,24 @@
   function paintATSPage(){
     if (STATE.page !== 'applicants') return;
     var c = document.getElementById('content'); if(!c) return;
-    c.innerHTML = renderApplicants();
+    c.innerHTML = (STATE.ats.view === 'sourcing' && window.renderSourcing) ? renderSourcing() : renderApplicants();
   }
+
+  // Candidates / Sourcing sub-tabs — Sourcing used to be its own top-level nav
+  // item; it now lives inside the Candidates tab since both work the same pool.
+  window.atsSetView = function(v){
+    STATE.ats.view = v;
+    if (v === 'sourcing' && window.srcLoadForCandidatesTab) srcLoadForCandidatesTab();
+    render();
+  };
+  window.atsTabBar = function(){
+    var v = STATE.ats.view || 'grid';
+    function tab(key, label){
+      var active = v === key;
+      return '<button onclick="atsSetView(\''+key+'\')" style="padding:7px 14px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;border:1px solid '+(active?'var(--accent)':'var(--border)')+';background:'+(active?'var(--accent)':'var(--card)')+';color:'+(active?'#fff':'var(--text2)')+'">'+label+'</button>';
+    }
+    return '<div style="display:flex;gap:8px;margin-bottom:14px">'+tab('grid','All Candidates')+tab('sourcing','Sourcing')+'</div>';
+  };
 
   // ── grid ──────────────────────────────────────────────────────────────────────
   function renderApplicants(){
@@ -141,6 +157,7 @@
         '<div style="display:flex;align-items:end"><label style="font-size:12.5px;color:var(--text2);display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox"'+(f.has_resume==='1'?' checked':'')+' onchange="atsSetFilter(\'has_resume\',this.checked?\'1\':\'\')"> Has résumé</label></div>'+
       '</div>') : '';
     var toolbar =
+      atsTabBar()+
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">'+
         '<div><div style="font-size:18px;font-weight:700">Candidates</div>'+
         '<div style="font-size:12.5px;color:var(--text3)">'+(a.total||0)+' candidate'+(a.total===1?'':'s')+' in the database</div></div>'+

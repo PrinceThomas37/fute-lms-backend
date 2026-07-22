@@ -109,7 +109,8 @@ try {
     Array.from(document.querySelectorAll('.sb-nav .nav-item')).map(e => e.textContent.trim()));
   step('Nav hides Leads', !navItems.includes('Leads'), navItems.join(' | '));
   step('Nav keeps My Jobs after Dashboard', navItems[0] === 'Dashboard' && navItems[1] === 'My Jobs', navItems.join(' | '));
-  step('Nav keeps Candidates & Sourcing', navItems.includes('Candidates') && navItems.includes('Sourcing'));
+  // Sourcing moved inside the Candidates tab (a sub-tab, not its own nav item).
+  step('Nav keeps Candidates, no separate Sourcing item', navItems.includes('Candidates') && !navItems.includes('Sourcing'));
 
   // ── Job board (All Jobs) ───────────────────────────────────────────────────
   const jbNav = await page.evaluate(() =>
