@@ -224,6 +224,7 @@
         '<div style="font-size:12.5px;color:var(--text3)">'+esc(j.client||'')+'</div></div>'+
         '<div style="display:flex;gap:8px">'+
           '<button class="btn btn-outline" onclick="bdOpenEditJob(\''+j.id+'\')">Edit job</button>'+
+          '<button class="btn btn-outline" onclick="plOpenSourcing(\''+j.id+'\')">Source candidates</button>'+
           '<button class="btn btn-primary" onclick="plOpenAdd(\''+j.id+'\')">+ Add Candidate</button>'+
         '</div>'+
       '</div>'+
@@ -441,6 +442,22 @@
     var j = joById(jid) || {};
     if (window.atsOpenNew) return atsOpenNew({ jobId:jid, jobTitle:j.job_title||'', jobCode:j.job_code||'' });
     showToast('Candidate form not loaded','error');
+  };
+
+  // ── source candidates for this job ──────────────────────────────────────────
+  // Jumps to the Candidates tab's Sourcing sub-tab, pre-tagged to this job so
+  // anything imported (CSV or a job-board connector) lands straight on its
+  // pipeline instead of needing a separate "Tag to a job" step.
+  window.plOpenSourcing = function(jid){
+    var j = joById(jid) || {};
+    STATE.sourcing = STATE.sourcing || { providers:[], staged:[], sel:{}, loading:false, tagJob:'', force:false, jobs:null };
+    STATE.sourcing.tagJob = jid;
+    STATE.sourcing.jobs = [{ id:jid, job_code:j.job_code||'', job_title:j.job_title||'' }];
+    STATE.ats = STATE.ats || {};
+    STATE.ats.view = 'sourcing';
+    STATE.page = 'applicants';
+    render();
+    if (window.srcLoadForCandidatesTab) srcLoadForCandidatesTab();
   };
 
 })();
