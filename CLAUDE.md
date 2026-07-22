@@ -82,12 +82,23 @@ Ordered by "cheapest to do now vs. most painful to retrofit":
      resolves `req.orgId` (JWT carries `org_id`; falls back to the default org), and
      the core creates (candidates, job orders, pipeline, submissions, new users)
      stamp it. Behaviour is unchanged for the single existing org.
-   - **Slice 2 IN PROGRESS:** the core ATS collection reads are now org-scoped via
-     a `withOrg(query, req)` helper — `GET /candidates`, `GET /job-orders`,
-     `GET /job-orders/browse`. Still to scope: the recruiting dashboard aggregates,
-     single-record long tail, and the **leads engine** (`jobs` table via the shared
-     cached `loadAllJobs` + the email subsystem in index.js) — deliberately deferred
-     because it's the live, actively-used email system and needs its own careful pass.
+   - **Slice 2 DONE:** the core ATS collection reads are org-scoped via a
+     `withOrg(query, req)` helper — `GET /candidates`, `GET /job-orders`,
+     `GET /job-orders/browse`. **Also done (this session):** the **leads engine**
+     (`jobs`/`companies`/`contacts` in index.js + routes/jobs.js, routes/companies.js,
+     routes/contacts.js) is now org-scoped the same way — `withOrg()`/`orgStamp()`
+     helpers were added to index.js (mirroring bd_recruiter_routes.js) and threaded
+     through `routeCtx`. The `loadAllJobs()` in-memory cache (the big payload every
+     open tab polls) is now **keyed per org_id** instead of one shared global cache —
+     this was the most severe gap, since a second org would otherwise have seen the
+     first org's entire leads list. `/distribute/execute` (assigns the Unassigned
+     lead pool to a BD manager) and `/distribute/pool-stats` / `/today-summary` are
+     org-scoped too — previously an org's Unassigned pool was assignable to any
+     org's manager. Also closed: the `/recruiting-dashboard` aggregate, and the
+     single-record long tail on `GET /job-orders/:id` / `GET /candidates/:id` /
+     `GET|PUT|DELETE /jobs/:id` (404 instead of leaking a cross-org record).
+     **Still open:** the legacy `/bd-analytics/*` endpoints (un-org-scoped — item 5
+     below), and RLS (slice 3b, next).
    - **Slice 3a DONE** (migration `023`): `org_id` is now `NOT NULL` on all tenant
      tables (safe — every row backfilled + column DEFAULT).
    - **Slice 3b DEFERRED by owner decision:** enabling RLS (row-level security) with
@@ -114,9 +125,13 @@ Ordered by "cheapest to do now vs. most painful to retrofit":
      "Email JD" modal's **"✉ Send tracked through futé"** button (mail-app kept as
      fallback); the candidate profile shows an **Email activity** card ("✓ Opened · N×"
      / "Sent · not opened yet") from `GET /candidates/:id/email-activity`.
-     **Caveat:** send path is Microsoft-only for now (mirrors the existing
-     `candidate_email` channel; `recruiterSendingMailbox` only checks `microsoft_tokens`).
-     Gmail send = a small follow-up (check `gmail_tokens` + dispatch by `platform`).
+     **Gmail send DONE (this session):** `recruiterSendingMailbox` now checks both
+     `microsoft_tokens` and `gmail_tokens`; a new `sendMailboxNewMessage(mailbox, …)`
+     dispatches to the Gmail provider or Microsoft Graph by `mailbox.platform`
+     (mirrors `deliverOutboundEmail`'s existing dispatch for the general outreach
+     engine). Used by both `POST /candidates/email` and the `candidate_email`
+     sequence channel; `connectedMailboxById` (sequence "from" override) is
+     platform-aware the same way.
    - **Slice 3 DONE:** reply detection — hooked into the existing 30-min
      `sweepMailboxReplies` inbox scan (uses `Mail.ReadWrite`, already granted, so NO
      reconnect needed): an inbound message whose `from` matches a tracked send's
@@ -134,6 +149,10 @@ Ordered by "cheapest to do now vs. most painful to retrofit":
      link"** button fills it in. Added `OnlineMeetings.ReadWrite` to the MS OAuth
      scopes — **mailboxes connected before this need a one-time reconnect**; until
      then the endpoint returns 409 `meetings_permission_missing` and the UI says so.
+     **Reconnect UI added (this session):** a "Reconnect" link now sits next to the
+     "✓ Connected" badge (Manager Users, and the workflow mailbox picker) — before
+     this there was no way to redo OAuth on an already-connected mailbox short of
+     deleting and re-adding it.
      **Next:** Google Meet (needs a Google Calendar scope/connection); Zoom (new OAuth).
 4. **Candidate ↔ JD match scoring / ranking** — we already parse resumes and JDs; add a
    match score (AI when a key is set, rule-based fallback). On-trend differentiator.
