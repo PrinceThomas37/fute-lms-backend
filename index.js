@@ -1017,14 +1017,18 @@ async function resolveSentMessageId(accessToken, { conversationId, toEmail, fall
   return { id: fallbackId, conversationId };
 }
 
-async function sendMicrosoftNewMessage(userEmailId, { to, subject, htmlBody }) {
+async function sendMicrosoftNewMessage(userEmailId, { to, subject, htmlBody, attachments }) {
   const accessToken = await getMicrosoftToken(userEmailId);
   const msg = await graphMailRequest(accessToken, '/me/messages', {
     method: 'POST',
     body: JSON.stringify({
       subject,
       body: { contentType: 'HTML', content: htmlBody },
-      toRecipients: [{ emailAddress: { address: to } }]
+      toRecipients: [{ emailAddress: { address: to } }],
+      ...((attachments && attachments.length) ? { attachments: attachments.map(a => ({
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: a.filename, contentType: a.contentType || 'application/octet-stream', contentBytes: a.base64
+      })) } : {})
     })
   });
   await graphMailRequest(accessToken, `/me/messages/${msg.id}/send`, { method: 'POST' });
@@ -2701,12 +2705,37 @@ async function recruiterSendingMailbox(recruiterId) {
 // Dispatch a fresh outbound message by the mailbox's connected platform —
 // the Microsoft/Gmail counterpart to sendMicrosoftNewMessage alone. Both
 // providers return a message + thread/conversation id in the same shape.
-async function sendMailboxNewMessage(mailbox, { to, subject, htmlBody }) {
+async function sendMailboxNewMessage(mailbox, { to, subject, htmlBody, attachments }) {
   if (mailbox.platform === 'Gmail') {
-    const r = await gmailProvider.sendNewMessage(mailbox.id, { to, subject, htmlBody, fromAddress: mailbox.email_address });
+    const r = await gmailProvider.sendNewMessage(mailbox.id, { to, subject, htmlBody, attachments, fromAddress: mailbox.email_address });
     return { graphMessageId: r.messageId, conversationId: r.threadId || null, inReplyTo: null };
   }
-  return sendMicrosoftNewMessage(mailbox.id, { to, subject, htmlBody });
+  return sendMicrosoftNewMessage(mailbox.id, { to, subject, htmlBody, attachments });
+}
+
+// Resolve document_ids (from candidate_documents or client_documents) into
+// {filename, contentType, base64} attachment payloads, downloading each from
+// the private candidate-docs bucket. Best-effort: a document that fails to
+// download is silently skipped rather than blocking the whole send. Caps
+// total attached bytes so a send can't blow past provider/API limits.
+const MAX_EMAIL_ATTACH_BYTES = 18 * 1024 * 1024;
+async function resolveEmailAttachments(table, ids) {
+  if (!ids || !ids.length) return [];
+  const { data: docs } = await supabase.from(table).select('id,filename,content_type,storage_path')
+    .in('id', ids).is('deleted_at', null);
+  const out = [];
+  let total = 0;
+  for (const d of (docs || [])) {
+    try {
+      const { data, error } = await supabase.storage.from('candidate-docs').download(d.storage_path);
+      if (error || !data) continue;
+      const buf = Buffer.from(await data.arrayBuffer());
+      if (total + buf.length > MAX_EMAIL_ATTACH_BYTES) continue;
+      total += buf.length;
+      out.push({ filename: d.filename, contentType: d.content_type || 'application/octet-stream', base64: buf.toString('base64') });
+    } catch (_) { /* skip this one, best-effort */ }
+  }
+  return out;
 }
 
 // A specific mailbox by id, but only if it's active AND connected — used by
@@ -2793,6 +2822,7 @@ app.post('/candidates/email', auth, async (req, res) => {
 
     const signature = await getMailboxSignature(mailbox.id, req.user.id).catch(() => '');
     const suppressed = await loadSuppressedSet(recipients.map(r => r.email).filter(Boolean));
+    const attachments = await resolveEmailAttachments('candidate_documents', b.document_ids);
     const orgId = req.orgId || null;
     const results = [];
     for (const r of recipients) {
@@ -2802,7 +2832,7 @@ app.post('/candidates/email', auth, async (req, res) => {
       const token = newTrackToken();
       const htmlBody = injectTrackPixel(buildHtmlEmailBody(bodyText, signature), token);
       try {
-        await sendMailboxNewMessage(mailbox, { to, subject, htmlBody });
+        await sendMailboxNewMessage(mailbox, { to, subject, htmlBody, attachments });
         await supabase.from('email_tracking').insert({
           token, channel: 'candidate', candidate_id: r.candidate_id || null,
           job_order_id: b.job_order_id || null, to_email: to, subject,
@@ -2824,6 +2854,47 @@ app.post('/candidates/email', auth, async (req, res) => {
       );
     }
     res.json({ mailbox: mailbox.email_address, sent: sentCount, results });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Tracked email to a client contact, with optional client-document
+// attachments — the client-side counterpart to /candidates/email. BD only
+// (clients are a BD concept; recruiters only ever email candidates).
+app.post('/companies/:id/email', auth, async (req, res) => {
+  try {
+    if (req.user.isGuest) return res.status(403).json({ error: 'Guests cannot send email.' });
+    if (!hasRole(req, 'admin', 'bd', 'bd_lead')) return res.status(403).json({ error: 'BD role required.' });
+    const b = req.body || {};
+    const to = String(b.to || '').trim();
+    const subject = String(b.subject || '').trim();
+    const bodyText = String(b.body || '');
+    if (!to || !emailSyntaxValid(to)) return res.status(400).json({ error: 'A valid recipient email is required.' });
+    if (!subject) return res.status(400).json({ error: 'Subject is required.' });
+
+    const mailbox = await recruiterSendingMailbox(req.user.id);
+    if (!mailbox) return res.status(409).json({ error: 'no_connected_mailbox' });
+
+    const suppressed = await loadSuppressedSet([to]);
+    if (suppressed.has(to.toLowerCase())) return res.status(409).json({ error: 'This address has opted out of email from us.' });
+
+    const signature = await getMailboxSignature(mailbox.id, req.user.id).catch(() => '');
+    const attachments = await resolveEmailAttachments('client_documents', b.document_ids);
+    const token = newTrackToken();
+    const htmlBody = injectTrackPixel(buildHtmlEmailBody(bodyText, signature), token);
+    const orgId = req.orgId || null;
+    await sendMailboxNewMessage(mailbox, { to, subject, htmlBody, attachments });
+    await supabase.from('email_tracking').insert({
+      token, channel: 'client', company_id: req.params.id, to_email: to, subject,
+      sent_by: req.user.id, mailbox_email: mailbox.email_address || null,
+      ...(orgId ? { org_id: orgId } : {})
+    });
+    const { data: sendLog } = await supabase.from('email_send_log')
+      .select('id,emails_sent').eq('send_date', today()).eq('user_email_id', mailbox.id).maybeSingle();
+    await supabase.from('email_send_log').upsert(
+      { user_email_id: mailbox.id, send_date: today(), emails_sent: (sendLog?.emails_sent || 0) + 1 },
+      { onConflict: 'user_email_id,send_date' }
+    );
+    res.json({ mailbox: mailbox.email_address, sent: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
