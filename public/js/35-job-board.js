@@ -17,7 +17,7 @@
     }catch(e){ return ''; }
   }
 
-  STATE.jb = STATE.jb || { list:null, loading:false, q:'', modalJob:null, subs:null, subsMasked:false, subsLoading:false };
+  STATE.jb = STATE.jb || { list:null, loading:false, q:'', modalJob:null };
 
   // ── render / nav / routing hooks ───────────────────────────────────────────
   var _prevRender = window.render;
@@ -138,39 +138,31 @@
     if (inp){ inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
   };
 
-  // ── job detail modal (candidates masked until assigned) ────────────────────
+  // ── job detail modal ─────────────────────────────────────────────────────────
+  // Client/job information only — no candidate names or details, whether or not
+  // the viewer is assigned. That lives on the job's own pipeline (reached via
+  // "On your desk — open" once assigned); this popup is purely "should I ask to
+  // work this req?" context.
   window.jbOpenJob = function(id){
-    STATE.jb.modalJob = id; STATE.jb.subs = null; STATE.jb.subsMasked = false; STATE.jb.subsLoading = true;
+    STATE.jb.modalJob = id;
     paint();
-    apiGet('/job-orders/'+id+'/submissions').then(function(d){
-      if (d && d.masked){ STATE.jb.subs = d.submissions||[]; STATE.jb.subsMasked = true; }
-      else { STATE.jb.subs = d||[]; STATE.jb.subsMasked = false; }
-      STATE.jb.subsLoading = false; paint();
-    }).catch(function(){ STATE.jb.subs = []; STATE.jb.subsLoading = false; paint(); });
   };
   window.jbCloseModal = function(){ STATE.jb.modalJob = null; paint(); };
+
+  function remoteLabel(r){ return r==='Yes'?'Remote':r==='Hybrid'?'Hybrid':r==='No'?'Onsite':(r||''); }
+  function fmtDate(s){ if(!s)return ''; try{ var d=new Date(s); return (d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear(); }catch(e){ return ''; } }
 
   function modalHtml(){
     var id = STATE.jb.modalJob; if (!id) return '';
     var j = (STATE.jb.list||[]).find(function(x){ return x.id===id; }); if (!j) return '';
     var loc = [j.city,j.state,j.country].filter(Boolean).join(', ');
+    var pay = (j.pay_min||j.pay_max) ? ((j.pay_cur||'USD')+' '+(j.pay_min||'?')+'–'+(j.pay_max||'?')) : '';
 
     function dr(lbl,val){ return val?'<div style="font-size:12.5px;margin-bottom:4px"><span style="color:var(--text3)">'+lbl+': </span>'+esc(val)+'</div>':''; }
 
-    var subsRows;
-    if (STATE.jb.subsLoading) subsRows = '<div style="padding:14px;text-align:center;color:var(--text3);font-size:13px">Loading candidates…</div>';
-    else if (!(STATE.jb.subs||[]).length) subsRows = '<div style="padding:14px;text-align:center;color:var(--text3);font-size:13px">No candidates on this job yet.</div>';
-    else subsRows = (STATE.jb.subs||[]).map(function(s){
-      var c = s.candidate||{};
-      var who = s.recruiter && s.recruiter.name ? ' · by '+esc(s.recruiter.name) : '';
-      return '<div style="display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--border)">'+
-        '<div style="flex:1;min-width:0">'+
-          '<div style="font-size:13px;font-weight:600">'+esc(c.full_name||'Candidate')+' <span style="font-family:var(--mono);font-size:10.5px;color:var(--text3)">'+esc(c.candidate_code||'')+'</span></div>'+
-          '<div style="font-size:11.5px;color:var(--text3)">'+esc(c.current_title||'')+([c.city,c.state].filter(Boolean).length?' · '+esc([c.city,c.state].filter(Boolean).join(', ')):'')+who+'</div>'+
-        '</div>'+
-        '<span style="font-size:11px;color:var(--accent);white-space:nowrap">'+esc(s.stage||'')+'</span>'+
-      '</div>';
-    }).join('');
+    var descBody = j.job_description
+      ? '<div style="font-size:13px;line-height:1.5;white-space:pre-wrap;max-height:180px;overflow:auto">'+esc(j.job_description)+'</div>'
+      : '<div style="font-size:12.5px;color:var(--text3);font-style:italic">No job description provided yet.</div>';
 
     return '<div onclick="jbCloseModal()" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:90;display:flex;align-items:center;justify-content:center;padding:20px">'+
       '<div onclick="event.stopPropagation()" style="background:var(--card);border-radius:var(--r3);max-width:640px;width:100%;max-height:86vh;overflow:auto;padding:22px 24px">'+
@@ -183,12 +175,14 @@
           '<button class="btn btn-sm btn-outline" onclick="jbCloseModal()">✕</button>'+
         '</div>'+
         '<div style="margin:12px 0;padding-top:12px;border-top:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr;gap:6px">'+
-          dr('Job Type',j.job_type)+dr('Level',j.emp_level)+dr('Remote',j.remote)+dr('Positions',j.positions)+
-          dr('Priority',j.priority)+dr('Skills',j.primary_skills)+
+          dr('Pay Rate',pay)+dr('Work Style',remoteLabel(j.remote))+
+          dr('Job Type',j.job_type)+dr('Level',j.emp_level)+
+          dr('Work Authorization',j.work_auth)+dr('Positions',j.positions)+
+          dr('Needed By',fmtDate(j.start_date))+dr('Priority',j.priority)+
+          dr('Primary Skills',j.primary_skills)+dr('Secondary Skills',j.secondary_skills)+
         '</div>'+
-        '<div style="margin:6px 0 4px;font-weight:600;font-size:13.5px">Candidates on this job ('+((STATE.jb.subs||[]).length)+')</div>'+
-        (STATE.jb.subsMasked?'<div style="font-size:11.5px;color:var(--amber);background:var(--amber-l);border-radius:8px;padding:6px 10px;margin-bottom:6px">🔒 Contact details are hidden — they unlock when you\'re assigned to this job.</div>':'')+
-        subsRows+
+        '<div style="margin:10px 0 4px;font-weight:600;font-size:13.5px">Job Description</div>'+
+        descBody+
         '<div style="margin-top:14px">'+actionBtn(j)+'</div>'+
       '</div>'+
     '</div>';

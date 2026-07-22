@@ -121,19 +121,17 @@ try {
     // stub the API so the board's real load path runs against fixed data
     const browse = [
       { id: 'b1', job_code: 'JO-201', job_title: 'React Developer', client: 'Stark Industries', city: 'NYC', state: 'NY',
-        status: 'Active', priority: 'High', recruiters: ['Alice'], submission_count: 6, assigned_to_me: false, my_request: null },
+        status: 'Active', priority: 'High', recruiters: ['Alice'], submission_count: 6, assigned_to_me: false, my_request: null,
+        job_description: 'Build the front-end for a new internal tool.', pay_cur: 'USD', pay_min: '60', pay_max: '80',
+        remote: 'Hybrid', work_auth: 'US Citizen', start_date: '2026-09-01' },
       { id: 'b2', job_code: 'JO-202', job_title: 'Cloud Architect', client: 'Wayne Ent', city: 'Gotham', state: 'NJ',
         status: 'Active', priority: 'Normal', recruiters: [], submission_count: 0, assigned_to_me: true, my_request: null },
       { id: 'b3', job_code: 'JO-203', job_title: 'ML Engineer', client: 'Oscorp', city: 'SF', state: 'CA',
         status: 'On Hold', priority: 'Normal', recruiters: ['Bob'], submission_count: 2, assigned_to_me: false, my_request: { id: 'r1', status: 'pending' } }
     ];
-    const maskedSubs = { masked: true, submissions: [
-      { id: 's1', stage: 'Screening', candidate: { id: 'c1', candidate_code: 'CAND-9', full_name: 'Peter Parker', current_title: 'Frontend Dev', city: 'Queens', state: 'NY' }, recruiter: { name: 'Alice' } }
-    ]};
     const _origApiGet = window.apiGet;
     window.apiGet = function(p){
       if (p === '/job-orders/browse') return Promise.resolve(JSON.parse(JSON.stringify(browse)));
-      if (/^\/job-orders\/b\d+\/submissions$/.test(p)) return Promise.resolve(JSON.parse(JSON.stringify(maskedSubs)));
       return _origApiGet.apply(this, arguments);
     };
     STATE.jb.list = null;
@@ -147,13 +145,13 @@ try {
   step('Assigned job shows On your desk', board.includes('On your desk'));
   step('Pending request shows waiting state', board.includes('Requested — waiting on BD'));
 
-  // masked candidate modal — through the real fetch path (stubbed API)
+  // job popup — client/job info only, no candidates, whether or not assigned
   await page.evaluate(() => { jbOpenJob('b1'); });
   await page.waitForTimeout(300);
   const modal = await page.evaluate(() => document.getElementById('content').innerHTML);
-  step('Modal shows candidate name + stage', modal.includes('Peter Parker') && modal.includes('Screening'));
-  step('Modal shows contact-lock notice', modal.includes('Contact details are hidden'));
-  step('Modal never leaks contacts', !modal.includes('@') || !/[\w.]+@[\w.]+/.test((modal.match(/Peter[^<]*/)||[''])[0]));
+  step('Modal shows job description', modal.includes('Build the front-end for a new internal tool'));
+  step('Modal shows pay, work style, needed-by', modal.includes('60') && modal.includes('Hybrid') && modal.includes('Needed By'));
+  step('Modal has no candidate list/masking language', !modal.includes('Candidates on this job') && !modal.includes('Contact details are hidden'));
   await page.evaluate(() => { jbCloseModal(); goPage('dashboard'); });
   await page.waitForTimeout(200);
 
