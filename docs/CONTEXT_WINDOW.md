@@ -14,8 +14,11 @@
 
 ## Session 4 — this session
 
-Picked up 3 items the owner chose off Session 3's "open next candidates" list, in
-the order given. Not yet merged — see PR opened at the end of this session.
+**Part 1** picked up 3 items the owner chose off Session 3's "open next candidates"
+list — shipped as PR #114, merged and live. **Part 2** (below) is a 14-item punch
+list the owner listed right after Part 1 deployed — all 14 are done, sitting in
+draft PR #115 (`claude/context-window-resume-m04j2e` → `main`), not yet merged as
+of this update.
 
 1. **Mailbox Reconnect UI.** The Teams-meeting-create feature (PR #111) added a new
    OAuth scope (`OnlineMeetings.ReadWrite`), so already-connected Microsoft mailboxes
@@ -62,7 +65,90 @@ the order given. Not yet merged — see PR opened at the end of this session.
 
 All 17 test suites pass; `bash test/verify-frontend.sh` passes. Screenshot taken of
 the new Reconnect button (Manager Users page) — the other two changes are backend
-plumbing with no visible UI change today.
+plumbing with no visible UI change today. **PR #114, merged.**
+
+---
+
+## Session 4, Part 2 — the 14-item punch list
+
+The owner listed 14 items in one message after trying the live Part-1 deploy. I
+triaged into quick fixes → a couple of medium items → two bigger foundational
+pieces (team hierarchy, then documents/clients, since reports depends on the
+hierarchy). Owner explicitly said to use my own judgment on design rather than
+being asked clarifying questions, so I made the calls noted below and flagged them
+in commit messages / the PR description rather than blocking on questions.
+
+**Quick fixes:**
+- Removed the stray "+ Enroll leads…" button from the admin per-manager panel
+  (and ~80 lines of code it was the only entry point for).
+- **Stale-name bug, root-caused:** `STATE.users` was fetched once at login and
+  never refreshed — a name change was instant only in the editor's own tab. Added
+  `/users` to the existing 3-minute background poll (jobs already did this).
+- Job cards (detail view + company job board) now show "BD Manager" (+ "Created
+  by" when different). `/job-orders/browse`'s select didn't even join
+  `bd_manager_id` before.
+- **Sourcing moved inside the Candidates tab** as a sub-tab ("All Candidates" /
+  "Sourcing") instead of its own nav item; each job also got a **"Source
+  candidates"** button that pre-tags imports to it.
+- **Zip-code autocomplete** (`40-zip-autocomplete.js`, reusable, DOM-patches only
+  its own suggestion box so typing never loses focus) added to the Candidate and
+  Job Order forms — state was already a dropdown in both.
+- **BD Jobs page** split into My Jobs / All Jobs tabs with counts (defaults to All
+  Jobs so nothing looks different until you click).
+- **Candidate profile** got an always-available **"✉ Email"** button (BD and
+  recruiter both) — reuses the existing tracked-send modal, pre-seeded with one
+  recipient. `plShowEmailJDModal()` exposed on `window` so any page can reuse it.
+- **Job board popup redesigned:** client/job info only (description, pay, work
+  style, work auth, needed-by date, priority, skills) — no candidate names, for
+  anyone, assigned or not. Previously showed a masked-but-still-named candidate
+  list that was never actually useful for "should I ask to work this req?"
+
+**Team hierarchy (migration `026`):**
+- `users.manager_id`, self-referencing, nullable. Deliberately a **flexible
+  tree** — any user can report to any other user regardless of role — per the
+  owner's explicit clarification mid-session, not a hard-coded RA→BD→BDLead
+  ladder. Two new roles: Associate Director, Director (added to every role
+  picker in the app).
+- This is **additive alongside** the existing `team_assignments` table (which
+  already drives some Insights pages) — left untouched, since replacing it was
+  out of scope and riskier than needed for what was asked.
+- Admin-only `PUT /users/:id/manager` (rejects self-management + walks the
+  chain to reject reporting loops). New **"Reporting Hierarchy"** card on the
+  Admin user detail page: "Reports to" picker + live "Direct reports" list.
+- `/reports/recruiting` now hierarchy-scoped via `reportingChainIds()` (BFS over
+  `manager_id`): a BD with no reports sees their own numbers; a BD Lead sees
+  their whole team's; admin still sees the whole org. Response carries
+  `scope`/`team_size` instead of the old binary `role` field.
+  **Note left for the owner:** a BD Lead needs their reports set up in Admin's
+  new card before they'll see team data — until then they see only their own,
+  same as anyone else.
+  **Still open:** folding Reports into the Dashboard page itself (today it's
+  still a separate nav item), and hierarchy-scoping the main Dashboard's own
+  recruiting widgets (`/recruiting-dashboard` still uses the old binary split).
+
+**Clients + document attach/send (migration `027`), the last item:**
+- "Clients" aren't a new table — they're `companies` (same table the leads
+  engine uses) that have ≥1 `job_order`, i.e. converted business. New **Clients**
+  nav tab, BD/admin only (verified recruiters don't get it).
+- `client_documents` table, reusing the existing private `candidate-docs`
+  storage bucket under a `client/<company_id>/...` prefix (no new bucket).
+- **Real email attachments, for the first time anywhere in the app:**
+  `sendMicrosoftNewMessage` takes an `attachments` array (Graph
+  `fileAttachment`); Gmail's `buildRaw()` now builds `multipart/mixed` MIME with
+  base64 parts when attachments are present. `resolveEmailAttachments()` in
+  index.js downloads from storage, best-effort (a failed doc is skipped, not
+  fatal), capped ~18MB/send.
+- `POST /candidates/email` takes `document_ids` now; the candidate profile's
+  Documents card is selectable with an "Email selected" action.
+- New `POST /companies/:id/email` (BD-only) is the client-side counterpart, plus
+  `GET /clients`, `GET/POST/DELETE /companies/:id/documents`,
+  `GET /companies/:id/job-orders`.
+
+All 19 test suites pass (2 new: `40-zip-autocomplete.js`, `41-page-clients.js`);
+`bash test/verify-frontend.sh` passes. Screenshotted: Sourcing sub-tab, the
+redesigned job popup, the Reporting Hierarchy card working end-to-end, and the
+Clients list + detail page. **PR #115, draft — awaiting the owner's look before
+merge.**
 
 ---
 
