@@ -110,6 +110,7 @@
         '</div>'+
         '<div style="font-weight:600;font-size:15px;margin-bottom:3px">'+esc(j.job_title||'')+pr+'</div>'+
         '<div style="font-size:12.5px;color:var(--text3);margin-bottom:10px">'+esc(j.client||(j.company&&j.company.name)||'')+(loc?' · '+esc(loc):'')+'</div>'+
+        (j.bd_manager&&j.bd_manager.name?'<div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">BD Manager: <span style="color:var(--text2);font-weight:500">'+esc(j.bd_manager.name)+'</span></div>':'')+
         '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;font-size:11.5px;color:var(--text3)">'+
           '<span>'+(recs.length?('👥 '+esc(recs.slice(0,3).join(', '))+(recs.length>3?' +'+(recs.length-3):'')):'No recruiters yet')+'</span>'+
           '<span style="white-space:nowrap">'+(j.submission_count||0)+' subs</span>'+

@@ -35,7 +35,10 @@
     var pay = (j.pay_min||j.pay_max) ? ((j.pay_cur||'USD')+' '+(j.pay_min||'?')+'–'+(j.pay_max||'?')) : '';
     var exp = (j.exp_min||j.exp_max) ? ((j.exp_min||'0')+'–'+(j.exp_max||'?')+' yrs') : '';
     function dr(lbl,val){ return val?'<div style="font-size:12.5px;margin-bottom:4px"><span style="color:var(--text3)">'+esc(lbl)+': </span>'+esc(val)+'</div>':''; }
-    var grid = dr('Location',loc)+dr('Pay Rate',pay)+dr('Job Type',j.job_type)+
+    var bdName = j.bd_manager && j.bd_manager.name;
+    var creatorName = j.creator && j.creator.name;
+    var grid = dr('BD Manager',bdName)+(creatorName&&creatorName!==bdName?dr('Created by',creatorName):'')+
+      dr('Location',loc)+dr('Pay Rate',pay)+dr('Job Type',j.job_type)+
       dr('Employment Level',j.emp_level)+dr('Work Authorization',j.work_auth)+dr('Remote',j.remote)+
       dr('Priority',j.priority)+dr('Positions',j.positions)+dr('Experience',exp)+
       dr('Primary Skills',j.primary_skills)+dr('Secondary Skills',j.secondary_skills)+dr('Industry',j.industry);
