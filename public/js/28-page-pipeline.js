@@ -35,7 +35,10 @@
     var pay = (j.pay_min||j.pay_max) ? ((j.pay_cur||'USD')+' '+(j.pay_min||'?')+'–'+(j.pay_max||'?')) : '';
     var exp = (j.exp_min||j.exp_max) ? ((j.exp_min||'0')+'–'+(j.exp_max||'?')+' yrs') : '';
     function dr(lbl,val){ return val?'<div style="font-size:12.5px;margin-bottom:4px"><span style="color:var(--text3)">'+esc(lbl)+': </span>'+esc(val)+'</div>':''; }
-    var grid = dr('Location',loc)+dr('Pay Rate',pay)+dr('Job Type',j.job_type)+
+    var bdName = j.bd_manager && j.bd_manager.name;
+    var creatorName = j.creator && j.creator.name;
+    var grid = dr('BD Manager',bdName)+(creatorName&&creatorName!==bdName?dr('Created by',creatorName):'')+
+      dr('Location',loc)+dr('Pay Rate',pay)+dr('Job Type',j.job_type)+
       dr('Employment Level',j.emp_level)+dr('Work Authorization',j.work_auth)+dr('Remote',j.remote)+
       dr('Priority',j.priority)+dr('Positions',j.positions)+dr('Experience',exp)+
       dr('Primary Skills',j.primary_skills)+dr('Secondary Skills',j.secondary_skills)+dr('Industry',j.industry);
@@ -221,6 +224,7 @@
         '<div style="font-size:12.5px;color:var(--text3)">'+esc(j.client||'')+'</div></div>'+
         '<div style="display:flex;gap:8px">'+
           '<button class="btn btn-outline" onclick="bdOpenEditJob(\''+j.id+'\')">Edit job</button>'+
+          '<button class="btn btn-outline" onclick="plOpenSourcing(\''+j.id+'\')">Source candidates</button>'+
           '<button class="btn btn-primary" onclick="plOpenAdd(\''+j.id+'\')">+ Add Candidate</button>'+
         '</div>'+
       '</div>'+
@@ -320,17 +324,20 @@
     STATE.bd._emailJD = { jid:jid, subject:subject, body:body, recips:recips };
     plShowEmailJDModal();
   };
-  function plShowEmailJDModal(){
+  // Exposed so any page can open the same compose/tracked-send modal by
+  // pre-seeding STATE.bd._emailJD (e.g. the candidate profile's "Email" button).
+  window.plShowEmailJDModal = function plShowEmailJDModal(){
     var d = STATE.bd._emailJD; if(!d) return;
     var withEmail = d.recips.filter(function(r){ return r.email; });
     var noEmail = d.recips.filter(function(r){ return !r.email; });
     var chips = withEmail.map(function(r){ return '<span style="background:var(--accent-l,rgba(30,122,60,.1));border:1px solid var(--border);border-radius:12px;padding:2px 9px;font-size:11.5px">'+esc(r.name)+' · '+esc(r.email)+'</span>'; }).join(' ');
     var warn = noEmail.length ? '<div style="font-size:11.5px;color:var(--amber);margin-top:8px">⚠ '+noEmail.length+' selected candidate'+(noEmail.length>1?'s have':' has')+' no email on file and will be skipped: '+esc(noEmail.map(function(r){return r.name;}).join(', '))+'</div>' : '';
+    var docCount = (d.documentIds||[]).length;
     STATE.modal =
       '<div class="modal modal-w720" onclick="event.stopPropagation()">'+
         '<div style="padding:16px 20px;border-bottom:1px solid var(--border)">'+
           '<div style="font-weight:700;font-size:16px">Email the job to '+withEmail.length+' candidate'+(withEmail.length>1?'s':'')+'</div>'+
-          '<div style="font-size:11.5px;color:var(--text3);margin-top:2px">Review the invitation, then open it in your mail app. Candidates are BCC\'d so they can\'t see each other.</div>'+
+          '<div style="font-size:11.5px;color:var(--text3);margin-top:2px">Review the invitation, then open it in your mail app. Candidates are BCC\'d so they can\'t see each other.'+(docCount?' '+docCount+' document'+(docCount>1?'s':'')+' will be attached (tracked send only).':'')+'</div>'+
         '</div>'+
         '<div style="padding:16px 20px">'+
           '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:6px">RECIPIENTS</div>'+
@@ -359,7 +366,7 @@
     var recipients = d.recips.filter(function(r){ return r.email; }).map(function(r){ return { candidate_id:r.candidate_id||null, email:r.email, name:r.name }; });
     if(!recipients.length){ showToast('No valid recipient emails','error'); return; }
     showToast('Sending…','info');
-    apiPost('/candidates/email', { recipients:recipients, subject:subject, body:body, job_order_id:d.jid })
+    apiPost('/candidates/email', { recipients:recipients, subject:subject, body:body, job_order_id:d.jid, document_ids:d.documentIds||[] })
       .then(function(r){
         var sent=r.sent||0;
         showToast(sent+' email'+(sent!==1?'s':'')+' sent & tracked'+(r.mailbox?' from '+r.mailbox:''),'success');
@@ -438,6 +445,22 @@
     var j = joById(jid) || {};
     if (window.atsOpenNew) return atsOpenNew({ jobId:jid, jobTitle:j.job_title||'', jobCode:j.job_code||'' });
     showToast('Candidate form not loaded','error');
+  };
+
+  // ── source candidates for this job ──────────────────────────────────────────
+  // Jumps to the Candidates tab's Sourcing sub-tab, pre-tagged to this job so
+  // anything imported (CSV or a job-board connector) lands straight on its
+  // pipeline instead of needing a separate "Tag to a job" step.
+  window.plOpenSourcing = function(jid){
+    var j = joById(jid) || {};
+    STATE.sourcing = STATE.sourcing || { providers:[], staged:[], sel:{}, loading:false, tagJob:'', force:false, jobs:null };
+    STATE.sourcing.tagJob = jid;
+    STATE.sourcing.jobs = [{ id:jid, job_code:j.job_code||'', job_title:j.job_title||'' }];
+    STATE.ats = STATE.ats || {};
+    STATE.ats.view = 'sourcing';
+    STATE.page = 'applicants';
+    render();
+    if (window.srcLoadForCandidatesTab) srcLoadForCandidatesTab();
   };
 
 })();

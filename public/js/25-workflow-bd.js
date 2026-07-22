@@ -37,6 +37,7 @@
       leadSel:{},
       jobFilter:{state:"",status:"",job_type:"",priority:"",remote:""},
       jobFilterOpen:false,
+      jobsView:'all',
       _filterDocBound:false,
       _convertQueue:null
     };
@@ -219,7 +220,11 @@
   window.renderJobOrders=function(){
     if(STATE.bd.loading)return '<div class="page"><div style="text-align:center;padding:60px;color:var(--text3)">Loading jobs…</div></div>';
     var f=STATE.bd.jobFilter;
-    var rows=STATE.bd.jobOrders.filter(function(j){
+    var all=STATE.bd.jobOrders;
+    var mine=all.filter(function(j){return j.bd_manager&&j.bd_manager.id===STATE.user.id;});
+    var view=STATE.bd.jobsView||'all';
+    var base=view==='mine'?mine:all;
+    var rows=base.filter(function(j){
       if(f.state&&(j.state||'')!==f.state)return false;
       if(f.status&&(j.status||'')!==f.status)return false;
       if(f.job_type&&(j.job_type||'')!==f.job_type)return false;
@@ -228,6 +233,12 @@
       return true;
     });
     var activeCount=['state','status','job_type','priority','remote'].filter(function(k){return f[k];}).length;
+    var jobsTabBar='<div style="display:flex;gap:8px;margin-bottom:12px">'+
+      ['mine','all'].map(function(v){
+        var on=view===v, n=v==='mine'?mine.length:all.length, lbl=v==='mine'?'My Jobs':'All Jobs';
+        return '<button onclick="bdSetJobsView(\''+v+'\')" style="padding:7px 14px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;border:1px solid '+(on?'var(--accent)':'var(--border)')+';background:'+(on?'var(--accent)':'var(--card)')+';color:'+(on?'#fff':'var(--text2)')+'">'+lbl+' ('+n+')</button>';
+      }).join('')+
+    '</div>';
     function fopt(key,all,list){return '<select class="sel" onchange="bdSetJobFilter(\''+key+'\',this.value)"><option value="">'+all+'</option>'+list.map(function(s){return '<option value="'+esc(s)+'"'+(f[key]===s?' selected':'')+'>'+esc(s)+'</option>';}).join("")+'</select>';}
     var body=rows.map(function(j){
       var recs=j.recruiters||[];
@@ -245,8 +256,9 @@
       '</tr>';
     }).join("");
     return '<div class="page">'+
+      jobsTabBar+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
-        '<div style="font-size:13px;color:var(--text3)">All jobs. Convert a connected lead from the Leads page, or create one here.</div>'+
+        '<div style="font-size:13px;color:var(--text3)">'+(view==='mine'?'Jobs you manage.':'Every job in the company.')+' Convert a connected lead from the Leads page, or create one here.</div>'+
         '<div style="display:flex;gap:8px;align-items:center;position:relative">'+
           '<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();bdToggleFilter()" title="Filters">'+
             '<span style="display:inline-flex;align-items:center;gap:6px">'+
@@ -276,6 +288,7 @@
       '</div>'+
     '</div>';
   };
+  window.bdSetJobsView=function(v){STATE.bd.jobsView=v;render();};
   window.bdSetJobFilter=function(k,v){STATE.bd.jobFilter[k]=v;STATE.bd.jobFilterOpen=true;render();};
   window.bdClearJobFilter=function(){STATE.bd.jobFilter={state:"",status:"",job_type:"",priority:"",remote:""};render();};
   window.bdToggleFilter=function(){STATE.bd.jobFilterOpen=!STATE.bd.jobFilterOpen;render();};
@@ -345,6 +358,11 @@
 
   window.bdFormSet=function(k,v){STATE.bd.form[k]=v;};
   window.bdFormTab=function(t){STATE.bd.form.tab=t;renderNewJobModal();};
+  window.bdZipPick=function(place){
+    var f=STATE.bd.form;
+    f.zip=place.zip||f.zip; f.city=place.city||f.city; f.state=place.state||f.state;
+    renderNewJobModal();
+  };
 
   function renderNewJobModal(){
     var f=STATE.bd.form;
@@ -367,7 +385,7 @@
         fld('Country',inp('country'))+
         fld('State',selBlank('state',US_STATES))+
         fld('City',inp('city'))+
-        fld('Zip',inp('zip'))+
+        fld('Zip',zipAcHTML('bd-zip',f.zip,'bdZipPick'))+
         fld('Start Date','<input type="date" class="sel" value="'+esc(f.start_date)+'" onchange="bdFormSet(\'start_date\',this.value)">')+
         fld('End Date','<input type="date" class="sel" value="'+esc(f.end_date)+'" onchange="bdFormSet(\'end_date\',this.value)">')+
         fld('Duration',inp('duration','e.g. 6 months'))+

@@ -822,8 +822,8 @@ window.toggleBDAssign=function(role){
 };
 window.openAddUser=function(){
   var managers=STATE.users.filter(function(x){return x.role==='bd'||x.role==='bd_lead'||x.role==='admin';});
-  var roleOpts=['ra','ra_lead','bd','bd_lead','admin','recruiter'].map(function(r){
-    var labels={ra:'Research Analyst',ra_lead:'RA Team Lead',bd:'Manager',bd_lead:'BD Team Lead',admin:'Admin',recruiter:'Recruiter'};
+  var roleOpts=['ra','ra_lead','bd','bd_lead','associate_director','director','admin','recruiter'].map(function(r){
+    var labels={ra:'Research Analyst',ra_lead:'RA Team Lead',bd:'Manager',bd_lead:'BD Team Lead',associate_director:'Associate Director',director:'Director',admin:'Admin',recruiter:'Recruiter'};
     return '<option value="'+r+'">'+labels[r]+'</option>';
   }).join('');
   STATE.modal='<div class="modal modal-w480">'+

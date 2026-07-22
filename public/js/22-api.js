@@ -34,7 +34,7 @@ function normaliseUser(u){
   var roles=u.roles||(u.role?[u.role]:[]);
   var primaryRole=roles[0]||u.role||'ra';
   var roleAvc={admin:'av-admin',bd:'av-bd',ra:'av-ra',ra_lead:'av-admin',bd_lead:'av-bd'};
-  return{id:u.id,name:nm,email:u.email,role:primaryRole,roles:roles,empId:u.employee_id,desig:u.designation,plt:u.platform||'Gmail',ooo:u.ooo_until||null,av:initials.toUpperCase()||'?',avc:roleAvc[primaryRole]||'av-ra',bdm:null};
+  return{id:u.id,name:nm,email:u.email,role:primaryRole,roles:roles,empId:u.employee_id,desig:u.designation,plt:u.platform||'Gmail',ooo:u.ooo_until||null,av:initials.toUpperCase()||'?',avc:roleAvc[primaryRole]||'av-ra',bdm:null,managerId:u.manager_id||null,managerName:(u.manager&&u.manager.name)||''};
 }
 function userHasRole(u,role){
   if(!u)return false;
@@ -169,6 +169,18 @@ function startBackgroundPoll(){
       var p=STATE._pendingStageChanges||{};
       STATE.jobs=raw.map(normaliseJob).map(function(j){if(p[j.id])j.stage=p[j.id];return j;});
       STATE.contacts=flattenContacts(raw);
+      scheduleRender();
+    }).catch(function(){});
+    // Always refresh users — STATE.users otherwise only loads once at login, so a
+    // name/role change made by someone else (or in another tab) never showed up
+    // anywhere that reads from it (avatars, assignee labels, pickers) until a
+    // full page reload.
+    apiGet('/users').then(function(raw){
+      STATE.users=(raw||[]).map(normaliseUser);
+      if(STATE.user&&!STATE.user.isGuest){
+        var me=STATE.users.find(function(u){return u.id===STATE.user.id;});
+        if(me){STATE.user.name=me.name;STATE.user.email=me.email;STATE.user.role=me.role;STATE.user.roles=me.roles;}
+      }
       scheduleRender();
     }).catch(function(){});
     // Refresh emails when on email page

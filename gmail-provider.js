@@ -80,25 +80,44 @@ function createGmailProvider(ctx) {
   function base64url(str) {
     return Buffer.from(str, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
-  function buildRaw({ from, to, subject, htmlBody, headers, inReplyTo, references }) {
-    const lines = [];
-    if (from) lines.push(`From: ${from}`);
-    lines.push(`To: ${to}`);
-    lines.push(`Subject: ${subject || ''}`);
-    lines.push('MIME-Version: 1.0');
-    lines.push('Content-Type: text/html; charset="UTF-8"');
-    if (inReplyTo) lines.push(`In-Reply-To: ${inReplyTo}`);
-    if (references) lines.push(`References: ${references}`);
-    for (const [k, v] of Object.entries(headers || {})) lines.push(`${k}: ${v}`);
-    lines.push('');
-    lines.push(htmlBody || '');
-    return base64url(lines.join('\r\n'));
+  function buildRaw({ from, to, subject, htmlBody, headers, inReplyTo, references, attachments }) {
+    const head = [];
+    if (from) head.push(`From: ${from}`);
+    head.push(`To: ${to}`);
+    head.push(`Subject: ${subject || ''}`);
+    head.push('MIME-Version: 1.0');
+    if (inReplyTo) head.push(`In-Reply-To: ${inReplyTo}`);
+    if (references) head.push(`References: ${references}`);
+    for (const [k, v] of Object.entries(headers || {})) head.push(`${k}: ${v}`);
+
+    if (!attachments || !attachments.length) {
+      head.push('Content-Type: text/html; charset="UTF-8"');
+      head.push('');
+      head.push(htmlBody || '');
+      return base64url(head.join('\r\n'));
+    }
+
+    // multipart/mixed: the HTML body, then one attachment part per file.
+    const boundary = 'fute_' + Date.now().toString(36) + Math.random().toString(36).slice(2);
+    head.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+    head.push('');
+    const parts = [`--${boundary}`, 'Content-Type: text/html; charset="UTF-8"', '', htmlBody || ''];
+    attachments.forEach((a) => {
+      const b64 = String(a.base64 || '').match(/.{1,76}/g) || [];
+      parts.push(`--${boundary}`,
+        `Content-Type: ${a.contentType || 'application/octet-stream'}; name="${a.filename}"`,
+        'Content-Transfer-Encoding: base64',
+        `Content-Disposition: attachment; filename="${a.filename}"`,
+        '', ...b64);
+    });
+    parts.push(`--${boundary}--`);
+    return base64url(head.join('\r\n') + '\r\n' + parts.join('\r\n'));
   }
 
   // ── Send (fresh) ────────────────────────────────────────────────────────────
-  async function sendNewMessage(userEmailId, { to, subject, htmlBody, headers, fromAddress }) {
+  async function sendNewMessage(userEmailId, { to, subject, htmlBody, headers, fromAddress, attachments }) {
     const token = await getToken(userEmailId);
-    const raw = buildRaw({ from: fromAddress, to, subject, htmlBody, headers });
+    const raw = buildRaw({ from: fromAddress, to, subject, htmlBody, headers, attachments });
     const r = await api(token, '/messages/send', { method: 'POST', body: JSON.stringify({ raw }) });
     return { messageId: r.id, threadId: r.threadId };
   }

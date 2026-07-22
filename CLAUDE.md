@@ -108,6 +108,18 @@ Ordered by "cheapest to do now vs. most painful to retrofit":
      on the live DB without an explicit, fresh go-ahead.**
 2. **Configurable roles & permissions per org** — we already have roles; make them
    data so different customers can mirror their own org charts.
+   - **Reporting hierarchy DONE** (migration `026`): `users.manager_id`, self-
+     referencing, nullable — a *flexible* tree where any user can report to any
+     other user regardless of role (not a fixed ladder), per the owner's explicit
+     ask. Two new roles added everywhere roles are picked: Associate Director,
+     Director. Admin-only `PUT /users/:id/manager` (rejects self-management and
+     reporting loops). A **"Reporting Hierarchy"** card on the Admin user detail
+     page: a "Reports to" picker + a live "Direct reports" list. This is additive
+     alongside the existing RA/BD `team_assignments` table (which already drives
+     some Insights and is untouched) — a second, more general hierarchy layer.
+     **Still open:** actual per-role *permission* differences (today the new
+     roles are hierarchy/reporting-only, no new capabilities); a full
+     configurable-permissions system remains future work.
 3. **App-tracked candidate email** (not just `mailto:`): route candidate emails through
    the sending subsystem we already have → open/reply tracking = a real selling point,
    no new infra.
@@ -161,15 +173,46 @@ Ordered by "cheapest to do now vs. most painful to retrofit":
    - **DONE:** a **Reports** page (`39-page-reports.js`, nav item) from one org-scoped
      endpoint `GET /reports/recruiting` — headline totals, pipeline funnel, 8-week
      submission trend, recruiter-productivity table (with fill % + placement-fee
-     revenue), avg time-to-fill and top clients. Managers see the whole desk;
-     recruiters see only their own. (Legacy `/bd-analytics/*` endpoints still exist,
-     un-org-scoped — fold in later.)
+     revenue), avg time-to-fill and top clients. (Legacy `/bd-analytics/*` endpoints
+     still exist, un-org-scoped — fold in later.)
+   - **Hierarchy-scoped DONE (this session):** replaced the old binary "recruiter
+     sees own / any BDM sees the whole desk" split with the reporting hierarchy
+     above — everyone sees themselves plus everyone under them on the chain
+     (`reportingChainIds()` in `bd_recruiter_routes.js`, a BFS over `manager_id`).
+     A BD with no reports sees just their own; a BD Lead sees their whole team's.
+     Admin is the one exception and always sees the whole org. Response carries
+     `scope` (`own`/`team`/`org`) instead of the old binary `role` field.
+     **Still open:** the owner also asked for reports to be *part of the
+     Dashboard* page itself (today it's a separate Reports nav item/page), and
+     for the main Dashboard's own recruiting widgets (`/recruiting-dashboard`)
+     to get the same hierarchy scoping — currently only `/reports/recruiting`
+     (the Reports page) is hierarchy-aware.
 6. **CSV import/export + a small public API** — buyers need to migrate in and integrate.
 7. **Audit trail everywhere** — generalize the submission activity log; buyers want
    accountability.
 8. **Mobile-friendly / PWA polish** — recruiters live on phones; cheap CSS work.
 9. **Billing later, stubbed now (Stripe)** — leave a seam for self-serve signup +
    subscription so it plugs in without a rewrite.
+10. **Clients as a first-class concept + document attach/send (DONE this session,
+    migration `027`).** "Clients" aren't a separate table — they're `companies`
+    (the same table the leads engine already uses) that have at least one
+    `job_order`, i.e. leads that actually converted into business. New:
+    - `client_documents` table (mirrors `candidate_documents`; reuses the private
+      `candidate-docs` storage bucket under a `client/<company_id>/...` prefix).
+    - **Real email attachments, for the first time anywhere in the app:**
+      `sendMicrosoftNewMessage` takes an `attachments` array (Graph
+      `fileAttachment`); the Gmail provider's `buildRaw()` builds
+      `multipart/mixed` MIME with base64 attachment parts. `resolveEmailAttachments()`
+      (index.js) downloads documents from storage and encodes them, best-effort
+      and capped at ~18MB total per send.
+    - `POST /candidates/email` now accepts `document_ids` — the candidate
+      profile's Documents card is selectable with an "Email selected" action.
+    - New **Clients** nav tab (BD/admin only — recruiters don't get it): list of
+      converted clients, each with its job orders, its own documents
+      (upload/select/delete), and a "✉ Email this client" compose modal that can
+      attach selected documents. New endpoints: `GET /clients`,
+      `GET/POST/DELETE /companies/:id/documents`, `GET /companies/:id/job-orders`,
+      `POST /companies/:id/email`.
 
 These are options to offer the owner in plain language — not a mandate to build them
 unasked.

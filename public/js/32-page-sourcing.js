@@ -11,7 +11,6 @@
 
   function esc(s){ return String(s==null?'':s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
   function code(t){ return '<span style="font-family:var(--mono);font-size:10.5px;color:var(--text3);font-weight:600">'+esc(t)+'</span>'; }
-  function canUse(u){ return userHasAnyRole(u,'admin','bd','bd_lead','recruiter'); }
 
   // ── CSV parser (quote-aware) + header mapping ───────────────────────────────
   function parseCSV(text){
@@ -59,37 +58,14 @@
   // ── data ─────────────────────────────────────────────────────────────────────
   function loadProviders(){ return apiGet('/sourcing/providers').then(function(d){ STATE.sourcing.providers=d||[]; }).catch(function(){ STATE.sourcing.providers=[]; }); }
   function loadStaged(){
-    STATE.sourcing.loading=true; paint();
-    return apiGet('/sourcing/staged').then(function(d){ STATE.sourcing.staged=d||[]; STATE.sourcing.loading=false; paint(); })
-      .catch(function(e){ STATE.sourcing.loading=false; showToast('Failed to load: '+e.message,'error'); paint(); });
+    STATE.sourcing.loading=true; render();
+    return apiGet('/sourcing/staged').then(function(d){ STATE.sourcing.staged=d||[]; STATE.sourcing.loading=false; render(); })
+      .catch(function(e){ STATE.sourcing.loading=false; showToast('Failed to load: '+e.message,'error'); render(); });
   }
-
-  // ── nav + routing ───────────────────────────────────────────────────────────
-  var _prevRender = window.render;
-  window.render = function(){
-    _prevRender.apply(this, arguments);
-    injectNav();
-    if (STATE.page==='sourcing'){ paint(); var t=document.querySelector('.tb-title'); if(t) t.textContent='Sourcing'; }
-  };
-  function injectNav(){
-    var u=STATE.user; if(!u||!canUse(u)) return;
-    var navWrap=document.querySelector('.sb-nav'); if(!navWrap) return;
-    if (navWrap.querySelector('[data-srcnav]')) return;
-    var d=document.createElement('div');
-    d.className='nav-item'+(STATE.page==='sourcing'?' active':'');
-    d.setAttribute('data-srcnav','1');
-    d.innerHTML='<span class="nav-icon">'+icon('dl')+'</span>Sourcing';
-    d.onclick=function(){ goPage('sourcing'); };
-    var ats=navWrap.querySelector('[data-atsnav]');
-    if (ats&&ats.parentNode) ats.parentNode.insertBefore(d, ats.nextSibling); else navWrap.appendChild(d);
-  }
-  var _prevGoPage = window.goPage;
-  window.goPage = function(p){
-    if (p==='sourcing'){ STATE.page='sourcing'; STATE.modal=null; render();
-      loadProviders().then(loadStaged); return; }
-    return _prevGoPage.apply(this, arguments);
-  };
-  function paint(){ if(STATE.page!=='sourcing')return; var c=document.getElementById('content'); if(c) c.innerHTML=renderSourcing(); }
+  // Sourcing lives inside the Candidates tab (see 27-page-applicants.js's
+  // atsSetView) rather than as its own nav item/page — this is the hook that
+  // tab uses to (re)load provider + staged-candidate data on first switch.
+  window.srcLoadForCandidatesTab = function(){ loadProviders().then(loadStaged); };
 
   // ── page ──────────────────────────────────────────────────────────────────
   window.renderSourcing = function(){
@@ -141,6 +117,7 @@
       '<button class="btn btn-sm btn-outline" onclick="srcLoadJobs()">Tag to a job…</button>';
 
     return '<div class="page">'+
+      (window.atsTabBar?atsTabBar():'')+
       '<div style="font-size:18px;font-weight:700;margin-bottom:2px">Sourcing</div>'+
       '<div style="font-size:12.5px;color:var(--text3);margin-bottom:14px">Bring candidates from any job board into your database. CSV/Excel works today; API boards activate when credentials are added.</div>'+
       '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-bottom:18px">'+providerCards+'</div>'+

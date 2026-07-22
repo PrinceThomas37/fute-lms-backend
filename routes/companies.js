@@ -78,5 +78,113 @@ router.delete('/companies/:id', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Clients — companies with at least one job order, i.e. leads that
+// actually converted into paying business. BD/admin only; recruiters don't
+// get this tab (they work candidates, not client relationships).
+function isBDlike(req) { return hasRole(req, 'admin', 'bd', 'bd_lead'); }
+
+router.get('/clients', auth, async (req, res) => {
+  try {
+    if (!isBDlike(req)) return res.status(403).json({ error: 'BD role required.' });
+    const { data: jobOrders, error: jErr } = await withOrg(supabase.from('job_orders')
+      .select('id,company_id,status,created_at').is('deleted_at', null).not('company_id', 'is', null), req);
+    if (jErr) throw jErr;
+    const companyIds = [...new Set((jobOrders || []).map(j => j.company_id).filter(Boolean))];
+    if (!companyIds.length) return res.json([]);
+    const { data: companies, error: cErr } = await withOrg(supabase.from('companies')
+      .select('id,name,industry,location,website').is('deleted_at', null).in('id', companyIds), req);
+    if (cErr) throw cErr;
+    const countByCompany = {}, openByCompany = {};
+    (jobOrders || []).forEach(j => {
+      countByCompany[j.company_id] = (countByCompany[j.company_id] || 0) + 1;
+      if (!['Filled', 'Closed'].includes(j.status)) openByCompany[j.company_id] = (openByCompany[j.company_id] || 0) + 1;
+    });
+    const result = (companies || []).map(c => ({
+      ...c, job_order_count: countByCompany[c.id] || 0, open_job_order_count: openByCompany[c.id] || 0
+    })).sort((a, b) => (b.job_order_count - a.job_order_count) || a.name.localeCompare(b.name));
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/companies/:id/job-orders', auth, async (req, res) => {
+  try {
+    if (!isBDlike(req)) return res.status(403).json({ error: 'BD role required.' });
+    const { data, error } = await withOrg(supabase.from('job_orders')
+      .select('id,job_code,job_title,status,priority,created_at,bd_manager:users!bd_manager_id(id,name)')
+      .eq('company_id', req.params.id).is('deleted_at', null), req).order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Client documents (stored in the same private candidate-docs bucket,
+// under a client/<company_id>/... path prefix) ──────────────────────────────
+const CLIENT_DOC_BUCKET = 'candidate-docs';
+const MAX_CLIENT_DOC_BYTES = 4.5 * 1024 * 1024;
+let _clientBucketEnsured = false;
+async function ensureClientDocBucket() {
+  if (_clientBucketEnsured) return;
+  try { await supabase.storage.createBucket(CLIENT_DOC_BUCKET, { public: false }); } catch (_) { /* exists */ }
+  _clientBucketEnsured = true;
+}
+
+router.get('/companies/:id/documents', auth, async (req, res) => {
+  try {
+    if (!isBDlike(req)) return res.status(403).json({ error: 'BD role required.' });
+    const { data, error } = await supabase.from('client_documents')
+      .select('*, uploader:users!uploaded_by(id,name,employee_id)')
+      .eq('company_id', req.params.id).is('deleted_at', null).order('uploaded_at', { ascending: false });
+    if (error) throw error;
+    const rows = await Promise.all((data || []).map(async (d) => {
+      let url = null;
+      try {
+        const { data: s } = await supabase.storage.from(CLIENT_DOC_BUCKET).createSignedUrl(d.storage_path, 3600);
+        url = s ? s.signedUrl : null;
+      } catch (_) { /* leave null */ }
+      return Object.assign({}, d, { url });
+    }));
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/companies/:id/documents', auth, async (req, res) => {
+  try {
+    if (!isBDlike(req)) return res.status(403).json({ error: 'BD role required.' });
+    const b = req.body || {};
+    if (!b.filename || !b.data_base64) return res.status(400).json({ error: 'filename and data_base64 required' });
+    const raw = String(b.data_base64).replace(/^data:.*;base64,/, '');
+    const buffer = Buffer.from(raw, 'base64');
+    if (!buffer.length) return res.status(400).json({ error: 'empty file' });
+    if (buffer.length > MAX_CLIENT_DOC_BYTES) return res.status(413).json({ error: 'File too large (max ~4.5 MB).' });
+
+    await ensureClientDocBucket();
+    const safe = String(b.filename).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120);
+    const path = 'client/' + req.params.id + '/' + Date.now() + '-' + safe;
+    const { error: upErr } = await supabase.storage.from(CLIENT_DOC_BUCKET)
+      .upload(path, buffer, { contentType: b.content_type || 'application/octet-stream', upsert: false });
+    if (upErr) throw upErr;
+
+    const { data, error } = await supabase.from('client_documents').insert({
+      company_id: req.params.id, doc_type: b.doc_type || 'other', filename: String(b.filename),
+      storage_path: path, content_type: b.content_type || null, size_bytes: buffer.length,
+      uploaded_by: req.user.id, ...orgStamp(req)
+    }).select('*, uploader:users!uploaded_by(id,name,employee_id)').single();
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/companies/:id/documents/:docId', auth, async (req, res) => {
+  try {
+    if (!isBDlike(req)) return res.status(403).json({ error: 'BD role required.' });
+    const { data: doc } = await supabase.from('client_documents')
+      .select('storage_path').eq('id', req.params.docId).eq('company_id', req.params.id).maybeSingle();
+    await supabase.from('client_documents').update({ deleted_at: new Date() })
+      .eq('id', req.params.docId).eq('company_id', req.params.id);
+    if (doc && doc.storage_path) { try { await supabase.storage.from(CLIENT_DOC_BUCKET).remove([doc.storage_path]); } catch (_) {} }
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
   return router;
 };

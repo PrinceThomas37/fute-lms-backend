@@ -124,7 +124,7 @@
     var ttf = d.avg_time_to_fill != null ? d.avg_time_to_fill + ' days' : '—';
     var header = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
       '<div><div style="font-size:18px;font-weight:700">Reports</div>'+
-      '<div style="font-size:12.5px;color:var(--text3)">'+(d.role==='recruiter'?'Your recruiting numbers':'Whole-desk recruiting analytics')+'</div></div>'+
+      '<div style="font-size:12.5px;color:var(--text3)">'+(d.scope==='org'?'Whole-desk recruiting analytics':(d.scope==='team'?'Your numbers plus your team’s ('+(d.team_size-1)+' report'+(d.team_size!==2?'s':'')+')':'Your recruiting numbers'))+'</div></div>'+
       '<button class="btn btn-sm btn-outline" onclick="reportsReload()">↻ Refresh</button></div>';
     var tiles = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
       tile('Candidates added', t.candidates_added||0)+

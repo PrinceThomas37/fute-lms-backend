@@ -167,7 +167,10 @@
             '</div>'+
             '<div style="font-size:13px;color:var(--text3)">'+esc(c.headline||c.current_title||'')+(c.current_employer?' · '+esc(c.current_employer):'')+'</div>'+
           '</div>'+
-          '<button class="btn btn-sm btn-outline" onclick="atsOpenEdit(\''+c.id+'\')">Edit</button>'+
+          '<div style="display:flex;gap:8px">'+
+            '<button class="btn btn-sm btn-outline" onclick="cpOpenEmail()">✉ Email</button>'+
+            '<button class="btn btn-sm btn-outline" onclick="atsOpenEdit(\''+c.id+'\')">Edit</button>'+
+          '</div>'+
         '</div>'+
         '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">'+
           field('Email',c.email)+field('Mobile',c.phone)+field('Work Authorization',c.work_authorization)+
@@ -246,11 +249,15 @@
         noteRows+
       '</div>';
 
-    // Documents
+    // Documents — selectable so they can be attached to the "Email" button
+    // above (send a résumé, offer letter, etc. straight to the candidate).
     var docs = pr.documents || [];
+    var docSel = pr.docSel || {};
+    var docSelIds = Object.keys(docSel).filter(function(k){ return docSel[k]; });
     var docRows = docs.map(function(d){
-      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 4px;border-bottom:1px solid var(--border)">'+
-        '<div style="min-width:0">'+
+      return '<div style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--border)">'+
+        '<input type="checkbox" '+(docSel[d.id]?'checked':'')+' onclick="cpDocToggle(\''+d.id+'\')"/>'+
+        '<div style="flex:1;min-width:0">'+
           '<div style="font-size:13px;font-weight:600">'+(d.url?'<a href="'+esc(d.url)+'" target="_blank" rel="noopener" style="color:var(--accent)">'+esc(d.filename)+'</a>':esc(d.filename))+'</div>'+
           '<div style="font-size:11px;color:var(--text3)">'+esc(d.doc_type||'')+' · '+esc((d.uploader&&d.uploader.name)||'—')+' · '+esc(fmtDT(d.uploaded_at))+'</div>'+
         '</div>'+
@@ -260,8 +267,11 @@
     var docsCard =
       '<div class="card" style="padding:16px;margin-bottom:16px">'+
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
-          '<div style="font-weight:600;font-size:14px">Documents</div>'+
-          '<label class="btn btn-sm btn-primary" style="cursor:pointer;margin:0">+ Upload<input type="file" id="cp-doc-file" style="display:none" onchange="cpUploadDoc(this)"></label>'+
+          '<div style="font-weight:600;font-size:14px">Documents'+(docSelIds.length?' · '+docSelIds.length+' selected':'')+'</div>'+
+          '<div style="display:flex;gap:8px">'+
+            (docSelIds.length?'<button class="btn btn-sm btn-outline" onclick="cpOpenEmail(true)">Email selected</button>':'')+
+            '<label class="btn btn-sm btn-primary" style="cursor:pointer;margin:0">+ Upload<input type="file" id="cp-doc-file" style="display:none" onchange="cpUploadDoc(this)"></label>'+
+          '</div>'+
         '</div>'+
         docRows+
       '</div>';
@@ -317,6 +327,35 @@
       (window.navBar?navBar():'<div style="margin-bottom:6px"><span onclick="cpGoBack()" style="cursor:pointer;font-size:12.5px;color:var(--accent)">← '+esc(backLabel(pr.back))+'</span></div>')+
       header + lifecycle + resumeCard + jobsCard + emailCard + notesCard + docsCard + actCard +
     '</div>';
+  };
+
+  // ── email the candidate, from their own profile ─────────────────────────────
+  // Every candidate profile gets this, for both BD and recruiters — previously
+  // the only way to email a candidate was the bulk "Email JD" flow on a job's
+  // Candidates tab. Reuses that same compose/tracked-send modal (28-page-
+  // pipeline.js), just pre-seeded with this one candidate.
+  window.cpOpenEmail = function(withSelectedDocs){
+    var pr = STATE.bd.profile; if(!pr) return;
+    var c = pr.candidate || {};
+    if (!c.email){ showToast('This candidate has no email on file','error'); return; }
+    var first = String(c.full_name||'').trim().split(/\s+/)[0] || 'there';
+    var docSel = pr.docSel || {};
+    var documentIds = withSelectedDocs ? Object.keys(docSel).filter(function(k){ return docSel[k]; }) : [];
+    STATE.bd._emailJD = {
+      jid: pr.selJob || null,
+      subject: 'Opportunity: ' + (c.headline || c.current_title || ''),
+      body: 'Hi ' + first + ',\n\nI wanted to reach out about an opportunity that may be a good fit for you. Would you be open to a quick chat?\n\nBest regards,',
+      recips: [{ name: c.full_name || 'Candidate', email: c.email, candidate_id: c.id }],
+      documentIds: documentIds
+    };
+    if (window.plShowEmailJDModal) plShowEmailJDModal();
+    else showToast('Email module not loaded','error');
+  };
+  window.cpDocToggle = function(id){
+    var pr = STATE.bd.profile; if(!pr) return;
+    pr.docSel = pr.docSel || {};
+    pr.docSel[id] = !pr.docSel[id];
+    render();
   };
 
   // ── notes & documents handlers ───────────────────────────────────────────
