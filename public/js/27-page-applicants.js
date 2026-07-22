@@ -288,6 +288,12 @@
   };
 
   window.atsFormSet = function(k,v){ STATE.ats.form[k]=v; };
+  window.atsZipPick = function(place){
+    STATE.ats.form.zip = place.zip || STATE.ats.form.zip;
+    STATE.ats.form.city = place.city || STATE.ats.form.city;
+    STATE.ats.form.state = place.state || STATE.ats.form.state;
+    showApplicantModal();
+  };
 
   // ── job-context: search an existing candidate to add to this job ────────────
   window.atsJobTagSearch = function(q){
@@ -441,7 +447,7 @@
             fld('City', inp('city'))+
             fld('State', sel('state', US_STATES, true))+
             fld('Country', inp('country','United States'))+
-            fld('Zip', inp('zip'))+
+            fld('Zip', zipAcHTML('ats-zip', STATE.ats.form.zip, 'atsZipPick'))+
             fld('Current Title', inp('current_title'))+
             fld('Desired / Headline Title', inp('headline'))+
             fld('Current Employer', inp('current_employer'))+
