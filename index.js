@@ -75,6 +75,10 @@ async function resolveDefaultOrg() {
 resolveDefaultOrg();
 // Exposed so route modules can stamp/scope by the caller's org.
 function orgIdFor(req) { return (req && req.user && req.user.org_id) || DEFAULT_ORG_ID || null; }
+// Same withOrg/orgStamp pattern as bd_recruiter_routes.js, for the leads/email
+// engine's own queries (jobs/companies/contacts live here, not in that module).
+function withOrg(query, req) { const o = orgIdFor(req); return o ? query.eq('org_id', o) : query; }
+function orgStamp(req) { const o = orgIdFor(req); return o ? { org_id: o } : {}; }
 
 function auth(req, res, next) {
   const header = req.headers.authorization;
@@ -524,18 +528,23 @@ const JOB_SELECT = `*, research, company:companies(id,name,website,industry,loca
 // it — Supabase is hit at most once per TTL no matter how many tabs are open.
 // Any successful write invalidates the cache (middleware above), so users
 // always see their own changes immediately.
-let jobsCache = null, jobsCacheAt = 0;
+// Keyed per org_id so one tenant's leads are never served out of another
+// tenant's cache entry once a second org exists.
+let jobsCacheByOrg = new Map();
 const JOBS_CACHE_TTL_MS = 60 * 1000;
-function invalidateJobsCache() { jobsCache = null; jobsCacheAt = 0; }
+function invalidateJobsCache() { jobsCacheByOrg.clear(); }
 
-async function loadAllJobs() {
-  if (jobsCache && (Date.now() - jobsCacheAt) < JOBS_CACHE_TTL_MS) return jobsCache;
-  const { data, error } = await supabase.from('jobs').select(JOB_SELECT)
-    .is('deleted_at', null).order('created_at', { ascending: false });
+async function loadAllJobs(orgId) {
+  const key = orgId || '__all__';
+  const cached = jobsCacheByOrg.get(key);
+  if (cached && (Date.now() - cached.at) < JOBS_CACHE_TTL_MS) return cached.data;
+  let query = supabase.from('jobs').select(JOB_SELECT).is('deleted_at', null);
+  if (orgId) query = query.eq('org_id', orgId);
+  const { data, error } = await query.order('created_at', { ascending: false });
   if (error) throw error;
-  jobsCache = data || [];
-  jobsCacheAt = Date.now();
-  return jobsCache;
+  const rows = data || [];
+  jobsCacheByOrg.set(key, { data: rows, at: Date.now() });
+  return rows;
 }
 
 // Jobs routes (list/detail/create/bulk/update/delete/export, JD parsing,
@@ -1672,7 +1681,7 @@ app.post('/distribute/execute', auth, async (req, res) => {
     // Fetch all unassigned leads — use range to bypass Supabase 1000 row default limit
     let pool = [], from = 0;
     while (true) {
-      let q = supabase.from('jobs').select('id,position,freshness,industry,timezone,is_duplicate').is('deleted_at', null).eq('stage', 'Unassigned').is('assigned_to_bd', null).range(from, from + 999);
+      let q = withOrg(supabase.from('jobs').select('id,position,freshness,industry,timezone,is_duplicate').is('deleted_at', null).eq('stage', 'Unassigned').is('assigned_to_bd', null).range(from, from + 999), req);
       if (ratio.exclude_duplicates) q = q.eq('is_duplicate', false);
       const { data } = await q;
       if (!data || !data.length) break;
@@ -2473,7 +2482,7 @@ function buildHtmlEmailBody(plainText, signatureHtml, includeFooter = true) {
 // Shared helpers/middleware stay defined above; routers receive them via ctx so
 // their closures and behaviour are identical to the original inline routes.
 const routeCtx = {
-  supabase, auth, hasRole, notGuest, today, orgIdFor,
+  supabase, auth, hasRole, notGuest, today, orgIdFor, withOrg, orgStamp,
   loadMailboxSignatures, getMailboxSignature, getMicrosoftToken, buildHtmlEmailBody,
   MS_TENANT, MS_CLIENT, MS_SECRET, MS_REDIRECT, MS_SCOPES,
   logActivity, INDUSTRIES, normInd,
