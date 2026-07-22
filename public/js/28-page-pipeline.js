@@ -324,7 +324,9 @@
     STATE.bd._emailJD = { jid:jid, subject:subject, body:body, recips:recips };
     plShowEmailJDModal();
   };
-  function plShowEmailJDModal(){
+  // Exposed so any page can open the same compose/tracked-send modal by
+  // pre-seeding STATE.bd._emailJD (e.g. the candidate profile's "Email" button).
+  window.plShowEmailJDModal = function plShowEmailJDModal(){
     var d = STATE.bd._emailJD; if(!d) return;
     var withEmail = d.recips.filter(function(r){ return r.email; });
     var noEmail = d.recips.filter(function(r){ return !r.email; });

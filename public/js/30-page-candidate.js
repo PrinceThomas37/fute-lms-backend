@@ -167,7 +167,10 @@
             '</div>'+
             '<div style="font-size:13px;color:var(--text3)">'+esc(c.headline||c.current_title||'')+(c.current_employer?' · '+esc(c.current_employer):'')+'</div>'+
           '</div>'+
-          '<button class="btn btn-sm btn-outline" onclick="atsOpenEdit(\''+c.id+'\')">Edit</button>'+
+          '<div style="display:flex;gap:8px">'+
+            '<button class="btn btn-sm btn-outline" onclick="cpOpenEmail()">✉ Email</button>'+
+            '<button class="btn btn-sm btn-outline" onclick="atsOpenEdit(\''+c.id+'\')">Edit</button>'+
+          '</div>'+
         '</div>'+
         '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">'+
           field('Email',c.email)+field('Mobile',c.phone)+field('Work Authorization',c.work_authorization)+
@@ -317,6 +320,26 @@
       (window.navBar?navBar():'<div style="margin-bottom:6px"><span onclick="cpGoBack()" style="cursor:pointer;font-size:12.5px;color:var(--accent)">← '+esc(backLabel(pr.back))+'</span></div>')+
       header + lifecycle + resumeCard + jobsCard + emailCard + notesCard + docsCard + actCard +
     '</div>';
+  };
+
+  // ── email the candidate, from their own profile ─────────────────────────────
+  // Every candidate profile gets this, for both BD and recruiters — previously
+  // the only way to email a candidate was the bulk "Email JD" flow on a job's
+  // Candidates tab. Reuses that same compose/tracked-send modal (28-page-
+  // pipeline.js), just pre-seeded with this one candidate.
+  window.cpOpenEmail = function(){
+    var pr = STATE.bd.profile; if(!pr) return;
+    var c = pr.candidate || {};
+    if (!c.email){ showToast('This candidate has no email on file','error'); return; }
+    var first = String(c.full_name||'').trim().split(/\s+/)[0] || 'there';
+    STATE.bd._emailJD = {
+      jid: pr.selJob || null,
+      subject: 'Opportunity: ' + (c.headline || c.current_title || ''),
+      body: 'Hi ' + first + ',\n\nI wanted to reach out about an opportunity that may be a good fit for you. Would you be open to a quick chat?\n\nBest regards,',
+      recips: [{ name: c.full_name || 'Candidate', email: c.email, candidate_id: c.id }]
+    };
+    if (window.plShowEmailJDModal) plShowEmailJDModal();
+    else showToast('Email module not loaded','error');
   };
 
   // ── notes & documents handlers ───────────────────────────────────────────
