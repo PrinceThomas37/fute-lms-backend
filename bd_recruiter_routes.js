@@ -71,6 +71,26 @@ module.exports = function (app, deps) {
     return [...new Set((data || []).map(r => r.job_order_id))];
   }
 
+  // Everyone a user is responsible for on the flexible reporting hierarchy
+  // (users.manager_id, migration 026) — themselves plus every direct and
+  // transitive report. A user nobody reports to just gets [self]. Used to
+  // scope reports: a BD sees their own numbers, a BD Lead sees their whole
+  // team's, up the chain to Director — without hard-coding role pairs.
+  async function reportingChainIds(userId, orgId) {
+    let q = supabase.from('users').select('id,manager_id').is('deleted_at', null);
+    if (orgId) q = q.eq('org_id', orgId);
+    const { data } = await q;
+    const childrenOf = {};
+    (data || []).forEach(u => { if (u.manager_id) (childrenOf[u.manager_id] = childrenOf[u.manager_id] || []).push(u.id); });
+    const chain = new Set([userId]);
+    const queue = [userId];
+    while (queue.length) {
+      const next = childrenOf[queue.shift()] || [];
+      next.forEach(id => { if (!chain.has(id)) { chain.add(id); queue.push(id); } });
+    }
+    return [...chain];
+  }
+
   const JOB_ORDER_SELECT =
     '*, company:companies(id,name,industry,location), ' +
     'source_lead:jobs!source_lead_id(id,position,stage,lead_code), ' +
@@ -1605,19 +1625,23 @@ ${String(j.job_description).slice(0, 12000)}`;
   // per-recruiter performance
   // Consolidated recruiting report — funnel, per-recruiter productivity, an
   // 8-week submission trend, time-to-fill, top clients and headline totals.
-  // Org-scoped; recruiters see only their own numbers, BD/admin the whole desk.
+  // Org-scoped and hierarchy-scoped: everyone sees their own numbers plus
+  // everyone under them on the reporting chain (users.manager_id) — a BD
+  // sees just their own, a BD Lead sees their whole team's, and so on up to
+  // Director. Admin always sees the whole desk regardless of the hierarchy.
   app.get('/reports/recruiting', auth, async (req, res) => {
     try {
       if (!isBDM(req) && !isRecruiter(req)) return res.status(403).json({ error: 'Not permitted.' });
-      const recruiterView = isRecruiter(req) && !isBDM(req);
+      const scoped = !hasRole(req, 'admin');
+      const chain = scoped ? await reportingChainIds(req.user.id, orgIdFor(req)) : null;
 
       let sq = withOrg(supabase.from('submissions')
         .select('id,stage,created_at,submitted_at,stage_updated_at,job_order_id,recruiter_id,recruiter:users!recruiter_id(id,name)')
         .is('deleted_at', null), req);
-      if (recruiterView) sq = sq.eq('recruiter_id', req.user.id);
+      if (scoped) sq = sq.in('recruiter_id', chain);
       let jq = withOrg(supabase.from('job_orders').select('id,client,status,created_at,placement_fee').is('deleted_at', null), req);
       let pq = withOrg(supabase.from('candidate_pipeline').select('id,tagged_by').is('deleted_at', null), req);
-      if (recruiterView) pq = pq.eq('tagged_by', req.user.id);
+      if (scoped) pq = pq.in('tagged_by', chain);
 
       const [{ data: subs }, { data: jobs }, { data: pipe }] = await Promise.all([sq, jq, pq]);
       const S = subs || [], J = jobs || [], P = pipe || [];
@@ -1674,7 +1698,8 @@ ${String(j.job_description).slice(0, 12000)}`;
         revenue: by_recruiter.reduce((a, r) => a + r.revenue, 0)
       };
 
-      res.json({ role: recruiterView ? 'recruiter' : 'manager', funnel, stages: STAGES, by_recruiter, trend, avg_time_to_fill, top_clients, totals });
+      const scope = !scoped ? 'org' : (chain.length > 1 ? 'team' : 'own');
+      res.json({ role: scoped ? 'recruiter' : 'manager', scope, team_size: scoped ? chain.length : null, funnel, stages: STAGES, by_recruiter, trend, avg_time_to_fill, top_clients, totals });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
