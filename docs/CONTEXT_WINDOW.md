@@ -1,185 +1,192 @@
-# FUTE LMS Backend — Context Window (Session 2)
+# FUTE LMS Backend — Context Window (Session 3)
 
 > **Read `CLAUDE.md` at the repo root first** — it holds the durable, must-carry
 > context: who the owner is (a product owner who doesn't read code or use git — I
 > own everything technical and show them the running app, not code) and what we're
 > building (a commercial ATS to sell; spend nothing now, architect to scale later).
+> That file also tracks per-feature status (multi-tenancy slices, email-tracking
+> slices, interview auto-meeting) — keep it current.
 
+**Updated**: 2026-07-22 · **Repo**: PrinceThomas37/fute-lms-backend · **Branch**: main
+**Dev branch this session**: `claude/job-candidate-email-details-61mxc1` (reset to
+`origin/main` after each merge; force-with-lease pushes are used because the branch
+only ever carries already-merged history between PRs).
+**Supabase project**: `teiqievahzhllojvgsku` · **Deploy**: Render
+(fute-lms-backend.onrender.com, auto-deploys from `main` — merging IS the release).
 
-**Updated**: 2026-07-21 · **Repo**: PrinceThomas37/fute-lms-backend · **Branch**: main
-**Dev branch this session**: `claude/continue-previous-session-20021c` (rebased onto main each PR)
-**Supabase project**: `teiqievahzhllojvgsku` · **Deploy**: Render (fute-lms-backend.onrender.com)
-
-This continues the prior context (14 tasks: pipeline, stage modal, kanban, resume
-parsing, posting JD, role dashboards — all previously merged). Below is everything
-shipped in **this** session, newest last. All work is frontend (`public/js/*.js`,
-plain `<script>` modules, no build step) unless noted.
+This continues Session 2 (PRs #93–#101: role dashboards, stage/kanban consolidation,
+job board, submission packet, send-race guard). Everything below shipped in **this**
+session (PRs #103–#112), newest last. All merged to `main` and live unless noted.
 
 ---
 
 ## Theme of this session
-Make the app **role-relevant** (each user sees only their workflow), then fix the
-recruiter/BDM ATS flow end-to-end, then squash bugs found in real use.
+Turn futé into a genuinely sellable ATS: finish the owner's job/candidate UX fixes,
+then lay the multi-tenant foundation, then build the "feels like a real product"
+features — match scoring, app-tracked candidate email (open + reply), interview
+scheduling with auto-created Teams meetings, and a reporting dashboard.
 
 ---
 
 ## Shipped (merged PRs)
 
-### PR #93 — Role-relevant recruiter dashboard
-- Pure recruiters (`recruiter` role, none of admin/bd/bd_lead/ra_lead) get a native
-  `renderRecruiterDashboard()` in `05-page-dashboard.js`: banner (subs week/month, in
-  interview, placements), desk tiles, **My candidate pipeline** by stage, **Upcoming
-  interviews**, Reminders. No lead-gen widgets (Your Team, Response trend, Industry
-  breakdown, lead Pipeline overview). Leads nav item hidden for pure recruiters.
-- `getTeam` leads table excludes pure recruiters (all-zero rows were noise).
-- `34-recruiting-dashboard.js` injected "my desk" strip is managers-only now.
-- Built from `GET /recruiting-dashboard` (shared 60s cache).
+### PR #103 — Job/candidate UX fixes (the owner's punch-list)
+- **Email the JD to selected candidates** (separate from the sequence): the
+  Candidates-tab bulk bar's "Email JD to candidates" opens a compose/review modal
+  (editable subject+body) and sends via the mail app, BCC'ing recipients. Ticking a
+  candidate no longer scroll-jumps — selection repaints only the checkboxes + bulk
+  bar in place (`plRepaintSelection`), not the whole page.
+- **Candidate details in the BD job view**: Email + Title columns on the Candidates
+  table; pipeline API embeds `current_title`/`headline` (later `skills` too).
+- **"Submitted" fix**: a freshly added candidate reads **"Added"**; **"✓ Submitted"**
+  only appears once stage ≥ "Submitted to BDM".
+- **ONE unified Add-Candidate window**: the job's and the kanban's "+ Add Candidate"
+  now open the same full applicant form (`atsOpenNew(jobCtx)` in 27-page-applicants.js),
+  scoped to the job (search-to-add existing, or create-and-tag). Removed the two
+  divergent mini-modals.
+- **Breadcrumb navigation** (`public/js/37-nav-history.js`): a file-manager trail
+  (root › job › candidate); Back returns to exactly where you came from. Wraps
+  bdOpenPipeline/Kanban/JobOrder/Candidate.
+- **Edit job in place**: `bdOpenEditJob` reopens the job form prefilled →
+  `PUT /job-orders/:id`. Backend now lets an **assigned recruiter** (not just BDM)
+  edit a job.
 
-### PR #93 (same) — "My jobs" card on recruiter dashboard
-- `/recruiting-dashboard` (recruiter view) returns `jobs_assigned` (week/month/
-  quarter/total from `recruiter_assignments.assigned_at`) and `top_jobs` (5 assigned
-  jobs ranked by team submissions in last 14 days). `renderRecruiterJobsCard`.
+### PR #104 — Multi-tenant foundation, slice 1 (migration 022)
+`org_id` on 33 tenant tables, backfilled to the default org "Fute Global", column
+DEFAULT so nothing breaks. Backend resolves `req.orgId` (JWT carries `org_id`, falls
+back to default org via `orgIdFor`/`resolveDefaultOrg` in index.js); login embeds
+`org_id`; core creates stamp org. Behaviour unchanged for the single org.
 
-### PR #93 (same) — Company-wide job board + assignment requests
-- `GET /job-orders/browse`: every recruiter sees every job (client, location, status,
-  priority, assigned recruiter names, submission count, `assigned_to_me`, `my_request`).
-- Candidate contacts **masked** until assigned: `GET /job-orders/:id/submissions`
-  returns `{ masked:true, submissions }` (name/title/stage only) for unassigned recruiters.
-- Migration **020** `assignment_requests` table. `POST /job-orders/:id/request-assignment`,
-  `GET /assignment-requests`, `POST /assignment-requests/:id/decide` (BDM approve creates
-  the `recruiter_assignments` row). New `public/js/35-job-board.js` ("All Jobs" nav item,
-  masked modal, BDM **Assignment requests** card).
+### PR #105 — Multi-tenant slice 2 + 3a (migration 023)
+Read-scoping via `withOrg(query, req)` on the core ATS collections — `GET /candidates`,
+`GET /job-orders`, `GET /job-orders/browse`. `org_id` set **NOT NULL** on all tenant
+tables. **Deferred:** dashboard aggregates + single-record long tail, the leads/email
+engine (`jobs` via cached `loadAllJobs` + index.js send subsystem), and RLS (slice 3b).
 
-### PR #93 (same) — docs/ROLE_UX_BLUEPRINT.md
-Per-role design spec (recruiter, BD manager, BD lead, RA, RA lead, admin) + product
-decisions: **milestones not quotas**; next-in-line manager sets them; proposed roles
-Recruiter Lead + Associate Director; needs `users.manager_id`.
+### PR #106 — Candidate ↔ job match scoring
+`public/js/38-match-score.js`: `matchScore(cand, job)` → {score, band, reasons},
+`matchBadge`, `matchScoreValue`. Rule-based (skills 50% / experience 20% / work-auth
+15% / title 10% / location 5%, weights renormalized over present signals; null when
+nothing scoreable). Candidates tab shows a colour-coded **Match** column, sorted
+best-first, with a "Best match / Recently added" toggle. Pipeline candidate embed
+gained `skills`. AI scorer can slot in behind the same API later.
 
-### PR #94 — Convert-to-Job City/State prefill
-`bdOpenNewJob` read `lead.state`/`lead.city` which don't exist on a lead (leads only
-store a combined `location` string). Added `parseLeadLocation()` splitting "City, ST" /
-"City, State", mapping abbreviations to full state names (form's State `<select>` needs
-full names). `25-workflow-bd.js`. Test `lead-location-parse-smoke.mjs`.
+### PR #107 — Email open-tracking infrastructure (migration 024)
+`email_tracking` table (org-scoped). `email-tracking.js` (root) pure helpers:
+`newToken`, `pixelUrl`, `pixelHtml`, `injectPixel`. `routes/tracking.js`: public
+`GET /o/:token.gif` (records the open, returns a 1×1 gif, never errors/leaks) +
+`GET /candidates/:id/email-activity`. Nothing wired to sends yet.
 
-### PR #95 — Lead stage revert (BD couldn't move Connected→Assigned)
-`PUT /jobs/:id` stage matrix only let RA Lead/Admin write "Assigned", so BD/BD Lead
-picking it silently no-op'd (200, nothing written). Added "Assigned" to bdStages;
-extracted `resolveLeadStageUpdate(hasRole, req, stage)` (pure fn); unauthorized stage
-now returns explicit 403 instead of silent success. `routes/jobs.js`. Test
-`lead-stage-permission.mjs`.
+### PR #108 — Email tracking slice 2: tracked send + "Opened"
+`POST /candidates/email` (index.js) sends the invite to selected candidates via the
+recruiter's connected mailbox (`recruiterSendingMailbox` + `sendMicrosoftNewMessage`
++ `buildHtmlEmailBody`), injects the pixel, records an `email_tracking` row, bumps
+`email_send_log`; 409 `no_connected_mailbox` → UI falls back to the mail app. Frontend:
+"Email JD" modal's **"✉ Send tracked through futé"** button; candidate profile's
+**Email activity** card ("✓ Opened · N×" / "Sent · not opened yet"). **Microsoft-only**
+(mirrors the `candidate_email` sequence channel).
 
-### PR #96 — Unify stage changes to ONE control + notes modal
-- `33-stage-modal.js`: exports single 12-stage list/colors (`ATS_STAGE_LIST`/
-  `ATS_STAGE_COLORS`). Modal header shows explicit **[current] → [target]** confirmation;
-  **Note is required** on every stage change.
-- `28-page-pipeline.js`: removed divergent `pipeline_status` vocabulary + the
-  no-confirmation **Promote** button. One "Stage" dropdown drives all via `plMove()`:
-  promoted rows open the modal directly; un-promoted rows silent-promote to "Sourced"
-  then open the same modal.
-- Real **futé letterhead** in `36-resume-format.js` (green logo base64 + Dallas footer
-  "8111 Lyndon B. Johnson Freeway, Suite 1340, Dallas, TX 75251", brand green #2E7D32).
-- Tests `stage-consolidation-smoke.mjs`, updated `workflow-gating-smoke.mjs`.
+### PR #109 — Interview scheduling + email invites (migration 025)
+Stage modal (33-stage-modal.js) captures full interview details: format
+(in-person / virtual / phone), platform + join link OR office address OR phone, up to
+3 interviewer names, and "Email these details to: Candidate / BD Manager". Stored on
+`submissions` (interview_type/platform/link/address/interviewers). `PATCH
+/submissions/:id/stage` stores them; **new** `POST /submissions/:id/interview-invite`
+emails the formatted, open-tracked details (job title, company, date/time, format,
+interviewers auto-included) to the candidate and/or the job's BD manager.
 
-### PR #96 (same) — Collapse job tabs
-Pipeline + Submissions merged into one **"Candidates"** tab (Candidates / Board / Job
-details). Ported bulk sequence + Email JD. `bdOpenSubmissions()` aliases to
-`bdOpenPipeline()` so all entry points land on Candidates. Test `tab-collapse-smoke.mjs`.
+### PR #110 — Reporting / analytics dashboard
+`GET /reports/recruiting` (org-scoped, role-aware): funnel, per-recruiter productivity
+(submitted/interviews/placements/fill%/placement-fee revenue), 8-week submission trend,
+avg time-to-fill, top clients, headline totals. `public/js/39-page-reports.js` — a
+**Reports** nav item + page (tiles, colour funnel, trend bars, recruiter table, top
+clients). Managers see the whole desk; recruiters their own. (Legacy `/bd-analytics/*`
+still exist, un-org-scoped — fold in later.)
 
-### PR #97 — Delete dead code
-Removed `public/js/29-page-submissions.js` (unreachable after the collapse) + its
-`<script>` tag. `bdOpenSubmissions` alias moved into `28-page-pipeline.js`.
+### PR #111 — Auto-create a Microsoft Teams meeting
+`POST /submissions/:id/create-meeting` creates a Teams meeting via Graph
+`/me/onlineMeetings` (reuses `graphMailRequest`), stores joinUrl + platform on the
+submission. Interview modal's **"📅 Generate Teams meeting link"** button fills it in.
+Added `OnlineMeetings.ReadWrite` to `MICROSOFT_SCOPES` (config/env.js). **Mailboxes
+connected before this need a one-time reconnect**; until then the endpoint returns
+409 `meetings_permission_missing` and the UI says so. Email/reply are unaffected.
 
-### PR #98 — "Job not found" + job details header
-- `joById()` only searches `STATE.bd.jobOrders` (populated by My Jobs list). Opening a
-  job from the All Jobs board or the dashboard top-jobs card left it empty → "Job not
-  found". `bdOpenPipeline` now calls `ensureJobOrder(jid)` → fetches `GET /job-orders/:id`
-  when missing.
-- `renderJobSummaryCard(j)` shows job description/pay/location/work-auth/skills FIRST,
-  above the candidates table, for everyone. Test `job-open-details-smoke.mjs`.
-
-### PR #99 — Submission packet + BDM review + add-candidate cleanup + robust job details
-1. **Format resume attaches to packet**: `atsFormatResumeFile(file, {onFormatted})` +
-   `atsFormattedDocDataUri` (UTF-8 safe base64). Submit-to-BDM uploads BOTH original +
-   formatted `.doc`; `submission_details` records both filenames.
-2. **BDM review before approve**: `bdViewSubmission(sid)` modal (25-workflow-bd.js) shows
-   `submission_details` + attached resume docs, with Approve→Client / Reject inside.
-   Awaiting-approval candidate is now clickable + View button.
-3. **Add-Candidate**: no default candidate list; opens on create form; search-to-reuse
-   only shows matches on query (≥2 chars). `plOpenAdd` stops pre-fetching the pool.
-4. `renderJobSummaryCard` always renders (placeholder description when blank).
-   Test `submission-review-smoke.mjs`.
-
-### PR #100 — Format Resume crash `f.skills.map is not a function`
-Parser (`resume-parser.js`) returns `skills` as a **comma-separated string**; formatter
-called `.map`. Added `skillsArray()` normalization. Also fixed field-name mismatch:
-formatter read `f.name`/`f.years_experience` but parser returns **`full_name`**/
-**`experience_years`** (was silently showing "Candidate"). Now reads full_name/
-experience_years/current_title. `36-resume-format.js`. Tests updated to real parser shape.
-
-### PR #101 — Duplicate email sends (send race)  ← latest
-Reported: assign 10 leads → click "Send all pending" → each POC emailed twice. Live DB
-showed ONE row per recipient but two Outlook messages = send race, not generation dup.
-- Root cause: `processPendingEmailSends` (index.js) dispatched then marked `status='sent'`
-  with **no atomic claim**; `POST /emails/queue-all` ran without the `activeSendByUser`
-  lock. Concurrent runs (double-click, or manual send-all overlapping auto-send/20-min
-  `retryDeferredPendingSends`) both dispatched the same pending row.
-- Fix: **atomic claim** before dispatch — conditional update `pending→sending`
-  (`.eq('id',...).eq('status','pending').select()`); if 0 rows, skip (already claimed).
-  Success→sent, failure→failed, deferred-followup→released back to pending. Plus
-  `queue-all` now acquires/releases `activeSendByUser`.
-- Verified live: first claim returns row, second returns nothing. Test `send-race-guard.mjs`.
-- **Caveat**: does not un-send already-sent duplicates. Offered to list who was double-emailed.
+### PR #112 — Email reply detection
+Hooked into the existing 30-min `sweepMailboxReplies` inbox scan (uses `Mail.ReadWrite`,
+**already granted — no reconnect needed**): an inbound message whose `from` matches a
+tracked send's `to_email` stamps `replied_at`. Candidate profile shows **"↩ Replied"**.
+No new columns/Graph calls — piggybacks on the lead reply-sweep.
 
 ---
 
-## Also done (not code PRs)
-- **Deleted all candidates + job_orders** from live DB per user request (kept the 1,252
-  BD leads in the separate `jobs` table). Note schema trap: BD leads live in `jobs`;
-  recruiting postings live in `job_orders`. 2 orphaned resume blobs remain in the
-  `candidate-docs` storage bucket (DB rows gone) — harmless, manual cleanup optional.
-
 ## Migrations applied to live Supabase this session
-- **020** `assignment_requests` (job_order_id, recruiter_id, status, note, decided_by/at)
-- **021** `submissions.submission_details` (JSONB) + `submissions.rejection_reason` (TEXT)
-  *(021 was from earlier stage-gating work; both live.)*
+- **022** `org_id` on 33 tenant tables + backfill + column DEFAULT + FK/index.
+- **023** `org_id` NOT NULL on all tenant tables.
+- **024** `email_tracking` table (org-scoped; token/open_count/opened_at/replied_at…).
+- **025** `submissions`: interview_type, interview_platform, interview_link,
+  interview_address, interviewers (jsonb).
+(Teams meeting-create and reply-detection needed **no** migration.)
+
+---
+
+## Also done (not repo PRs)
+- **Created `CLAUDE.md`** (repo root) — durable project memory, auto-loaded every
+  session; holds the owner relationship + product vision (must carry into every
+  handoff) plus per-feature status. Merged in #103/#104 area.
+- **Silenced the local stop-hook nag**: `~/.claude/stop-hook-git-check.sh` (NOT in the
+  repo — it's this workspace's Claude Code hook) now ignores GitHub's own squash/merge
+  commits (committer `noreply@github.com`) while still flagging real mis-authored
+  commits. Workspace-only; no effect on the repo or future devs.
+
+---
+
+## Open / next candidates (queued with the owner)
+1. **Reconnect a Microsoft mailbox** → activates Teams meeting creation (one-time,
+   because of the new `OnlineMeetings.ReadWrite` scope).
+2. **Google Meet / Zoom** meeting auto-create — each needs its own OAuth (Google
+   Calendar scope / a Zoom app). For now the recruiter pastes a link.
+3. **Multi-tenancy remaining:** org-scope the leads/email engine (careful — it's the
+   live send system), dashboard aggregates + single-record reads; then **slice 3b =
+   RLS** (row-level security). **DO NOT enable RLS on the live DB without an explicit,
+   fresh go-ahead** — the owner paused it once already; the pattern is proven-safe
+   (service-role bypass, frontend is API-only) but touches prod.
+4. Gmail send for tracked candidate email (currently Microsoft-only); fold the legacy
+   `/bd-analytics/*` endpoints into `/reports/recruiting` (+ org-scope them).
+5. Blueprint leftovers: BDM approvals-queue dashboard card; RA dashboard redesign; new
+   roles Recruiter Lead / Associate Director (needs `users.manager_id`).
 
 ---
 
 ## Key architecture notes (for future work)
-- **Frontend**: plain `<script>` modules in `public/js/NN-*.js`, loaded in order by
-  `public/index.html`. Global `window.*` namespace (no bundler). `render()` /`goPage()`
-  are wrapped by each page module. State on global `STATE` (`STATE.bd`, `STATE.jb`, etc.).
-- **Stage vocabulary (recruiting)**: 12 stages `Sourced, Screening, Submitted to BDM,
-  Submitted to Client, Interview Scheduled, Interview Completed, Offer, Confirmation,
-  Placement, Rejected, Not Joined, On Hold`. Single source `ATS_STAGE_LIST` (33-stage-modal.js).
-- **Lead vocabulary (BD/RA, table `jobs`)**: Unassigned, Assigned, Connected, Rejected,
-  Future, In Discussion — DIFFERENT from recruiting stages. Don't conflate.
-- **Recruiter gating**: recruiters change stages only up to "Submitted to BDM"; BD owns
-  everything after (enforced in `PATCH /submissions/:id/stage` + the stage modal).
-- **Roles**: `userHasRole(u,role)` / `userHasAnyRole(u,...)`; roles in `u.roles[]` (fallback `u.role`).
-- **Email send**: `processPendingEmailSends(userId, pending, opts)` is the ONE send loop
-  (used by manual `queue-all` and `autoSendForManager`/`retryDeferredPendingSends`).
-  Per-email atomic claim now guarantees no double-dispatch.
+- **Frontend**: plain `<script>` modules `public/js/NN-*.js`, loaded in order by
+  `public/index.html`, no build step. Global `window.*` + `STATE`. `render()`/`goPage()`
+  are wrapped by each page module. New this session: 37-nav-history, 38-match-score,
+  39-page-reports. Reports/nav icon added in 03-core-render.js.
+- **Backend**: `index.js` (email/lead engine, auth, send helpers, org context) +
+  `bd_recruiter_routes.js` (ATS) + `routes/*.js`. New: `email-tracking.js` (root
+  helpers), `routes/tracking.js`. Route modules receive `orgIdFor` via `routeCtx`.
+- **Multi-tenant helpers**: `req.orgId` (auth middleware), `orgIdFor(req)`,
+  `orgStamp(req)` (inserts), `withOrg(query, req)` (reads) in bd_recruiter_routes.js.
+- **Email send**: `sendMicrosoftNewMessage` / gmail `sendNewMessage` via
+  `deliverOutboundEmail`'s platform dispatch; `buildHtmlEmailBody(plain, sig)`;
+  `recruiterSendingMailbox(userId)` resolves a **Microsoft-connected** mailbox only.
+  `graphMailRequest(token, path, opts)` is a generic Graph client (v1.0).
+- **Two vocabularies**: recruiting = `job_orders` + `submissions` (12 stages); BD leads
+  = `jobs` (Unassigned/Assigned/Connected…). Recruiter gating: up to "Submitted to BDM".
 
-## Test suites (all green as of PR #101)
+## Test suites (all green — 17 suites)
 `test/`: backend-smoke (89), frontend-smoke (14), recruiter-dashboard-smoke (34),
-workflow-gating-smoke (25), stage-consolidation-smoke (12), tab-collapse-smoke (10),
+workflow-gating-smoke (25), stage-consolidation-smoke (12), tab-collapse-smoke (11),
 job-open-details-smoke (12), submission-review-smoke (16), lead-location-parse (14),
-lead-stage-permission (13), send-race-guard (7). Runner needs
-`npm install --no-save playwright-core`; Chromium at `$PLAYWRIGHT_BROWSERS_PATH`.
-`bash test/verify-frontend.sh` checks per-file syntax + index.html consistency.
-
-## Open / next candidates
-- BDM **approvals queue** card on the dashboard (blueprint phase 1, still to build).
-- RA dashboard redesign (target-milestone banner, lead-outcome card).
-- New roles Recruiter Lead / Associate Director + `users.manager_id` (needs product input).
-- Candidates list still shows full contact details to any recruiter (only the job-board
-  is masked) — decide if that should be locked too.
-- Real letterhead is wired; if a richer template is provided, swap in 36-resume-format.js.
+lead-stage-permission (13), send-race-guard (7), **job-candidate-updates-smoke (25)**,
+**match-score-smoke (11)**, **email-tracking-smoke (7)**, **email-tracking-send-smoke
+(10)**, **interview-schedule-smoke (16)**, **reports-smoke (8)** (bold = new this
+session). Runner: `npm install --no-save playwright-core`; Chromium at
+`$PLAYWRIGHT_BROWSERS_PATH`. `bash test/verify-frontend.sh` checks syntax + index.html.
 
 ## Working conventions this session
-- Each change: implement → `node --check` → targeted browser/DB test → screenshot → commit
-  → **rebase branch onto latest origin/main** (`git checkout -B <branch> origin/main`) →
-  force-with-lease push → open PR (draft then ready) → squash-merge. Prior PRs are merged,
-  so the dev branch restarts from main each time.
-- Commit trailer: `Co-Authored-By: Claude ...` + `Claude-Session: https://claude.ai/code/session_01P2jfTWrUuDqJbzKNMzp9UC`.
+Implement → `node --check` → targeted smoke → screenshot (shown to the owner) →
+commit → **reset branch to `origin/main` + cherry-pick/commit the new work** →
+force-with-lease push → open PR → squash-merge (I merge; owner can't do git) → it
+deploys. Keep `CLAUDE.md` + this file current. Commit trailer:
+`Co-Authored-By: Claude Opus 4.8 …` + `Claude-Session: …`.
