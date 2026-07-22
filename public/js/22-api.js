@@ -34,7 +34,7 @@ function normaliseUser(u){
   var roles=u.roles||(u.role?[u.role]:[]);
   var primaryRole=roles[0]||u.role||'ra';
   var roleAvc={admin:'av-admin',bd:'av-bd',ra:'av-ra',ra_lead:'av-admin',bd_lead:'av-bd'};
-  return{id:u.id,name:nm,email:u.email,role:primaryRole,roles:roles,empId:u.employee_id,desig:u.designation,plt:u.platform||'Gmail',ooo:u.ooo_until||null,av:initials.toUpperCase()||'?',avc:roleAvc[primaryRole]||'av-ra',bdm:null};
+  return{id:u.id,name:nm,email:u.email,role:primaryRole,roles:roles,empId:u.employee_id,desig:u.designation,plt:u.platform||'Gmail',ooo:u.ooo_until||null,av:initials.toUpperCase()||'?',avc:roleAvc[primaryRole]||'av-ra',bdm:null,managerId:u.manager_id||null,managerName:(u.manager&&u.manager.name)||''};
 }
 function userHasRole(u,role){
   if(!u)return false;

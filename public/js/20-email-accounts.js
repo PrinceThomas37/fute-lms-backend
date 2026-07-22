@@ -53,8 +53,8 @@ function renderManagerUserDetail(userId){
   var assignments=STATE.teamAssignments||[];
   var myManagers=assignments.filter(function(a){return a.member_id===userId;});
   var myMembers=assignments.filter(function(a){return a.manager_id===userId;});
-  var rolesAll=['admin','ra_lead','bd_lead','bd','ra'];
-  var roleLabelsMap={admin:'Admin',ra_lead:'RA Team Lead',bd_lead:'BD Team Lead',bd:'BD Manager',ra:'Research Analyst'};
+  var rolesAll=['admin','ra_lead','bd_lead','associate_director','director','bd','ra'];
+  var roleLabelsMap={admin:'Admin',ra_lead:'RA Team Lead',bd_lead:'BD Team Lead',associate_director:'Associate Director',director:'Director',bd:'BD Manager',ra:'Research Analyst'};
   var userRoles=usr.roles||[usr.role];
   var roleCheckboxes=rolesAll.map(function(r){
     var checked=userRoles.indexOf(r)>-1;

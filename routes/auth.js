@@ -48,13 +48,42 @@ router.post('/auth/change-password', auth, async (req, res) => {
 // ══════════════════════════════════════════════════════════════
 // USERS
 // ══════════════════════════════════════════════════════════════
-const USER_COLS = 'id,name,email,role,roles,employee_id,designation,platform,is_active,created_at';
+const USER_COLS = 'id,name,email,role,roles,employee_id,designation,platform,is_active,created_at,manager_id';
 
 router.get('/users', auth, async (req, res) => {
   try {
-    const { data, error } = await supabase.from('users').select(USER_COLS).is('deleted_at', null).order('name');
+    const { data, error } = await supabase.from('users')
+      .select(USER_COLS + ',manager:users!manager_id(id,name)').is('deleted_at', null).order('name');
     if (error) throw error;
     res.json(data.map(u => ({ ...u, roles: u.roles || (u.role ? [u.role] : []) })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Who a user reports to — any user may report to any other user (flexible
+// hierarchy, not a fixed role ladder); admin-only to change. Rejects a cycle
+// (setting someone's manager to one of their own reports, direct or
+// transitive) and self-management.
+router.put('/users/:id/manager', auth, async (req, res) => {
+  try {
+    if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
+    const { id } = req.params;
+    const managerId = req.body.manager_id || null;
+    if (managerId === id) return res.status(400).json({ error: "A user can't report to themselves." });
+    if (managerId) {
+      const { data: allUsers } = await supabase.from('users').select('id,manager_id').is('deleted_at', null);
+      const byId = new Map((allUsers || []).map(u => [u.id, u.manager_id]));
+      let walk = managerId, hops = 0;
+      while (walk && hops < 100) {
+        if (walk === id) return res.status(400).json({ error: 'That would create a reporting loop.' });
+        walk = byId.get(walk) || null;
+        hops++;
+      }
+    }
+    const { data, error } = await supabase.from('users')
+      .update({ manager_id: managerId, updated_at: new Date() }).eq('id', id)
+      .select(USER_COLS + ',manager:users!manager_id(id,name)').single();
+    if (error) throw error;
+    res.json({ ...data, roles: data.roles || (data.role ? [data.role] : []) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

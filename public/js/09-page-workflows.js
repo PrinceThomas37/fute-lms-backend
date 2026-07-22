@@ -606,8 +606,8 @@ function renderAdminUserDetail(userId){
   }
 
   // role dropdown only — this IS the designation
-  var roleOpts=['ra','ra_lead','bd','bd_lead','admin','recruiter'].map(function(r){
-    var labels={ra:'Research Analyst',ra_lead:'RA Team Lead',bd:'BD Manager',bd_lead:'BD Team Lead',admin:'Admin',recruiter:'Recruiter'};
+  var roleOpts=['ra','ra_lead','bd','bd_lead','associate_director','director','admin','recruiter'].map(function(r){
+    var labels={ra:'Research Analyst',ra_lead:'RA Team Lead',bd:'BD Manager',bd_lead:'BD Team Lead',associate_director:'Associate Director',director:'Director',admin:'Admin',recruiter:'Recruiter'};
     return '<option value="'+r+'"'+(usr.role===r?' selected':'')+'>'+labels[r]+'</option>';
   }).join('');
 
@@ -693,7 +693,37 @@ function renderAdminUserDetail(userId){
         teamHtml+
       '</div>'+
 
+      // Reporting Hierarchy — a flexible, general reporting chain (any user
+      // can report to any other user), separate from the RA/BD Team
+      // Assignment above. This is what "Team creation" and hierarchy-scoped
+      // reports are built on: a user + everyone under them in this chain.
+      adminReportingHierarchyCard(usr)+
+
     '</div>'+
   '</div>';
 }
+
+function adminReportingHierarchyCard(usr){
+  var all=STATE.users||[];
+  var directReports=all.filter(function(x){return x.managerId===usr.id;});
+  var managerOpts='<option value="">— No manager —</option>'+
+    all.filter(function(x){return x.id!==usr.id;})
+      .map(function(x){return '<option value="'+x.id+'"'+(usr.managerId===x.id?' selected':'')+'>'+htmlEsc(x.name)+' ('+roleLabel(x.role)+')</option>';}).join('');
+  return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
+    '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Reporting Hierarchy</div>'+
+    '<div class="fgrp" style="margin-bottom:10px"><label class="flbl">Reports to</label>'+
+      '<select class="sel" onchange="adminSetManager(\''+usr.id+'\',this.value)">'+managerOpts+'</select>'+
+    '</div>'+
+    (directReports.length
+      ? '<div style="font-size:13px">Direct reports ('+directReports.length+'): '+directReports.map(function(x){return '<strong>'+htmlEsc(x.name)+'</strong>';}).join(', ')+'</div>'
+      : '<div style="font-size:13px;color:var(--text3)">No one reports to this user yet.</div>')+
+  '</div>';
+}
+
+window.adminSetManager=function(userId,managerId){
+  apiPut('/users/'+userId+'/manager',{manager_id:managerId||null}).then(function(updated){
+    STATE.users=STATE.users.map(function(u){return u.id===userId?normaliseUser(updated):u;});
+    showToast('Reporting manager updated','success');render();
+  }).catch(function(e){showToast('Failed: '+e.message,'error');render();});
+};
 
