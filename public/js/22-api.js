@@ -171,6 +171,18 @@ function startBackgroundPoll(){
       STATE.contacts=flattenContacts(raw);
       scheduleRender();
     }).catch(function(){});
+    // Always refresh users — STATE.users otherwise only loads once at login, so a
+    // name/role change made by someone else (or in another tab) never showed up
+    // anywhere that reads from it (avatars, assignee labels, pickers) until a
+    // full page reload.
+    apiGet('/users').then(function(raw){
+      STATE.users=(raw||[]).map(normaliseUser);
+      if(STATE.user&&!STATE.user.isGuest){
+        var me=STATE.users.find(function(u){return u.id===STATE.user.id;});
+        if(me){STATE.user.name=me.name;STATE.user.email=me.email;STATE.user.role=me.role;STATE.user.roles=me.roles;}
+      }
+      scheduleRender();
+    }).catch(function(){});
     // Refresh emails when on email page
     if(pg==='email'){loadEmailsForCurrentUser();}
     // Refresh pool stats when on assign page
