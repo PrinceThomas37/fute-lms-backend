@@ -621,7 +621,7 @@ function renderAdminUserDetail(userId){
     var platBadge='<span style="font-size:10px;padding:2px 7px;border-radius:6px;font-weight:600;background:'+(e.platform==='Microsoft'?'#e0f2fe':'#f0fdf4')+';color:'+(e.platform==='Microsoft'?'#0369a1':'#166534')+'">'+htmlEsc(e.platform)+'</span>';
     var connBtn='';
     if(e.platform==='Microsoft'){
-      connBtn=!msConn?'<button onclick="connectMicrosoftUserEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:10px;padding:2px 8px;background:#0078d4;color:#fff;border:0;border-radius:6px;cursor:pointer">Connect</button>':'<span style="font-size:10px;color:var(--green)">✓ Connected</span>';
+      connBtn=!msConn?'<button onclick="connectMicrosoftUserEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:10px;padding:2px 8px;background:#0078d4;color:#fff;border:0;border-radius:6px;cursor:pointer">Connect</button>':'<span style="font-size:10px;color:var(--green)">✓ Connected</span> <button onclick="connectMicrosoftUserEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:10px;padding:2px 8px;background:transparent;color:var(--text3);border:1px solid var(--border2);border-radius:6px;cursor:pointer">Reconnect</button>';
     } else if(e.platform==='Gmail'){
       connBtn=!e.gmail_connected?'<button onclick="connectGmailUserEmail(\''+userId+'\',\''+e.id+'\')" style="font-size:10px;padding:2px 8px;background:#16a34a;color:#fff;border:0;border-radius:6px;cursor:pointer">Connect</button>':'<span style="font-size:10px;color:var(--green)">✓ Connected</span>';
     }
