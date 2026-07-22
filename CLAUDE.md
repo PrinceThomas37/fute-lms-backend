@@ -117,7 +117,11 @@ Ordered by "cheapest to do now vs. most painful to retrofit":
      **Caveat:** send path is Microsoft-only for now (mirrors the existing
      `candidate_email` channel; `recruiterSendingMailbox` only checks `microsoft_tokens`).
      Gmail send = a small follow-up (check `gmail_tokens` + dispatch by `platform`).
-   - **Slice 3 (next):** reply detection (unique reply-to / mailbox scan) — bigger.
+   - **Slice 3 DONE:** reply detection — hooked into the existing 30-min
+     `sweepMailboxReplies` inbox scan (uses `Mail.ReadWrite`, already granted, so NO
+     reconnect needed): an inbound message whose `from` matches a tracked send's
+     `to_email` stamps `replied_at`. Candidate profile Email-activity card shows
+     **"↩ Replied"** (green). No new columns/Graph calls — reuses the lead sweep.
    - **Interview scheduling (related, DONE):** the stage modal captures full
      interview details — format (in-person / virtual / phone), platform + join link
      or office address, up to 3 interviewer names — stored on `submissions`

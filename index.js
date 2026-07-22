@@ -2193,6 +2193,17 @@ async function sweepMailboxReplies(tokenRow, ownAddresses) {
       }
       detected++;
     }
+    // Candidate email tracking: a reply from this address answers any tracked
+    // candidate/interview email we sent it — mark those rows replied. Reuses this
+    // same inbox fetch (no extra Graph calls). Best-effort; never breaks the sweep.
+    try {
+      const { data: trk } = await supabase.from('email_tracking')
+        .select('id').ilike('to_email', from).is('replied_at', null).limit(20);
+      for (const r of (trk || [])) {
+        await supabase.from('email_tracking').update({ replied_at: msg.receivedDateTime || new Date() }).eq('id', r.id);
+        detected++;
+      }
+    } catch (_) { /* best-effort */ }
   }
   await supabase.from('app_settings').upsert({ key: sinceKey, value: newest, updated_at: new Date() }, { onConflict: 'key' });
   return detected;
