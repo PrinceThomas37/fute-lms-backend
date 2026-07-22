@@ -445,10 +445,14 @@ function renderAdmin(){
       :'<button onclick="toggleSending(true)" style="padding:9px 18px;background:#dc2626;color:#fff;border:0;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">⏸ Emergency stop</button>')+
   '</div>';
 
+  var teamView=!!STATE.adminTeamView;
+  var teamViewBtn='<button class="btn btn-sm '+(teamView?'btn-primary':'btn-outline')+'" onclick="setAdminTeamView('+(!teamView)+')">🌳 Team View</button>';
+
   return '<div class="page">'+
     '<div class="ph"><div class="flex jb aic">'+
       '<div><div class="ptitle">Admin</div><div class="psub">'+allUsers.length+' users · Fute Global LLC</div></div>'+
       '<div style="display:flex;gap:8px;align-items:center">'+
+        teamViewBtn+
         (canSeeEngine?engineBtn:'')+
         (isAdmin?integrationsBtn:'')+
         (isAdmin?sysSettingsBtn:'')+
@@ -457,15 +461,91 @@ function renderAdmin(){
       '</div>'+
     '</div></div>'+
     stopCard+
-    '<div style="margin-bottom:14px">'+
-      '<input class="inp" placeholder="Search by name, email, employee ID…" value="'+htmlEsc(STATE.adminSearch||'')+'" oninput="STATE.adminSearch=this.value;render()" style="max-width:360px">'+
-    '</div>'+
-    '<div style="display:flex;gap:2px;border-bottom:2px solid var(--border);margin-bottom:16px">'+tabBar+'</div>'+
-    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
-      (rows||'<div style="padding:40px;text-align:center;color:var(--text3);font-size:13px">'+(q?'No users match "'+htmlEsc(q)+'"':'No users in this group yet.')+'</div>')+
-    '</div>'+
+    (teamView ? renderTeamTree() :
+      ('<div style="margin-bottom:14px">'+
+        '<input class="inp" placeholder="Search by name, email, employee ID…" value="'+htmlEsc(STATE.adminSearch||'')+'" oninput="STATE.adminSearch=this.value;render()" style="max-width:360px">'+
+      '</div>'+
+      '<div style="display:flex;gap:2px;border-bottom:2px solid var(--border);margin-bottom:16px">'+tabBar+'</div>'+
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
+        (rows||'<div style="padding:40px;text-align:center;color:var(--text3);font-size:13px">'+(q?'No users match "'+htmlEsc(q)+'"':'No users in this group yet.')+'</div>')+
+      '</div>'))+
   '</div>';
 }
+
+window.setAdminTeamView=function(v){ STATE.adminTeamView=v; render(); };
+
+// ── Team View: a drag-and-drop org chart over the same flexible hierarchy as
+// the Reporting Hierarchy card (users.manager_id) — drag anyone onto another
+// user to make them report to them; drag onto "Company (no manager)" to make
+// them top-level. Whoever has direct reports can name their team.
+function renderTeamTree(){
+  var users=STATE.users||[];
+  var byManager={};
+  users.forEach(function(u){
+    var key=u.managerId||'__root__';
+    (byManager[key]=byManager[key]||[]).push(u);
+  });
+  Object.keys(byManager).forEach(function(k){ byManager[k].sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); }); });
+
+  function nodeHtml(u, depth){
+    var kids=byManager[u.id]||[];
+    var editing=STATE._editingTeamName===u.id;
+    var teamLabel=kids.length
+      ? (editing
+          ? '<input id="team-name-'+u.id+'" class="inp" style="display:inline-block;width:180px;font-size:11.5px;padding:3px 8px;margin-left:8px" value="'+htmlEsc(u.teamName||'')+'" onkeydown="if(event.key===\'Enter\')teamSaveName(\''+u.id+'\')" onblur="teamSaveName(\''+u.id+'\')"/>'
+          : '<span onclick="event.stopPropagation();teamEditName(\''+u.id+'\')" style="margin-left:8px;font-size:11.5px;color:var(--accent);cursor:pointer;padding:2px 8px;background:var(--accent-l);border-radius:8px">'+(u.teamName?htmlEsc(u.teamName):'+ Name this team')+'</span>')
+      : '';
+    var childrenHtml=kids.map(function(k){ return nodeHtml(k, depth+1); }).join('');
+    return '<div style="margin-left:'+(depth?22:0)+'px;margin-top:6px">'+
+      '<div draggable="true" ondragstart="teamDragStart(event,\''+u.id+'\')" ondragover="teamDragOver(event)" ondrop="teamDrop(event,\''+u.id+'\')" '+
+        'style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px;cursor:grab;max-width:520px">'+
+        av(u,'28')+
+        '<span style="font-weight:600;font-size:13px">'+htmlEsc(u.name)+'</span>'+
+        '<span style="font-size:10.5px;padding:2px 7px;background:var(--bg);border:1px solid var(--border);color:var(--text3);border-radius:7px">'+htmlEsc(roleLabel(u.role))+'</span>'+
+        teamLabel+
+        (kids.length?'<span style="margin-left:auto;font-size:11px;color:var(--text3)">'+kids.length+' report'+(kids.length!==1?'s':'')+'</span>':'')+
+      '</div>'+
+      childrenHtml+
+    '</div>';
+  }
+
+  var roots=(byManager['__root__']||[]);
+  var tree=roots.map(function(u){ return nodeHtml(u,0); }).join('') ||
+    '<div style="padding:20px;color:var(--text3);font-size:13px">No users yet.</div>';
+
+  return '<div style="margin-bottom:10px;font-size:12.5px;color:var(--text3)">Drag a user onto another to make them report to them. Drag onto "Company (no manager)" below to make someone top-level. Whoever has reports can name their team.</div>'+
+    '<div ondragover="teamDragOver(event)" ondrop="teamDrop(event,\'\')" style="padding:12px 14px;border:2px dashed var(--border2);border-radius:10px;margin-bottom:14px;text-align:center;font-size:12.5px;color:var(--text3)">Company (no manager) — drop here to make someone top-level</div>'+
+    '<div style="max-height:60vh;overflow:auto;padding-bottom:20px">'+tree+'</div>';
+}
+
+window.teamDragStart=function(ev,id){ ev.dataTransfer.setData('text/plain',id); ev.dataTransfer.effectAllowed='move'; };
+window.teamDragOver=function(ev){ ev.preventDefault(); ev.dataTransfer.dropEffect='move'; };
+window.teamDrop=function(ev,targetId){
+  ev.preventDefault();
+  var draggedId=ev.dataTransfer.getData('text/plain');
+  if(!draggedId||draggedId===targetId)return;
+  if(targetId){
+    var users=STATE.users||[], walk=targetId, hops=0;
+    while(walk&&hops<100){
+      if(walk===draggedId){ showToast('That would create a reporting loop.','error'); return; }
+      var u=users.find(function(x){return x.id===walk;});
+      walk=u?u.managerId:null;
+      hops++;
+    }
+  }
+  adminSetManager(draggedId, targetId||'');
+};
+window.teamEditName=function(id){ STATE._editingTeamName=id; render(); setTimeout(function(){ var el=document.getElementById('team-name-'+id); if(el){el.focus();el.select();} },0); };
+window.teamSaveName=function(id){
+  if(STATE._editingTeamName!==id)return; // already saved (e.g. Enter then blur firing twice)
+  STATE._editingTeamName=null;
+  var el=document.getElementById('team-name-'+id);
+  var val=el?el.value.trim():'';
+  apiPut('/users/'+id,{team_name:val}).then(function(updated){
+    STATE.users=STATE.users.map(function(u){return u.id===id?normaliseUser(updated):u;});
+    render();
+  }).catch(function(e){ showToast('Failed: '+e.message,'error'); render(); });
+};
 
 // ── Control Center — per-user pending-queue counts (lazy, cached per user) ──
 function loadUserQueueCounts(userId){
