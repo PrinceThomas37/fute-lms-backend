@@ -295,14 +295,18 @@
     // Email activity — tracked sends and whether the candidate opened them.
     var ea = pr.emailActivity || [];
     var eaRows = ea.map(function(e){
-      var opened = !!e.opened_at;
-      var badge = opened
-        ? '<span style="font-size:11px;font-weight:700;color:var(--green);background:rgba(0,0,0,.04);padding:2px 8px;border-radius:10px">✓ Opened'+((e.open_count>1)?' · '+e.open_count+'×':'')+'</span>'
-        : '<span style="font-size:11px;font-weight:700;color:var(--text3);background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:10px">Sent · not opened yet</span>';
+      var opened = !!e.opened_at, replied = !!e.replied_at;
+      var badge = replied
+        ? '<span style="font-size:11px;font-weight:700;color:#fff;background:var(--green);padding:2px 9px;border-radius:10px">↩ Replied</span>'
+        : (opened
+          ? '<span style="font-size:11px;font-weight:700;color:var(--green);background:rgba(0,0,0,.04);padding:2px 8px;border-radius:10px">✓ Opened'+((e.open_count>1)?' · '+e.open_count+'×':'')+'</span>'
+          : '<span style="font-size:11px;font-weight:700;color:var(--text3);background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:10px">Sent · not opened yet</span>');
+      var sub = 'to '+esc(e.to_email||'')+' · '+esc(fmtDT(e.sent_at))+
+        (e.replied_at?' · replied '+esc(fmtDT(e.replied_at)):(e.opened_at?' · opened '+esc(fmtDT(e.opened_at)):''));
       return '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--border)">'+
         '<div style="min-width:0">'+
           '<div style="font-size:13px;font-weight:600">'+esc(e.subject||'(no subject)')+'</div>'+
-          '<div style="font-size:11px;color:var(--text3)">to '+esc(e.to_email||'')+' · '+esc(fmtDT(e.sent_at))+(e.opened_at?' · opened '+esc(fmtDT(e.opened_at)):'')+'</div>'+
+          '<div style="font-size:11px;color:var(--text3)">'+sub+'</div>'+
         '</div>'+badge+
       '</div>';
     }).join('') || '<div style="padding:10px 4px;color:var(--text3);font-size:12.5px">No tracked emails yet. Use “Send tracked through futé” from a job’s Candidates tab.</div>';

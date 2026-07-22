@@ -74,14 +74,16 @@ try {
     STATE.bd.profile = { id: 'c1', candidate: { id: 'c1', full_name: 'A Candidate', candidate_code: 'CN-1' },
       history: { pipeline: [], submissions: [], activity: [] }, notes: [], documents: [], selJob: null, noteTab: 'applicant_reference',
       emailActivity: [
-        { subject: 'Opportunity: Estimator', to_email: 'a@x.com', sent_at: '2026-07-21T10:00:00Z', opened_at: '2026-07-21T12:00:00Z', open_count: 3 },
-        { subject: 'Follow up', to_email: 'a@x.com', sent_at: '2026-07-21T14:00:00Z', opened_at: null, open_count: 0 }
+        { subject: 'Opportunity: Estimator', to_email: 'a@x.com', sent_at: '2026-07-21T10:00:00Z', opened_at: '2026-07-21T12:00:00Z', open_count: 3, replied_at: null },
+        { subject: 'Follow up', to_email: 'a@x.com', sent_at: '2026-07-21T14:00:00Z', opened_at: null, open_count: 0, replied_at: null },
+        { subject: 'Re: interview', to_email: 'a@x.com', sent_at: '2026-07-20T09:00:00Z', opened_at: '2026-07-20T09:30:00Z', open_count: 1, replied_at: '2026-07-20T15:00:00Z' }
       ] };
     return window.renderCandidateProfile();
   });
   step('Profile shows an Email activity card', prof.includes('Email activity'));
   step('Opened email shows "✓ Opened" with count', /✓ Opened.*3×/.test(prof.replace(/\s+/g, ' ')));
   step('Un-opened email shows "not opened yet"', prof.includes('not opened yet'));
+  step('Replied email shows "↩ Replied"', prof.includes('↩ Replied'));
 
   step('No uncaught page errors', pageErrors.length === 0, pageErrors.join(' | '));
 } catch (e) {
