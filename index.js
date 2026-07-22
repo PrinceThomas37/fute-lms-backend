@@ -2681,16 +2681,32 @@ wfEngine.registerContextLoader('submission', async (enrollment) => {
 });
 
 // The recruiter's connected sending mailbox (primary first), or null if none.
+// Checks both Microsoft (Graph) and Gmail tokens — callers dispatch the actual
+// send by mailbox.platform via sendMailboxNewMessage().
 async function recruiterSendingMailbox(recruiterId) {
   if (!recruiterId) return null;
   const { data: mailboxes } = await supabase.from('user_emails')
-    .select('id,email_address,display_name,is_primary,is_active,daily_send_limit')
+    .select('id,email_address,display_name,is_primary,is_active,daily_send_limit,platform')
     .eq('user_id', recruiterId).order('is_primary', { ascending: false });
   if (!mailboxes?.length) return null;
-  const { data: tokens } = await supabase.from('microsoft_tokens')
-    .select('user_email_id').in('user_email_id', mailboxes.map(m => m.id));
-  const connected = new Set((tokens || []).map(t => t.user_email_id));
+  const ids = mailboxes.map(m => m.id);
+  const [{ data: msTokens }, { data: gmailTokens }] = await Promise.all([
+    supabase.from('microsoft_tokens').select('user_email_id').in('user_email_id', ids),
+    supabase.from('gmail_tokens').select('user_email_id').in('user_email_id', ids)
+  ]);
+  const connected = new Set([...(msTokens || []), ...(gmailTokens || [])].map(t => t.user_email_id));
   return mailboxes.find(m => connected.has(m.id) && m.is_active !== false) || null;
+}
+
+// Dispatch a fresh outbound message by the mailbox's connected platform —
+// the Microsoft/Gmail counterpart to sendMicrosoftNewMessage alone. Both
+// providers return a message + thread/conversation id in the same shape.
+async function sendMailboxNewMessage(mailbox, { to, subject, htmlBody }) {
+  if (mailbox.platform === 'Gmail') {
+    const r = await gmailProvider.sendNewMessage(mailbox.id, { to, subject, htmlBody, fromAddress: mailbox.email_address });
+    return { graphMessageId: r.messageId, conversationId: r.threadId || null, inReplyTo: null };
+  }
+  return sendMicrosoftNewMessage(mailbox.id, { to, subject, htmlBody });
 }
 
 // A specific mailbox by id, but only if it's active AND connected — used by
@@ -2699,10 +2715,11 @@ async function recruiterSendingMailbox(recruiterId) {
 async function connectedMailboxById(id) {
   if (!id) return null;
   const { data: mb } = await supabase.from('user_emails')
-    .select('id,email_address,display_name,is_primary,is_active,daily_send_limit')
+    .select('id,email_address,display_name,is_primary,is_active,daily_send_limit,platform')
     .eq('id', id).maybeSingle();
   if (!mb || mb.is_active === false) return null;
-  const { data: tok } = await supabase.from('microsoft_tokens').select('user_email_id').eq('user_email_id', id).maybeSingle();
+  const tokenTable = mb.platform === 'Gmail' ? 'gmail_tokens' : 'microsoft_tokens';
+  const { data: tok } = await supabase.from(tokenTable).select('user_email_id').eq('user_email_id', id).maybeSingle();
   return tok ? mb : null;
 }
 
@@ -2744,7 +2761,7 @@ wfEngine.registerChannel('candidate_email', async ({ step, enrollment, context }
   const subject = fillTemplate(cfg.subject || DEFAULT_CANDIDATE_EMAIL.subject, vars);
   const htmlBody = fillTemplate(cfg.body || DEFAULT_CANDIDATE_EMAIL.body, vars);
   try {
-    const r = await sendMicrosoftNewMessage(mailbox.id, { to: candidate.email, subject, htmlBody });
+    const r = await sendMailboxNewMessage(mailbox, { to: candidate.email, subject, htmlBody });
     await supabase.from('email_send_log').upsert(
       { user_email_id: mailbox.id, send_date: today(), emails_sent: (sendLog?.emails_sent || 0) + 1 },
       { onConflict: 'user_email_id,send_date' }
@@ -2785,7 +2802,7 @@ app.post('/candidates/email', auth, async (req, res) => {
       const token = newTrackToken();
       const htmlBody = injectTrackPixel(buildHtmlEmailBody(bodyText, signature), token);
       try {
-        await sendMicrosoftNewMessage(mailbox.id, { to, subject, htmlBody });
+        await sendMailboxNewMessage(mailbox, { to, subject, htmlBody });
         await supabase.from('email_tracking').insert({
           token, channel: 'candidate', candidate_id: r.candidate_id || null,
           job_order_id: b.job_order_id || null, to_email: to, subject,
