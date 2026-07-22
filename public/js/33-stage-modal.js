@@ -117,6 +117,10 @@
                   '</select></div>'+
                 '<div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Join link / meeting ID</label>'+
                   '<input id="stg-iv-link" class="sel" placeholder="https://… or meeting ID" value="'+esc(ivType0==='virtual'?ivLink0:'')+'"></div>'+
+                (ids.length===1?'<div style="grid-column:1/-1;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+
+                  '<button type="button" class="btn btn-sm btn-outline" onclick="stgGenTeams(\''+ids[0]+'\')">📅 Generate Teams meeting link</button>'+
+                  '<span style="font-size:11px;color:var(--text3)">Creates a Microsoft Teams meeting &amp; fills the link above.</span>'+
+                '</div>':'')+
               '</div>'+
               '<div id="stg-iv-inperson" style="display:'+(ivType0==='in_person'?'block':'none')+';margin-top:10px">'+
                 '<label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Office address</label>'+
@@ -162,6 +166,22 @@
     set('stg-iv-virtual', t==='virtual', 'grid');
     set('stg-iv-inperson', t==='in_person', 'block');
     set('stg-iv-phone', t==='phone', 'block');
+  };
+
+  // Auto-create a Microsoft Teams meeting and drop the join link into the form.
+  window.stgGenTeams = function(subId){
+    var at = (document.getElementById('stg-iv-at')||{}).value;
+    if(!at){ showToast('Set the interview date & time first','error'); return; }
+    showToast('Creating Teams meeting…','info');
+    apiPost('/submissions/'+subId+'/create-meeting', { start: at }).then(function(r){
+      var el=document.getElementById('stg-iv-link'); if(el && r && r.joinUrl) el.value=r.joinUrl;
+      var pf=document.getElementById('stg-iv-platform'); if(pf) pf.value='Microsoft Teams';
+      showToast('Teams meeting created — link added','success');
+    }).catch(function(e){
+      if(/no_connected_mailbox/.test(e.message)) showToast('Connect your Microsoft mailbox first (Email settings)','error');
+      else if(/meetings_permission_missing/.test(e.message)) showToast('One-time: reconnect your mailbox to allow Teams meeting creation','error');
+      else showToast('Could not create meeting: '+e.message,'error');
+    });
   };
 
   window.stgApply = function () {
