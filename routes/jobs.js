@@ -44,6 +44,7 @@ module.exports = (ctx) => {
   const {
     supabase, auth, hasRole, today, logActivity, canTouchJob,
     loadAllJobs, JOB_SELECT, getTimezoneFromLocation, persistLearnedSkills,
+    orgIdFor, withOrg, orgStamp,
   } = ctx;
 
   /**
@@ -114,7 +115,7 @@ module.exports = (ctx) => {
 
 router.get('/jobs', auth, async (req, res) => {
   try {
-    const all = await loadAllJobs();
+    const all = await loadAllJobs(orgIdFor(req));
     let data;
     if (hasRole(req, 'admin', 'ra_lead')) {
       data = all;
@@ -133,11 +134,11 @@ router.get('/jobs/today-summary', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'Not allowed' });
     const todayStr = today();
-    const { data: todayJobs, error } = await supabase
+    const { data: todayJobs, error } = await withOrg(supabase
       .from('jobs')
       .select('id, position, industry, location, freshness, is_duplicate, timezone, company:companies(name, industry), contacts(id, designation)')
       .gte('created_at', todayStr + 'T00:00:00Z')
-      .is('deleted_at', null);
+      .is('deleted_at', null), req);
     if (error) throw error;
     const total = todayJobs.length;
     const duplicates = todayJobs.filter(j => j.is_duplicate).length;
@@ -152,7 +153,7 @@ router.get('/jobs/today-summary', auth, async (req, res) => {
     todayJobs.forEach(j => { byPosition[j.position] = (byPosition[j.position] || 0) + 1; });
     const topPositions = Object.entries(byPosition).sort((a,b) => b[1]-a[1]).slice(0,5).map(([k,v]) => `${k} (${v})`);
     const totalContacts = todayJobs.reduce((s, j) => s + (j.contacts?.length || 0), 0);
-    const { count: poolSize } = await supabase.from('jobs').select('id', { count: 'exact', head: true }).eq('stage', 'Unassigned').is('deleted_at', null);
+    const { count: poolSize } = await withOrg(supabase.from('jobs').select('id', { count: 'exact', head: true }).eq('stage', 'Unassigned').is('deleted_at', null), req);
     res.json({ date: todayStr, total, clean, duplicates, totalContacts, byIndustry, byFreshness, byTimezone, topPositions, poolSize: poolSize || 0 });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -161,6 +162,8 @@ router.get('/jobs/:id', auth, async (req, res) => {
   try {
     const { data, error } = await supabase.from('jobs').select(JOB_SELECT).eq('id', req.params.id).is('deleted_at', null).single();
     if (error) throw error;
+    const reqOrg = orgIdFor(req);
+    if (reqOrg && data.org_id && data.org_id !== reqOrg) return res.status(404).json({ error: 'Not found' });
     if (!hasRole(req, 'admin', 'ra_lead', 'bd_lead') && data.created_by !== req.user.id && data.assigned_to !== req.user.id && data.assigned_to_bd !== req.user.id) {
       return res.status(403).json({ error: 'Forbidden' });
     }
@@ -178,7 +181,7 @@ router.post('/jobs/bulk', auth, async (req, res) => {
     const companyIds = [...new Set(jobs.map(j => j.company_id).filter(Boolean))];
     let cooledDown = new Set();
     if (companyIds.length) {
-      const { data: recent } = await supabase.from('jobs').select('company_id').in('company_id', companyIds).gte('created_at', cooldownDate).is('deleted_at', null);
+      const { data: recent } = await withOrg(supabase.from('jobs').select('company_id').in('company_id', companyIds).gte('created_at', cooldownDate).is('deleted_at', null), req);
       cooledDown = new Set((recent || []).map(r => r.company_id));
     }
     const skipped = jobs.filter(j => cooledDown.has(j.company_id)).length;
@@ -216,7 +219,8 @@ router.post('/jobs/bulk', auth, async (req, res) => {
         timezone: getTimezoneFromLocation(j.location),
         freshness: getFreshness(j.job_opened_date, j.job_created_date),
         bdm_assigned_name: j.bdm_assigned_name || null,
-        industry: j.industry || null
+        industry: j.industry || null,
+        ...orgStamp(req)
       };
       if (research) row.research = research;
       return row;
@@ -254,7 +258,7 @@ router.post('/jobs/bulk', auth, async (req, res) => {
       const contacts = filteredJobs[idx].contacts || [];
       contacts.forEach((c, ci) => {
         if (!c.first_name && !c.email) return;
-        contactRows.push({ job_id: job.id, first_name: c.first_name || '', last_name: c.last_name || '', designation: c.designation || null, email: c.email || null, phone: c.phone || null, linkedin: c.linkedin || null, is_primary: ci === 0 });
+        contactRows.push({ job_id: job.id, first_name: c.first_name || '', last_name: c.last_name || '', designation: c.designation || null, email: c.email || null, phone: c.phone || null, linkedin: c.linkedin || null, is_primary: ci === 0, ...orgStamp(req) });
       });
     });
     if (contactRows.length) {
@@ -277,7 +281,7 @@ router.post('/jobs', auth, async (req, res) => {
     if (hasRole(req, 'ra')) {
       const cooldownDays = await getSetting(supabase, 'company_cooldown_days');
       const cooldownDate = new Date(Date.now() - cooldownDays * 24 * 3600 * 1000).toISOString();
-      const { data: recent } = await supabase.from('jobs').select('id,position,created_at').eq('company_id', company_id).gte('created_at', cooldownDate).is('deleted_at', null).limit(1);
+      const { data: recent } = await withOrg(supabase.from('jobs').select('id,position,created_at').eq('company_id', company_id).gte('created_at', cooldownDate).is('deleted_at', null).limit(1), req);
       if (recent && recent.length > 0) {
         const daysAgo = Math.floor((Date.now() - new Date(recent[0].created_at).getTime()) / 86400000);
         const daysLeft = cooldownDays - daysAgo;
@@ -316,11 +320,12 @@ router.post('/jobs', auth, async (req, res) => {
       is_duplicate: is_duplicate || false, duplicate_of: duplicate_of || null, salary_range: salary_range || null,
       job_created_date: job_created_date || null, job_opened_date: job_opened_date || null,
       timezone, freshness, bdm_assigned_name: bdm_assigned_name || null, industry: jobIndustry || null,
-      research: researchObj
+      research: researchObj,
+      ...orgStamp(req)
     }).select().single();
     if (error) throw error;
     if (Array.isArray(contacts) && contacts.length) {
-      const rows = contacts.map((c, i) => ({ job_id: job.id, first_name: c.first_name || '', last_name: c.last_name || '', designation: c.designation || null, email: c.email || null, phone: c.phone || null, linkedin: c.linkedin || null, is_primary: i === 0 }));
+      const rows = contacts.map((c, i) => ({ job_id: job.id, first_name: c.first_name || '', last_name: c.last_name || '', designation: c.designation || null, email: c.email || null, phone: c.phone || null, linkedin: c.linkedin || null, is_primary: i === 0, ...orgStamp(req) }));
       try { await annotateContactEmailStatus(rows); } catch (_) {}
       await supabase.from('contacts').insert(rows);
     }
@@ -334,6 +339,8 @@ router.put('/jobs/:id', auth, async (req, res) => {
   try {
     const { data: existing } = await supabase.from('jobs').select('*').eq('id', req.params.id).single();
     if (!existing) return res.status(404).json({ error: 'Not found' });
+    const reqOrg = orgIdFor(req);
+    if (reqOrg && existing.org_id && existing.org_id !== reqOrg) return res.status(404).json({ error: 'Not found' });
     const isRA = hasRole(req, 'ra') && !hasRole(req, 'admin', 'ra_lead', 'bd', 'bd_lead');
     // Admin-editable — config/settings.js.
     const editWindowHours = await getSetting(supabase, 'ra_edit_window_hours');
@@ -385,8 +392,10 @@ router.put('/jobs/:id', auth, async (req, res) => {
 
 router.delete('/jobs/:id', auth, async (req, res) => {
   try {
-    const { data: existing } = await supabase.from('jobs').select('created_by,position').eq('id', req.params.id).single();
+    const { data: existing } = await supabase.from('jobs').select('created_by,position,org_id').eq('id', req.params.id).single();
     if (!existing) return res.status(404).json({ error: 'Not found' });
+    const reqOrg = orgIdFor(req);
+    if (reqOrg && existing.org_id && existing.org_id !== reqOrg) return res.status(404).json({ error: 'Not found' });
     if (!hasRole(req, 'admin') && existing.created_by !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
     await supabase.from('jobs').update({ deleted_at: new Date() }).eq('id', req.params.id);
     await logActivity(req.params.id, null, req.user.id, 'job_deleted', `Job deleted: ${existing.position}`, null, null);
@@ -398,7 +407,7 @@ router.get('/jobs/export', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin', 'ra_lead')) return res.status(403).json({ error: 'RA Lead only' });
     const { from, to, stage } = req.query;
-    let query = supabase.from('jobs').select('id,position,stage,location,industry,timezone,freshness,salary_range,job_created_date,job_opened_date,bdm_assigned_name,source,created_at,company:companies(name,website,industry,location),contacts(first_name,last_name,designation,email,phone,linkedin),creator:users!created_by(name)').is('deleted_at', null).order('created_at', { ascending: false });
+    let query = withOrg(supabase.from('jobs').select('id,position,stage,location,industry,timezone,freshness,salary_range,job_created_date,job_opened_date,bdm_assigned_name,source,created_at,company:companies(name,website,industry,location),contacts(first_name,last_name,designation,email,phone,linkedin),creator:users!created_by(name)').is('deleted_at', null).order('created_at', { ascending: false }), req);
     if (from) query = query.gte('created_at', from);
     if (to) query = query.lte('created_at', to + 'T23:59:59Z');
     if (stage) query = query.eq('stage', stage);

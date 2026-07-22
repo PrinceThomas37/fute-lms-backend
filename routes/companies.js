@@ -8,11 +8,11 @@ const express = require('express');
 
 module.exports = (ctx) => {
   const router = express.Router();
-  const { supabase, auth, hasRole } = ctx;
+  const { supabase, auth, hasRole, withOrg, orgStamp } = ctx;
 
 router.get('/companies', auth, async (req, res) => {
   try {
-    const { data, error } = await supabase.from('companies').select('*').is('deleted_at', null).order('name');
+    const { data, error } = await withOrg(supabase.from('companies').select('*').is('deleted_at', null).order('name'), req);
     if (error) throw error;
     res.json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -22,11 +22,11 @@ router.get('/companies/search', auth, async (req, res) => {
   try {
     const { q } = req.query;
     if (!q || q.length < 2) return res.json([]);
-    const { data, error } = await supabase.from('companies')
-      .select('id,name,industry,location,website').ilike('name', `%${q}%`).is('deleted_at', null).limit(8);
+    const { data, error } = await withOrg(supabase.from('companies')
+      .select('id,name,industry,location,website').ilike('name', `%${q}%`).is('deleted_at', null).limit(8), req);
     if (error) throw error;
     const result = await Promise.all((data || []).map(async co => {
-      const { count } = await supabase.from('jobs').select('id', { count: 'exact', head: true }).eq('company_id', co.id).is('deleted_at', null);
+      const { count } = await withOrg(supabase.from('jobs').select('id', { count: 'exact', head: true }).eq('company_id', co.id).is('deleted_at', null), req);
       return { ...co, job_count: count || 0 };
     }));
     res.json(result);
@@ -37,7 +37,7 @@ router.post('/companies/bulk', auth, async (req, res) => {
   try {
     const { companies } = req.body;
     if (!Array.isArray(companies) || !companies.length) return res.status(400).json({ error: 'companies array required' });
-    const rows = companies.map(c => ({ name: c.name, website: c.website || null, industry: c.industry || null, location: c.location || null, created_by: req.user.id }));
+    const rows = companies.map(c => ({ name: c.name, website: c.website || null, industry: c.industry || null, location: c.location || null, created_by: req.user.id, ...orgStamp(req) }));
     const { data, error } = await supabase.from('companies').insert(rows).select('id,name');
     if (error) throw error;
     res.status(201).json(data);
@@ -48,7 +48,7 @@ router.post('/companies', auth, async (req, res) => {
   try {
     const { name, website, industry, location, size, notes } = req.body;
     if (!name) return res.status(400).json({ error: 'Company name required' });
-    const { data, error } = await supabase.from('companies').insert({ name, website, industry, location, size, notes, created_by: req.user.id }).select().single();
+    const { data, error } = await supabase.from('companies').insert({ name, website, industry, location, size, notes, created_by: req.user.id, ...orgStamp(req) }).select().single();
     if (error) throw error;
     res.status(201).json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }

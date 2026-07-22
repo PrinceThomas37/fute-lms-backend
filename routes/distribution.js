@@ -12,7 +12,7 @@ const express = require('express');
 
 module.exports = (ctx) => {
   const router = express.Router();
-  const { supabase, auth, hasRole, today, normInd } = ctx;
+  const { supabase, auth, hasRole, today, normInd, withOrg } = ctx;
 
 router.get('/admin/manager-ra-modes', auth, async (req, res) => {
   try {
@@ -47,10 +47,10 @@ router.get('/distribute/pool-stats', auth, async (req, res) => {
     // Supabase default limit is 1000 — use range to fetch all rows in batches
     let pool = [], from = 0, batchSize = 1000;
     while (true) {
-      const { data, error } = await supabase.from('jobs')
+      const { data, error } = await withOrg(supabase.from('jobs')
         .select('id,freshness,industry,timezone,is_duplicate,company:companies(industry)')
         .is('deleted_at', null).eq('stage', 'Unassigned').is('assigned_to_bd', null)
-        .range(from, from + batchSize - 1);
+        .range(from, from + batchSize - 1), req);
       if (error) throw error;
       if (!data || !data.length) break;
       pool = pool.concat(data);
@@ -72,7 +72,7 @@ router.get('/distribute/pool-stats', auth, async (req, res) => {
 router.get('/distribute/today-summary', auth, async (req, res) => {
   try {
     const targetId = req.query.manager_id || req.user.id;
-    const { data: jobs } = await supabase.from('jobs').select('id,industry,timezone,assigned_at,company:companies(industry)').eq('assigned_to_bd', targetId).gte('assigned_at', today() + 'T00:00:00Z');
+    const { data: jobs } = await withOrg(supabase.from('jobs').select('id,industry,timezone,assigned_at,company:companies(industry)').eq('assigned_to_bd', targetId).gte('assigned_at', today() + 'T00:00:00Z'), req);
     const summary = { total: jobs?.length || 0, by_industry: {}, by_timezone: {} };
     (jobs || []).forEach(j => {
       const rawInd = j.industry || j.company?.industry || '';

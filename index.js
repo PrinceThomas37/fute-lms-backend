@@ -75,6 +75,10 @@ async function resolveDefaultOrg() {
 resolveDefaultOrg();
 // Exposed so route modules can stamp/scope by the caller's org.
 function orgIdFor(req) { return (req && req.user && req.user.org_id) || DEFAULT_ORG_ID || null; }
+// Same withOrg/orgStamp pattern as bd_recruiter_routes.js, for the leads/email
+// engine's own queries (jobs/companies/contacts live here, not in that module).
+function withOrg(query, req) { const o = orgIdFor(req); return o ? query.eq('org_id', o) : query; }
+function orgStamp(req) { const o = orgIdFor(req); return o ? { org_id: o } : {}; }
 
 function auth(req, res, next) {
   const header = req.headers.authorization;
@@ -524,18 +528,23 @@ const JOB_SELECT = `*, research, company:companies(id,name,website,industry,loca
 // it — Supabase is hit at most once per TTL no matter how many tabs are open.
 // Any successful write invalidates the cache (middleware above), so users
 // always see their own changes immediately.
-let jobsCache = null, jobsCacheAt = 0;
+// Keyed per org_id so one tenant's leads are never served out of another
+// tenant's cache entry once a second org exists.
+let jobsCacheByOrg = new Map();
 const JOBS_CACHE_TTL_MS = 60 * 1000;
-function invalidateJobsCache() { jobsCache = null; jobsCacheAt = 0; }
+function invalidateJobsCache() { jobsCacheByOrg.clear(); }
 
-async function loadAllJobs() {
-  if (jobsCache && (Date.now() - jobsCacheAt) < JOBS_CACHE_TTL_MS) return jobsCache;
-  const { data, error } = await supabase.from('jobs').select(JOB_SELECT)
-    .is('deleted_at', null).order('created_at', { ascending: false });
+async function loadAllJobs(orgId) {
+  const key = orgId || '__all__';
+  const cached = jobsCacheByOrg.get(key);
+  if (cached && (Date.now() - cached.at) < JOBS_CACHE_TTL_MS) return cached.data;
+  let query = supabase.from('jobs').select(JOB_SELECT).is('deleted_at', null);
+  if (orgId) query = query.eq('org_id', orgId);
+  const { data, error } = await query.order('created_at', { ascending: false });
   if (error) throw error;
-  jobsCache = data || [];
-  jobsCacheAt = Date.now();
-  return jobsCache;
+  const rows = data || [];
+  jobsCacheByOrg.set(key, { data: rows, at: Date.now() });
+  return rows;
 }
 
 // Jobs routes (list/detail/create/bulk/update/delete/export, JD parsing,
@@ -1672,7 +1681,7 @@ app.post('/distribute/execute', auth, async (req, res) => {
     // Fetch all unassigned leads — use range to bypass Supabase 1000 row default limit
     let pool = [], from = 0;
     while (true) {
-      let q = supabase.from('jobs').select('id,position,freshness,industry,timezone,is_duplicate').is('deleted_at', null).eq('stage', 'Unassigned').is('assigned_to_bd', null).range(from, from + 999);
+      let q = withOrg(supabase.from('jobs').select('id,position,freshness,industry,timezone,is_duplicate').is('deleted_at', null).eq('stage', 'Unassigned').is('assigned_to_bd', null).range(from, from + 999), req);
       if (ratio.exclude_duplicates) q = q.eq('is_duplicate', false);
       const { data } = await q;
       if (!data || !data.length) break;
@@ -2473,7 +2482,7 @@ function buildHtmlEmailBody(plainText, signatureHtml, includeFooter = true) {
 // Shared helpers/middleware stay defined above; routers receive them via ctx so
 // their closures and behaviour are identical to the original inline routes.
 const routeCtx = {
-  supabase, auth, hasRole, notGuest, today, orgIdFor,
+  supabase, auth, hasRole, notGuest, today, orgIdFor, withOrg, orgStamp,
   loadMailboxSignatures, getMailboxSignature, getMicrosoftToken, buildHtmlEmailBody,
   MS_TENANT, MS_CLIENT, MS_SECRET, MS_REDIRECT, MS_SCOPES,
   logActivity, INDUSTRIES, normInd,
@@ -2672,16 +2681,32 @@ wfEngine.registerContextLoader('submission', async (enrollment) => {
 });
 
 // The recruiter's connected sending mailbox (primary first), or null if none.
+// Checks both Microsoft (Graph) and Gmail tokens — callers dispatch the actual
+// send by mailbox.platform via sendMailboxNewMessage().
 async function recruiterSendingMailbox(recruiterId) {
   if (!recruiterId) return null;
   const { data: mailboxes } = await supabase.from('user_emails')
-    .select('id,email_address,display_name,is_primary,is_active,daily_send_limit')
+    .select('id,email_address,display_name,is_primary,is_active,daily_send_limit,platform')
     .eq('user_id', recruiterId).order('is_primary', { ascending: false });
   if (!mailboxes?.length) return null;
-  const { data: tokens } = await supabase.from('microsoft_tokens')
-    .select('user_email_id').in('user_email_id', mailboxes.map(m => m.id));
-  const connected = new Set((tokens || []).map(t => t.user_email_id));
+  const ids = mailboxes.map(m => m.id);
+  const [{ data: msTokens }, { data: gmailTokens }] = await Promise.all([
+    supabase.from('microsoft_tokens').select('user_email_id').in('user_email_id', ids),
+    supabase.from('gmail_tokens').select('user_email_id').in('user_email_id', ids)
+  ]);
+  const connected = new Set([...(msTokens || []), ...(gmailTokens || [])].map(t => t.user_email_id));
   return mailboxes.find(m => connected.has(m.id) && m.is_active !== false) || null;
+}
+
+// Dispatch a fresh outbound message by the mailbox's connected platform —
+// the Microsoft/Gmail counterpart to sendMicrosoftNewMessage alone. Both
+// providers return a message + thread/conversation id in the same shape.
+async function sendMailboxNewMessage(mailbox, { to, subject, htmlBody }) {
+  if (mailbox.platform === 'Gmail') {
+    const r = await gmailProvider.sendNewMessage(mailbox.id, { to, subject, htmlBody, fromAddress: mailbox.email_address });
+    return { graphMessageId: r.messageId, conversationId: r.threadId || null, inReplyTo: null };
+  }
+  return sendMicrosoftNewMessage(mailbox.id, { to, subject, htmlBody });
 }
 
 // A specific mailbox by id, but only if it's active AND connected — used by
@@ -2690,10 +2715,11 @@ async function recruiterSendingMailbox(recruiterId) {
 async function connectedMailboxById(id) {
   if (!id) return null;
   const { data: mb } = await supabase.from('user_emails')
-    .select('id,email_address,display_name,is_primary,is_active,daily_send_limit')
+    .select('id,email_address,display_name,is_primary,is_active,daily_send_limit,platform')
     .eq('id', id).maybeSingle();
   if (!mb || mb.is_active === false) return null;
-  const { data: tok } = await supabase.from('microsoft_tokens').select('user_email_id').eq('user_email_id', id).maybeSingle();
+  const tokenTable = mb.platform === 'Gmail' ? 'gmail_tokens' : 'microsoft_tokens';
+  const { data: tok } = await supabase.from(tokenTable).select('user_email_id').eq('user_email_id', id).maybeSingle();
   return tok ? mb : null;
 }
 
@@ -2735,7 +2761,7 @@ wfEngine.registerChannel('candidate_email', async ({ step, enrollment, context }
   const subject = fillTemplate(cfg.subject || DEFAULT_CANDIDATE_EMAIL.subject, vars);
   const htmlBody = fillTemplate(cfg.body || DEFAULT_CANDIDATE_EMAIL.body, vars);
   try {
-    const r = await sendMicrosoftNewMessage(mailbox.id, { to: candidate.email, subject, htmlBody });
+    const r = await sendMailboxNewMessage(mailbox, { to: candidate.email, subject, htmlBody });
     await supabase.from('email_send_log').upsert(
       { user_email_id: mailbox.id, send_date: today(), emails_sent: (sendLog?.emails_sent || 0) + 1 },
       { onConflict: 'user_email_id,send_date' }
@@ -2776,7 +2802,7 @@ app.post('/candidates/email', auth, async (req, res) => {
       const token = newTrackToken();
       const htmlBody = injectTrackPixel(buildHtmlEmailBody(bodyText, signature), token);
       try {
-        await sendMicrosoftNewMessage(mailbox.id, { to, subject, htmlBody });
+        await sendMailboxNewMessage(mailbox, { to, subject, htmlBody });
         await supabase.from('email_tracking').insert({
           token, channel: 'candidate', candidate_id: r.candidate_id || null,
           job_order_id: b.job_order_id || null, to_email: to, subject,

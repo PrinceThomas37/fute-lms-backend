@@ -304,6 +304,8 @@ module.exports = function (app, deps) {
       const { data, error } = await supabase.from('job_orders')
         .select(JOB_ORDER_SELECT).eq('id', req.params.id).is('deleted_at', null).single();
       if (error || !data) return res.status(404).json({ error: 'Job order not found' });
+      const reqOrg = orgIdFor(req);
+      if (reqOrg && data.org_id && data.org_id !== reqOrg) return res.status(404).json({ error: 'Job order not found' });
 
       if (isRecruiter(req) && !isBDM(req)) {
         const ids = await assignedJobOrderIds(req.user.id);
@@ -632,6 +634,8 @@ ${String(j.job_description).slice(0, 12000)}`;
       const { data, error } = await supabase.from('candidates')
         .select(CANDIDATE_SELECT).eq('id', req.params.id).is('deleted_at', null).single();
       if (error || !data) return res.status(404).json({ error: 'Candidate not found' });
+      const reqOrg = orgIdFor(req);
+      if (reqOrg && data.org_id && data.org_id !== reqOrg) return res.status(404).json({ error: 'Candidate not found' });
       res.json(data);
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
@@ -1494,15 +1498,15 @@ ${String(j.job_description).slice(0, 12000)}`;
         if (!jobIds.length) return res.json({ role: 'recruiter', jobs: { total: 0, active: 0 }, jobs_assigned: { week: 0, month: 0, quarter: 0, total: 0 }, top_jobs: [], by_stage: {}, submissions_week: 0, submissions_month: 0, upcoming_interviews: [], awaiting_approval: 0 });
       }
 
-      let jq = supabase.from('job_orders')
+      let jq = withOrg(supabase.from('job_orders')
         .select('id,job_code,job_title,client,city,state,status,priority,created_at')
-        .is('deleted_at', null);
+        .is('deleted_at', null), req);
       if (recruiterView) jq = jq.in('id', jobIds);
       const { data: jobs } = await jq;
 
-      let sq = supabase.from('submissions')
+      let sq = withOrg(supabase.from('submissions')
         .select('id,stage,sub_stage,created_at,submitted_at,stage_updated_at,rejection_reason,interview_at,interview_location,job_order_id,recruiter_id,candidate:candidates(id,full_name)')
-        .is('deleted_at', null);
+        .is('deleted_at', null), req);
       if (recruiterView) sq = sq.eq('recruiter_id', uid);
       const { data: subs } = await sq;
 

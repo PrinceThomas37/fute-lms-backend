@@ -17,14 +17,14 @@ const { EVENTS, emit } = require('../events');
 
 module.exports = (ctx) => {
   const router = express.Router();
-  const { supabase, auth, hasRole, canTouchJob, logActivity, isPermanentFollowupBlock } = ctx;
+  const { supabase, auth, hasRole, canTouchJob, logActivity, isPermanentFollowupBlock, orgStamp } = ctx;
 
 router.post('/contacts', auth, async (req, res) => {
   try {
     const { job_id, first_name, last_name, designation, email, phone, linkedin, is_primary } = req.body;
     if (!job_id || !first_name) return res.status(400).json({ error: 'job_id and first_name required' });
     if (!(await canTouchJob(req, job_id))) return res.status(403).json({ error: 'Forbidden' });
-    const contactRow = { job_id, first_name, last_name: last_name || '', designation, email, phone, linkedin, is_primary: !!is_primary };
+    const contactRow = { job_id, first_name, last_name: last_name || '', designation, email, phone, linkedin, is_primary: !!is_primary, ...orgStamp(req) };
     if (email) { try { contactRow.email_status = await classifyEmailDeliverability(email); } catch (_) {} }
     const { data, error } = await supabase.from('contacts').insert(contactRow).select().single();
     if (error) throw error;

@@ -1,4 +1,4 @@
-# FUTE LMS Backend — Context Window (Session 3)
+# FUTE LMS Backend — Context Window (Session 4)
 
 > **Read `CLAUDE.md` at the repo root first** — it holds the durable, must-carry
 > context: who the owner is (a product owner who doesn't read code or use git — I
@@ -8,15 +8,69 @@
 > slices, interview auto-meeting) — keep it current.
 
 **Updated**: 2026-07-22 · **Repo**: PrinceThomas37/fute-lms-backend · **Branch**: main
-**Dev branch this session**: `claude/job-candidate-email-details-61mxc1` (reset to
-`origin/main` after each merge; force-with-lease pushes are used because the branch
-only ever carries already-merged history between PRs).
+**Dev branch this session**: `claude/context-window-resume-m04j2e`.
 **Supabase project**: `teiqievahzhllojvgsku` · **Deploy**: Render
 (fute-lms-backend.onrender.com, auto-deploys from `main` — merging IS the release).
 
+## Session 4 — this session
+
+Picked up 3 items the owner chose off Session 3's "open next candidates" list, in
+the order given. Not yet merged — see PR opened at the end of this session.
+
+1. **Mailbox Reconnect UI.** The Teams-meeting-create feature (PR #111) added a new
+   OAuth scope (`OnlineMeetings.ReadWrite`), so already-connected Microsoft mailboxes
+   need to redo the OAuth handshake once — but the UI only ever showed a "Connect"
+   button *before* a mailbox had a token; once connected there was no way back in
+   short of deleting the mailbox. Added a small **"Reconnect"** link next to the
+   "✓ Connected" badge (Manager Users page, and the workflow mailbox picker), reusing
+   the existing `connectMicrosoftUserEmail()` OAuth popup flow. **This is the step
+   the owner needs to click through themselves** (their own Microsoft login) to
+   unlock Teams meeting creation — nothing else to do on our side.
+2. **Multi-tenant slice 2, continued: leads engine + dashboards.** Session 3 scoped
+   the ATS side (`job_orders`/`candidates`) by org and deliberately deferred the BD
+   leads engine (`jobs`/`companies`/`contacts`) and the dashboards as "needs its own
+   careful pass." Done this session:
+   - `loadAllJobs()`'s in-memory cache — the big payload every open Jobs/Leads tab
+     polls — was a **single cache shared by every request regardless of org**. This
+     was the most severe gap: once a second org existed, its users would have seen
+     the first org's entire leads list. Now keyed per `org_id`.
+   - `jobs`/`companies`/`contacts`: list, export, and cooldown-check reads scoped
+     with `withOrg()`; creates stamp `org_id` with `orgStamp()`.
+   - `/distribute/execute` — assigns the Unassigned lead pool to a BD manager — now
+     draws only from the caller's org's pool (previously any org's leads could be
+     assigned to any org's manager). Same fix on `/distribute/pool-stats` and
+     `/distribute/today-summary`.
+   - `/recruiting-dashboard` (the main manager/recruiter dashboard) and the
+     single-record long tail (`GET /job-orders/:id`, `GET /candidates/:id`,
+     `GET|PUT|DELETE /jobs/:id`) now respect org boundaries too (404 instead of
+     leaking a cross-org record).
+   - Added `withOrg()`/`orgStamp()` helpers to `index.js` (mirroring the ones
+     already in `bd_recruiter_routes.js`) and threaded them through `routeCtx` for
+     the extracted route modules.
+   - Behaviour is unchanged for the single existing org today — every `org_id`
+     column still has its platform-default fallback. Nothing the owner will see.
+   - **Still open:** legacy `/bd-analytics/*` (un-org-scoped, listed as a fold-in
+     later); RLS (slice 3b — do not enable without a fresh go-ahead).
+3. **Gmail send for tracked candidate email.** `recruiterSendingMailbox()` (used by
+   the "✉ Send tracked through futé" button and the `candidate_email` sequence
+   channel) only ever resolved a Microsoft-connected mailbox. It now checks both
+   `microsoft_tokens` and `gmail_tokens`; a new `sendMailboxNewMessage(mailbox, …)`
+   dispatches to the Gmail provider or Microsoft Graph by `mailbox.platform`,
+   mirroring the dispatch the general BD outreach engine already had. Also fixed
+   the "+ Gmail" quick-add modal's copy, which claimed Google OAuth sending wasn't
+   built yet (it was — just not wired into this one feature).
+
+All 17 test suites pass; `bash test/verify-frontend.sh` passes. Screenshot taken of
+the new Reconnect button (Manager Users page) — the other two changes are backend
+plumbing with no visible UI change today.
+
+---
+
+## Session 3 (for history)
+
 This continues Session 2 (PRs #93–#101: role dashboards, stage/kanban consolidation,
-job board, submission packet, send-race guard). Everything below shipped in **this**
-session (PRs #103–#112), newest last. All merged to `main` and live unless noted.
+job board, submission packet, send-race guard). Everything below shipped in
+**Session 3** (PRs #103–#112), newest last. All merged to `main` and live unless noted.
 
 ---
 
