@@ -12,6 +12,12 @@ const { mailboxSignatureKey, resolveSignatureHtml } = require('../email-signatur
 module.exports = (ctx) => {
   const router = express.Router();
   const { supabase, auth, hasRole, loadMailboxSignatures } = ctx;
+  // Multi-tenant scoping — same helpers threaded through routeCtx from index.js.
+  const orgIdFor = ctx.orgIdFor || function (req) { return (req && req.orgId) || null; };
+  const withOrg = ctx.withOrg || function (query, req) { const o = orgIdFor(req); return o ? query.eq('org_id', o) : query; };
+  // Shared reporting-hierarchy primitive (users.manager_id chain) — used to trim
+  // cross-team fields out of GET /users for non-admins.
+  const { reportingChainIds } = require('../hierarchy')(supabase);
 
 router.post('/auth/login', async (req, res) => {
   try {
@@ -52,10 +58,21 @@ const USER_COLS = 'id,name,email,role,roles,employee_id,designation,platform,is_
 
 router.get('/users', auth, async (req, res) => {
   try {
-    const { data, error } = await supabase.from('users')
-      .select(USER_COLS + ',manager:users!manager_id(id,name)').is('deleted_at', null).order('name');
+    const { data, error } = await withOrg(supabase.from('users')
+      .select(USER_COLS + ',manager:users!manager_id(id,name)').is('deleted_at', null), req).order('name');
     if (error) throw error;
-    res.json(data.map(u => ({ ...u, roles: u.roles || (u.role ? [u.role] : []) })));
+    let rows = data.map(u => ({ ...u, roles: u.roles || (u.role ? [u.role] : []) }));
+    // The full org roster is fetched by every logged-in user (name/avatar/picker
+    // lookups), but the hierarchy fields — manager_id / manager — are only ever
+    // consumed by admins. For a non-admin, null those out on rows outside their
+    // own reporting chain so one user can't read the whole org's reporting graph
+    // from their browser. Their own row and everyone under them stay intact.
+    if (!hasRole(req, 'admin')) {
+      const chain = new Set(await reportingChainIds(req.user.id, orgIdFor(req)));
+      rows = rows.map(u => (u.id === req.user.id || chain.has(u.id))
+        ? u : { ...u, manager_id: null, manager: null });
+    }
+    res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -286,8 +303,8 @@ router.put('/users/:id/emails/:eid/signature', auth, async (req, res) => {
 // ══════════════════════════════════════════════════════════════
 router.get('/team-assignments', auth, async (req, res) => {
   try {
-    const { data, error } = await supabase.from('team_assignments')
-      .select('*, member:users!member_id(id,name,email,roles,role), manager:users!manager_id(id,name,email,roles,role)')
+    const { data, error } = await withOrg(supabase.from('team_assignments')
+      .select('*, member:users!member_id(id,name,email,roles,role), manager:users!manager_id(id,name,email,roles,role)'), req)
       .order('created_at');
     if (error) throw error;
     res.json(data || []);
@@ -299,7 +316,9 @@ router.post('/team-assignments', auth, async (req, res) => {
     if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
     const { member_id, manager_id, assignment_type } = req.body;
     if (!member_id || !manager_id || !assignment_type) return res.status(400).json({ error: 'member_id, manager_id, assignment_type required' });
-    const { data, error } = await supabase.from('team_assignments').insert({ member_id, manager_id, assignment_type }).select().single();
+    const orgId = orgIdFor(req);
+    const { data, error } = await supabase.from('team_assignments')
+      .insert({ member_id, manager_id, assignment_type, ...(orgId ? { org_id: orgId } : {}) }).select().single();
     if (error) throw error;
     res.status(201).json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }

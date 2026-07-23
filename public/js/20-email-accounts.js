@@ -3,6 +3,9 @@
 // ════════════════════════════════════════════════
 function renderManagerUsers(){
   var u=STATE.user;
+  // Admin-only (this legacy page is nav-unreachable today, but guard it anyway
+  // in case STATE.page is set directly). Non-admins bounce to their dashboard.
+  if(!userHasRole(u,'admin')){STATE.page='dashboard';return renderDashboard();}
   var tab=STATE.managerUsersTab||'bd';
   var allUsers=STATE.users||[];
   var assignments=STATE.teamAssignments||[];

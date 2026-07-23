@@ -120,6 +120,15 @@ Ordered by "cheapest to do now vs. most painful to retrofit":
      **Still open:** actual per-role *permission* differences (today the new
      roles are hierarchy/reporting-only, no new capabilities); a full
      configurable-permissions system remains future work.
+   - **Session 5 (in progress): team structure + visibility fix** — see
+     `docs/CONTEXT_WINDOW.md` "Session 5" for the full plan. The hierarchy existed
+     but nothing in the UI used it consistently: the Dashboard "Your Team" widget
+     had a live bug (keyed off a dead `bdm` field, so it silently showed the whole
+     org to everyone but recruiters), `GET /users`/`GET /team-assignments` had no
+     org scoping, and `/recruiting-dashboard` wasn't chain-scoped like
+     `/reports/recruiting` already was. Fixing all of that so "team" means one
+     consistent thing (direct + transitive reports under `manager_id`), before any
+     chat/meetings/docs layer gets built on top of teams.
 3. **App-tracked candidate email** (not just `mailto:`): route candidate emails through
    the sending subsystem we already have → open/reply tracking = a real selling point,
    no new infra.

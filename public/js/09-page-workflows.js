@@ -349,10 +349,15 @@ function renderSequenceBody(){
 
 function renderAdmin(){
   var u=STATE.user;
+  // Admin-only page. Every mutating action here is already admin-gated at the
+  // API layer, so this is a UX guard, not the security boundary — a non-admin
+  // who lands here (e.g. STATE.page set directly) is bounced to their dashboard.
+  if(!userHasRole(u,'admin')){STATE.page='dashboard';return renderDashboard();}
   if(STATE.sendingPaused===undefined){loadSendingStatus();}
   if(STATE.raModes===undefined){loadManagerRaModes();}
   var selectedUserId=STATE.adminSelectedUser||null;
   if(selectedUserId){return renderAdminUserDetail(selectedUserId);}
+  if((STATE.adminView||'list')==='org'){return renderAdminOrgChart();}
 
   var tab=STATE.adminTab||'bd';
   var q=(STATE.adminSearch||'').toLowerCase().trim();
@@ -449,6 +454,7 @@ function renderAdmin(){
     '<div class="ph"><div class="flex jb aic">'+
       '<div><div class="ptitle">Admin</div><div class="psub">'+allUsers.length+' users · Fute Global LLC</div></div>'+
       '<div style="display:flex;gap:8px;align-items:center">'+
+        adminViewToggle('list')+
         (canSeeEngine?engineBtn:'')+
         (isAdmin?integrationsBtn:'')+
         (isAdmin?sysSettingsBtn:'')+
@@ -464,6 +470,61 @@ function renderAdmin(){
     '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden">'+
       (rows||'<div style="padding:40px;text-align:center;color:var(--text3);font-size:13px">'+(q?'No users match "'+htmlEsc(q)+'"':'No users in this group yet.')+'</div>')+
     '</div>'+
+  '</div>';
+}
+
+// Segmented List / Org chart toggle shown in the Admin header. `active` is the
+// value if this is the currently-rendered view (so the button styling matches).
+function adminViewToggle(active){
+  function seg(val,label){
+    var on=(STATE.adminView||'list')===val;
+    return '<button onclick="setAdminView(\''+val+'\')" style="padding:6px 12px;border:0;border-radius:6px;background:'+(on?'var(--accent)':'transparent')+';color:'+(on?'#fff':'var(--text2)')+';font-size:12.5px;font-weight:600;cursor:pointer">'+label+'</button>';
+  }
+  return '<div style="display:flex;gap:3px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:3px">'+seg('list','List')+seg('org','Org chart')+'</div>';
+}
+window.setAdminView=function(v){STATE.adminView=v;render();};
+
+// Admin "Org chart" view — the whole company as a reporting tree instead of a
+// flat role list. Each org root (a user with no manager) heads a subtree;
+// unassigned users (no manager and no reports) are grouped separately so they're
+// easy to place. Clicking any node opens that user's detail page. Reparenting is
+// still done there (Reporting Hierarchy card) — this is the bird's-eye map.
+function renderAdminOrgChart(){
+  var all=STATE.users||[];
+  var byId={};all.forEach(function(x){byId[x.id]=x;});
+  // Roots: users whose manager is unset OR points to someone not in the roster.
+  var roots=all.filter(function(x){return !x.managerId||!byId[x.managerId];});
+  // A root that itself leads nobody and reports to nobody is "unassigned".
+  var leads=[],loose=[];
+  roots.forEach(function(r){
+    if(directReportsOf(r.id).length)leads.push(r);else loose.push(r);
+  });
+  leads.sort(function(a,b){return reportingSubtree(b.id).length-reportingSubtree(a.id).length;});
+  loose.sort(function(a,b){return (a.name||'').localeCompare(b.name||'');});
+
+  var trees=leads.map(function(r){
+    return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:12px 14px;margin-bottom:12px">'+
+      renderOrgSubtree(r.id,{click:'admin'})+
+    '</div>';
+  }).join('');
+
+  var looseHtml=loose.length?
+    '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:8px;margin-bottom:12px">'+
+      '<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;padding:6px 8px">Not on the chart yet ('+loose.length+') — no manager, no reports</div>'+
+      loose.map(function(r){return renderOrgSubtree(r.id,{click:'admin',flat:true});}).join('')+
+    '</div>':'';
+
+  return '<div class="page">'+
+    '<div class="ph"><div class="flex jb aic">'+
+      '<div><div class="ptitle">Admin · Org chart</div><div class="psub">'+all.length+' users · '+leads.length+' team'+(leads.length===1?'':'s')+' · Fute Global LLC</div></div>'+
+      '<div style="display:flex;gap:8px;align-items:center">'+
+        adminViewToggle('org')+
+        '<button class="btn btn-primary btn-sm" onclick="openAddUser()">'+ico('plus',13)+'Add user</button>'+
+      '</div>'+
+    '</div></div>'+
+    '<div style="font-size:12.5px;color:var(--text3);margin-bottom:14px">Reporting lines come from each user’s “Reports to” setting. Click anyone to open their profile and change who they report to.</div>'+
+    (trees||'<div style="padding:30px;text-align:center;color:var(--text3);font-size:13px">No reporting lines set yet — open a user and pick who they report to.</div>')+
+    looseHtml+
   '</div>';
 }
 
