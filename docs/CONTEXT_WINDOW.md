@@ -478,8 +478,64 @@ team structure + dashboard + admin revamp together), all phases, tested + screen
   users grouped separately, click-through to each user's detail. Plus a UX admin
   guard at the top of `renderAdmin()` and `renderManagerUsers()`.
 - **Tests:** new `test/team-structure-smoke.mjs` (13 checks). Existing suites green.
-- **Still deferred (unchanged from plan):** Phase 5 (`team_assignments` → `manager_id`
-  reconciliation migration + `renderBDLeadInsights()` rewrite). **Also flagged to the
-  owner:** the *individual-contributor* dashboards (plain `ra`/`bd` with no reports, and
-  the whole leads-engine dashboard) still read the dead `STATE.leads` — migrating those
-  to the real `jobs`/`submissions` model is separate, larger work.
+
+### Follow-up round (same session, after PR #117 merged) — the two deferred items
+The owner asked for both flagged follow-ups. Branch was restarted fresh off `main`
+(PR #117 had already merged) per the repo's merged-PR convention.
+
+**1. Individual (RA) dashboard fixed.** The only role left hitting the dead
+`STATE.leads` path after PR #117 was a plain `ra` with no reports (BD/BD Lead/
+Director/RA Lead/Admin already route to `renderManagerDashboard`; a plain `ra` or
+`bd` *given* reports via the hierarchy now also does — the manager-dashboard gate
+is `isManagerRole(u) || getTeam(u).length`, data-driven like everything else this
+session). New `renderIndividualDashboard()` (`05-page-dashboard.js`) is built
+entirely client-side from `STATE.jobs` — no new network call, since `GET /jobs`
+already scopes to `created_by = me` for this role (`routes/jobs.js`) and
+`getMyJobs()` was already correct. Real lead stages (Unassigned/Assigned/
+Connected/In Discussion/Rejected/Future), real industry breakdown, a "recent
+leads" list, no more "Positive/Negative"/fake response-rate widgets. Guests and
+"view as" keep the legacy `STATE.leads` path unchanged (seeded demo data, and
+`isViewingOther` was already excluded from every other dashboard variant
+pre-session — not a new gap).
+
+**2. `team_assignments` merged into the `manager_id` hierarchy.** "Team" now
+means the reporting hierarchy everywhere, not two competing sources:
+  - `renderBDLeadInsights()` ("Team Insights" page, `16-insights.js`) now sources
+    its BD roster from `getTeam(u)` (direct reports who are `bd`/`bd_lead`)
+    instead of `team_assignments` rows. The self-service "+ Assign BD Manager"
+    button/modal is removed — it only ever wrote `team_assignments`, which
+    nothing reads anymore; reassignment is admin-only via Reporting Hierarchy,
+    same deliberate line drawn for My Team in the original plan.
+  - Its nav gate (`04-shell-login.js`) is now data-driven — anyone (non-admin)
+    with ≥1 direct BD/BD Lead report sees "Team Insights", not just the
+    `bd_lead` title, matching the "flexible, not a fixed ladder" hierarchy.
+  - The redundant legacy "Team Assignment" card (Reports to / Members, sourced
+    from `team_assignments`) removed from the Admin user-detail page — it sat
+    directly above the "Reporting Hierarchy" card and showed conflicting/stale
+    info from the deprecated source. Admin's flat-list "N members" chip now
+    reads `directReportsOf()` too, so both Admin views agree with each other and
+    with Team Insights.
+  - **New migration `029_backfill_manager_from_team_assignments.sql`**: fills
+    `users.manager_id` from `team_assignments` (`assignment_type='bd_to_bdlead'`)
+    *only* where `manager_id` is currently `NULL` — never overwrites a value an
+    admin already set via the hierarchy UI. Includes a commented-out SELECT to
+    surface conflicts (both sources set, disagreeing) for manual review; the
+    migration itself never touches those rows. **File only — NOT applied to the
+    live DB.** The owner was asked whether to run it now and the question was
+    declined without an answer either way; it's sitting in `migrations/`
+    unapplied. Until it runs, any BD Lead↔BD pairing that only ever existed as a
+    `team_assignments` row (never mirrored to `manager_id`) won't show up in
+    Team Insights / My Team / the Admin org chart. Apply via Supabase MCP
+    `apply_migration` (or the Supabase SQL editor) when the owner is ready —
+    it's additive-only and safe to run at any time.
+  - **Deliberately not touched:** the `email_accounts` subsystem + the orphaned
+    "Manager Users" page (`12-manager-users.js` / `20-email-accounts.js`,
+    `emailaccounts`/`managerusers` — confirmed zero reachable `goPage()` call
+    sites, same finding as the original plan). It's a separate, larger legacy
+    system (its own email-account table, distinct from the per-user "Outreach
+    Email IDs" system the reachable Admin page uses) — retiring it needs its own
+    audit, not a rename inside this pass. `ra_to_bd` team_assignments rows are
+    untouched for the same reason.
+- **Tests:** `test/team-structure-smoke.mjs` extended with 3 more checks (own-
+  jobs-only scoping, real stage pills, no dead-data leftovers) — 16/16. All 17
+  suites green after this round too.

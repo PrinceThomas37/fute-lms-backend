@@ -120,6 +120,26 @@ try {
   });
   step('Non-admin bounced off the Admin page', guard.page === 'dashboard' && !guard.isAdminUI);
 
+  // 7. Individual (RA) dashboard: real STATE.jobs data, not the dead STATE.leads
+  // seed. Ora has no reports and role 'ra' — the one role left that isn't a
+  // recruiter or a manager, so it must hit renderIndividualDashboard().
+  const ra = await page.evaluate(() => {
+    STATE.user = Object.assign({}, STATE.user, { id: 'ora', role: 'ra', roles: ['ra'], name: 'Ora Analyst', isGuest: false });
+    STATE.jobs = [
+      { id: 'j1', position: 'Backend Engineer', company_name: 'Acme Co', industry: 'Software', location: 'Remote', stage: 'Connected', is_duplicate: false, created_by: 'ora', created_date: new Date().toISOString().slice(0,10), created_at: new Date().toISOString() },
+      { id: 'j2', position: 'Frontend Engineer', company_name: 'Beta Inc', industry: 'Software', location: 'NYC', stage: 'Unassigned', is_duplicate: false, created_by: 'ora', created_date: new Date().toISOString().slice(0,10), created_at: new Date().toISOString() },
+      { id: 'j3', position: 'Data Analyst', company_name: 'Gamma LLC', industry: 'Finance', location: 'SF', stage: 'Assigned', is_duplicate: true, created_by: 'ora', created_date: new Date().toISOString().slice(0,10), created_at: new Date().toISOString() },
+      { id: 'j4', position: 'Other Analyst', company_name: 'Zeta Co', industry: 'Retail', location: 'LA', stage: 'Connected', is_duplicate: false, created_by: 'someone-else', created_date: new Date().toISOString().slice(0,10), created_at: new Date().toISOString() }
+    ];
+    STATE.reminders = [];
+    STATE.viewingUser = null;
+    STATE.page = 'dashboard';
+    return { html: renderDashboard() };
+  });
+  step('Individual dashboard shows real leads (own jobs only, not j4)', ra.html.includes('Backend Engineer') && ra.html.includes('Data Analyst') && !ra.html.includes('Other Analyst'));
+  step('Individual dashboard shows real stage pills', ra.html.includes('Connected') && ra.html.includes('Unassigned'));
+  step('Individual dashboard has no dead-data leftovers', !ra.html.includes('Response rate trend') && !ra.html.includes('Positive') && !ra.html.includes('Negative'));
+
   step('No JS page errors', pageErrors.length === 0, pageErrors.join(' | '));
 } catch (e) {
   step('Test harness ran', false, String(e && e.stack || e));

@@ -369,7 +369,6 @@ function renderAdmin(){
     {id:'admin',     lbl:'Admin'}
   ];
 
-  var assignments=STATE.teamAssignments||[];
   var allUsers=STATE.users||[];
 
   function usersForTab(t){
@@ -399,7 +398,7 @@ function renderAdmin(){
   var rows=tabUsers.map(function(usr){
     var emailCount=(STATE.userEmailsCache&&STATE.userEmailsCache[usr.id]||[]).length||
                    (STATE.emailAccounts||[]).filter(function(a){return a.assigned_to===usr.id;}).length;
-    var teamCount=assignments.filter(function(a){return a.manager_id===usr.id;}).length;
+    var teamCount=directReportsOf(usr.id).length;
     // Per-BD RA mode toggle (BD tab only) — auto = leads auto-send, manual = BD sends by hand.
     var raChip='';
     if(tab==='bd'){
@@ -583,9 +582,6 @@ function renderAdminUserDetail(userId){
   }
 
   var userEmails=STATE.userEmailsCache&&STATE.userEmailsCache[userId]||[];
-  var assignments=STATE.teamAssignments||[];
-  var myManagers=assignments.filter(function(a){return a.member_id===userId;});
-  var myMembers=assignments.filter(function(a){return a.manager_id===userId;});
 
   // ── Control Center — sending status, RA mode, pending queue, active
   // sequence enrollments, all in one place instead of hunting across pages.
@@ -698,11 +694,6 @@ function renderAdminUserDetail(userId){
     '</div>';
   }).join('');
 
-  // team assignment
-  var teamHtml=
-    (myManagers.length?'<div style="font-size:13px;margin-bottom:8px">Reports to: '+myManagers.map(function(a){return '<strong>'+htmlEsc((a.manager&&a.manager.name)||'')+'</strong>';}).join(', ')+'</div>':'')+
-    (myMembers.length?'<div style="font-size:13px">Members: '+myMembers.map(function(a){return htmlEsc((a.member&&a.member.name)||'');}).filter(Boolean).join(', ')+'</div>':'<div style="font-size:13px;color:var(--text3)">No team members assigned.</div>');
-
   return '<div class="page">'+
     '<div class="ph"><div class="flex aic gap3">'+
       '<button onclick="STATE.adminSelectedUser=null;render()" style="background:transparent;border:0;color:var(--text3);font-size:22px;cursor:pointer;line-height:1">←</button>'+
@@ -748,16 +739,9 @@ function renderAdminUserDetail(userId){
           (emailRows||'<div style="padding:20px;text-align:center;font-size:13px;color:var(--text3)">No outreach email IDs added yet.</div>')+
         '</div>':'')+
 
-      // Team Assignment
-      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px;margin-bottom:16px">'+
-        '<div style="font-weight:700;font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Team Assignment</div>'+
-        teamHtml+
-      '</div>'+
-
       // Reporting Hierarchy — a flexible, general reporting chain (any user
-      // can report to any other user), separate from the RA/BD Team
-      // Assignment above. This is what "Team creation" and hierarchy-scoped
-      // reports are built on: a user + everyone under them in this chain.
+      // can report to any other user). The single source of truth for "team"
+      // everywhere in the app: a user + everyone under them in this chain.
       adminReportingHierarchyCard(usr)+
 
     '</div>'+

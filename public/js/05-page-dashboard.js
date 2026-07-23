@@ -40,10 +40,18 @@ function renderDashboard(){
   // lead-gen widgets are someone else's desk. Give them their own dashboard.
   if(!isViewingOther&&isPureRecruiter(u))return renderRecruiterDashboard(u);
   // Managers on a real login get the team dashboard (team roster + team's
-  // recruiting desk, from the live hierarchy-scoped endpoint). The guest/demo
-  // session stays on the legacy lead dashboard below — it has seeded STATE.leads
-  // and no backend to serve /recruiting-dashboard, so it's the better showcase.
-  if(!isViewingOther&&!u.isGuest&&isManagerRole(u))return renderManagerDashboard(u);
+  // recruiting desk, from the live hierarchy-scoped endpoint). Data-driven: a
+  // plain "ra"/"bd" who's been given reports via the flexible hierarchy also
+  // qualifies, not just the fixed manager-ish roles. The guest/demo session
+  // stays on the legacy lead dashboard below — it has seeded STATE.leads and no
+  // backend to serve /recruiting-dashboard, so it's the better showcase.
+  if(!isViewingOther&&!u.isGuest&&(isManagerRole(u)||getTeam(u).length))return renderManagerDashboard(u);
+  // Everyone else on a real login (typically a plain "ra" with no reports) gets
+  // the real individual dashboard, built on STATE.jobs — the same data the Leads
+  // page already uses (GET /jobs is scoped server-side to what this user owns).
+  // The legacy tail below reads STATE.leads, which is dead seed data for every
+  // real login; it stays only for the guest demo and the "view as" preview.
+  if(!isViewingOther&&!u.isGuest)return renderIndividualDashboard(u);
   var pl=periodLeads(u);
   var total=pl.length;
   var emailed=pl.filter(function(l){return l.sent}).length;
@@ -556,6 +564,112 @@ function renderManagerDashboard(u){
       '</div>'+
       (upcomingRows||'<div style="padding:16px 0;text-align:center;font-size:13px;color:var(--text3)">No interviews scheduled across your team yet.</div>')+
     '</div>'+
+
+    renderRemindersWidget()+
+
+  '</div>';
+}
+
+// ── INDIVIDUAL (RA) DASHBOARD ───────────────────────────────────────────
+// For a plain "ra" (Research Analyst) with no reports — the last role that
+// doesn't get a recruiter or manager/team dashboard. Built entirely from
+// STATE.jobs, which GET /jobs already scopes server-side to "created_by me"
+// for this role (routes/jobs.js) — the exact same data the Leads page uses.
+// Real lead stages (Unassigned/Assigned/Connected/In Discussion/Rejected/
+// Future), not the old demo "Positive/Negative" vocabulary from STATE.leads.
+var LEAD_STAGE_COLORS={Unassigned:'var(--text3)',Assigned:'var(--accent)',Connected:'var(--green)','In Discussion':'#8b5cf6',Future:'var(--amber)',Rejected:'var(--red)'};
+function jobsInPeriod(jobs,p){
+  var now=new Date();
+  return jobs.filter(function(j){
+    var ds=j.created_date||(j.created_at||'').slice(0,10);
+    if(!ds)return false;
+    var d=new Date(ds);
+    if(p==="daily")return ds===todayIST();
+    if(p==="weekly"){var w=new Date(now);w.setDate(w.getDate()-7);return d>=w;}
+    if(p==="monthly")return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();
+    if(p==="quarterly"){var q=new Date(now);q.setMonth(q.getMonth()-3);return d>=q;}
+    return true;
+  });
+}
+function renderIndividualDashboard(u){
+  var period=STATE.period||'weekly';
+  var myJobs=getMyJobs(u);
+  var pl=jobsInPeriod(myJobs,period);
+  var total=pl.length;
+  var dups=pl.filter(function(j){return j.is_duplicate;}).length;
+  var converted=pl.filter(function(j){return j.stage==='Connected'||j.stage==='In Discussion';}).length;
+  var convRate=total?Math.round(converted/total*100):0;
+
+  var hour=new Date().getHours();
+  var greet=hour<12?"Good morning":hour<17?"Good afternoon":"Good evening";
+
+  var periods=["daily","weekly","monthly","quarterly"];
+  var pickers=periods.map(function(p){
+    return '<button class="fc'+(period===p?" on":"") + '" onclick="setPeriod(\''+p+'\')" style="text-transform:capitalize">'+p+'</button>';
+  }).join("");
+
+  // industry breakdown — real job.industry field, same one the Leads page uses
+  var indMap={};
+  pl.forEach(function(j){var ind=j.industry||j.company_ind||'';if(ind)indMap[ind]=(indMap[ind]||0)+1;});
+  var indArr=Object.entries(indMap).sort(function(a,b){return b[1]-a[1]}).slice(0,7);
+  var maxI=indArr.length?indArr[0][1]:1;
+  var indRows=indArr.map(function(e){
+    var pct=Math.round(e[1]/maxI*100);
+    return '<div class="ind-row">'+
+      '<div style="font-size:13px;min-width:110px">'+htmlEsc(e[0])+'</div>'+
+      '<div class="ind-bg"><div class="ind-fill" style="width:'+pct+'%;background:var(--accent)"></div></div>'+
+      '<div style="font-size:12px;font-family:var(--mono);color:var(--text3);min-width:22px;text-align:right">'+e[1]+'</div>'+
+    '</div>';
+  }).join("");
+
+  // stage pills — real lead stages
+  var stagePills=Object.keys(LEAD_STAGE_COLORS).map(function(s){
+    var cnt=pl.filter(function(j){return j.stage===s;}).length;
+    if(!cnt)return"";
+    return '<div style="text-align:center;padding:12px 16px;background:var(--bg);border-radius:var(--r2);min-width:76px">'+
+      '<div style="font-family:var(--display);font-size:22px;font-weight:700;color:'+LEAD_STAGE_COLORS[s]+'">'+cnt+'</div>'+
+      '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+s+'</div>'+
+    '</div>';
+  }).join("");
+
+  // recent leads — quick jump to the Leads page for detail
+  var recentRows=myJobs.slice().sort(function(a,b){return new Date(b.created_at)-new Date(a.created_at);}).slice(0,6).map(function(j){
+    return '<div onclick="goPage(\'leads\')" onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'transparent\'" style="display:flex;align-items:center;gap:12px;padding:9px 4px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s">'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+htmlEsc(j.position||'')+'</div>'+
+        '<div class="f12 text3" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+htmlEsc(j.company_name||'')+(j.location?' · '+htmlEsc(j.location):'')+'</div>'+
+      '</div>'+
+      '<span style="font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:8px;background:'+(LEAD_STAGE_COLORS[j.stage]||'var(--text3)')+'1a;color:'+(LEAD_STAGE_COLORS[j.stage]||'var(--text3)')+'">'+htmlEsc(j.stage||'')+'</span>'+
+    '</div>';
+  }).join("");
+
+  return '<div class="page">'+
+    '<div class="banner">'+
+      '<div style="position:absolute;top:16px;right:20px;background:rgba(255,255,255,.18);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.3);border-radius:var(--r2);padding:10px 16px;text-align:right">'+
+        '<div id="dash-clock-time" style="font-family:var(--display);font-size:13px;font-weight:500;letter-spacing:.01em;line-height:1;color:rgba(255,255,255,.85)">'+new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:true})+'</div>'+
+        '<div id="dash-clock-date" style="font-size:22px;font-weight:700;margin-top:5px;color:#fff;font-family:var(--display)">'+new Date().toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})+'</div>'+
+      '</div>'+
+      '<div class="banner-name">'+greet+', '+u.name.split(" ")[0]+' 👋</div>'+
+      '<div class="banner-sub">'+roleLabel(u.role)+'</div>'+
+      '<div class="banner-stats">'+
+        '<div><div class="bstat-val">'+total+'</div><div class="bstat-lbl">Leads this period</div></div>'+
+        '<div style="width:1px;background:rgba(255,255,255,.25);align-self:stretch"></div>'+
+        '<div><div class="bstat-val">'+converted+'</div><div class="bstat-lbl">Connected</div></div>'+
+        '<div style="width:1px;background:rgba(255,255,255,.25);align-self:stretch"></div>'+
+        '<div><div class="bstat-val">'+convRate+'%</div><div class="bstat-lbl">Conversion rate</div></div>'+
+        '<div style="width:1px;background:rgba(255,255,255,.25);align-self:stretch"></div>'+
+        '<div><div class="bstat-val">'+dups+'</div><div class="bstat-lbl">Duplicates</div></div>'+
+      '</div>'+
+    '</div>'+
+
+    '<div class="flex gap2 mb4 flex-wrap">'+pickers+'</div>'+
+
+    '<div class="g2 mb4">'+
+      '<div class="card cp"><div class="flex jb aic mb3"><div class="fw6">Recent leads</div><button class="btn btn-outline btn-sm" onclick="goPage(\'leads\')">All leads →</button></div>'+(recentRows||'<div class="text3 f13" style="padding:8px 0">No leads yet — add one from the Leads page.</div>')+'</div>'+
+      '<div class="card cp"><div class="fw6 mb3">Industry breakdown</div>'+(indRows||'<div class="text3 f13">No leads yet</div>')+'</div>'+
+    '</div>'+
+
+    '<div class="card cp"><div class="flex jb aic mb3"><div class="fw6">Pipeline overview</div><div class="f12 text3">'+period+'</div></div><div class="flex gap2 flex-wrap">'+(stagePills||'<div class="text3 f13">No leads in this period yet.</div>')+'</div></div>'+
 
     renderRemindersWidget()+
 
