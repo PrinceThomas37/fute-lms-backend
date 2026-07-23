@@ -544,6 +544,20 @@ means the reporting hierarchy everywhere, not two competing sources:
 | Phases 0–4 (hierarchy fixes, dashboard + admin revamp, My Team page) | [#117](https://github.com/PrinceThomas37/fute-lms-backend/pull/117) | Merged, deployed |
 | Individual (RA) dashboard fix + `team_assignments` → `manager_id` merge | [#118](https://github.com/PrinceThomas37/fute-lms-backend/pull/118) | Merged, deployed |
 | Migration 029 (backfill `manager_id` from old `bd_to_bdlead` rows) | — (data-only, no deploy) | Applied to live DB |
+| This context-window writeup | [#119](https://github.com/PrinceThomas37/fute-lms-backend/pull/119) | Merged (docs-only) |
+
+**Session shape, for a future session picking this up cold:** the owner asked to
+continue from a handoff plan doc, approving each step as it shipped rather than
+reviewing code — "continue, build it" → (plan grounded against actual repo state,
+since the plan referenced a migration/`team_name`/Team View that were never
+actually committed) → PR #117 → "yes merge it" → two follow-ups requested directly
+("fix individual dashboard" + "merge team_assignments") → PR #118 → "merge it" →
+asked before touching the live DB, initially declined with no answer, asked again
+later and approved → migration 029 applied live → this doc. Every merge in this
+session was preceded by an explicit "merge it" from the owner; the one live-DB
+write was preceded by an explicit yes after an initial non-answer. That pattern —
+ship on a dev branch, screenshot/describe, wait for an explicit go before merge or
+before any live-data write — is the one to keep using.
 
 **Everything from the original plan is done** except the two items explicitly
 scoped out both in the plan and again during this session (not oversights —
