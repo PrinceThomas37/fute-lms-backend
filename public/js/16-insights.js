@@ -279,6 +279,8 @@ function loadBDInsights(){
   if(!u)return;
   apiGet('/insights/bd/'+u.id).then(function(d){STATE.bdInsightsData=d;render();}).catch(function(){});
 }
+// Personal | Team toggle on the Lead Insights page.
+window.switchLeadInsights=function(view){STATE.bdInsightsView=view;render();};
 
 // ════════════════════════════════════════════════════════════════
 // BD MANAGER — OWN INSIGHTS PAGE
@@ -289,8 +291,23 @@ function renderBDInsights(){
   var u=STATE.user;
   var d=STATE.bdInsightsData;
 
+  // Personal | Team toggle \u2014 shown only to a user who actually leads a lead-gen
+  // team (has at least one BD/BD Lead anywhere in their reporting subtree). The
+  // Team view reuses the shared team lead-gen body so it stays consistent with
+  // the My Team \u2192 Team Insights tab.
+  var canTeam=window.reportingSubtree&&reportingSubtree(u.id).some(function(x){return userHasAnyRole(x,'bd','bd_lead');});
+  var view=(canTeam&&STATE.bdInsightsView==='team')?'team':'personal';
+  var toggle=canTeam?
+    '<div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:3px;margin-bottom:14px">'+
+      [['personal','My leads'],['team','Team']].map(function(t){
+        var on=view===t[0];
+        return '<button onclick="switchLeadInsights(\''+t[0]+'\')" style="border:0;border-radius:7px;padding:5px 14px;font-size:12.5px;font-weight:600;cursor:pointer;background:'+(on?'var(--accent)':'transparent')+';color:'+(on?'#fff':'var(--text2)')+'">'+t[1]+'</button>';
+      }).join('')+
+    '</div>':'';
+  if(view==='team') return '<div class="page">'+toggle+renderTeamInsightsBody()+'</div>';
+
   if(!d){
-    return '<div class="page"><div class="ph"><div class="ptitle">My Insights</div><div class="psub">Loading your performance data\u2026</div></div>'+
+    return '<div class="page">'+toggle+'<div class="ph"><div class="ptitle">Lead Insights</div><div class="psub">Loading your performance data\u2026</div></div>'+
       '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">'+
         ['Emails Sent','Leads','Converted','Conv Rate'].map(function(l){
           return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;text-align:center"><div style="font-size:28px;font-weight:700;color:var(--border)">—</div><div style="font-size:12px;color:var(--text3);margin-top:3px">'+l+'</div></div>';
@@ -383,10 +400,10 @@ function renderBDInsights(){
     '</div>';
   }).join('');
 
-  return '<div class="page">'+
+  return '<div class="page">'+toggle+
     '<div class="ph"><div class="flex aic gap2">'+
       av(u,'40')+
-      '<div><div class="ptitle" style="margin:0">My Insights</div><div class="psub" style="margin:0">Your personal performance dashboard</div></div>'+
+      '<div><div class="ptitle" style="margin:0">Lead Insights</div><div class="psub" style="margin:0">Your personal lead-gen performance</div></div>'+
     '</div></div>'+
 
     // ── Top 4 stat cards ──
@@ -472,9 +489,13 @@ function renderBDInsights(){
 }
 
 // ════════════════════════════════════════════════════════════════
-// BD LEAD — OWN TEAM INSIGHTS PAGE
+// TEAM INSIGHTS — lead-gen performance across the reporting line.
+// renderTeamInsightsBody() returns the inner content (no .page wrapper) so it
+// can be embedded as a tab inside the "My Team" hub. renderBDLeadInsights()
+// keeps the standalone page for the legacy `bdleadinsights` route.
 // ════════════════════════════════════════════════════════════════
-function renderBDLeadInsights(){
+function renderBDLeadInsights(){ return '<div class="page">'+renderTeamInsightsBody()+'</div>'; }
+function renderTeamInsightsBody(){
   var u=STATE.user;
   var selectedBD=STATE.bdLeadSelectedBD||null;
   var allJobs=STATE.jobs;
@@ -486,7 +507,7 @@ function renderBDLeadInsights(){
   // ── Drill-down: individual BD Manager ──
   if(selectedBD){
     var bdUser=STATE.users.find(function(x){return x.id===selectedBD;});
-    if(!bdUser)return'<div class="page"><div style="padding:40px;text-align:center;color:var(--text3)">Not found</div></div>';
+    if(!bdUser)return'<div style="padding:40px;text-align:center;color:var(--text3)">Not found</div>';
     var bdJobs=allJobs.filter(function(j){return j.assigned_to_bd===selectedBD;});
     var convJ=bdJobs.filter(function(j){return j.stage==='Connected'||j.stage==='In Discussion';});
     var posJ=bdJobs.filter(function(j){return j.stage==='Positive';});
@@ -503,7 +524,7 @@ function renderBDLeadInsights(){
         '<div style="display:flex;align-items:center;gap:8px"><div style="width:8px;height:8px;border-radius:50%;background:'+(stgColors[s]||'var(--text3)')+'"></div><span style="font-size:13px;color:var(--text2)">'+s+'</span></div>'+
         '<span style="font-size:13px;font-weight:700;color:'+(stgColors[s]||'var(--text)')+'">'+cnt+'</span></div>';
     }).join('');
-    return '<div class="page">'+
+    return ''+
       '<div class="ph"><div class="flex aic gap3">'+
         '<button onclick="STATE.bdLeadSelectedBD=null;render()" style="background:transparent;border:0;color:var(--text3);font-size:22px;cursor:pointer">\u2190</button>'+
         av(bdUser,'40')+
@@ -527,15 +548,15 @@ function renderBDLeadInsights(){
           '<div style="font-weight:700;font-size:13px;margin-bottom:10px">Stage breakdown</div>'+
           (stgRows||'<div style="font-size:13px;color:var(--text3)">No leads.</div>')+
         '</div>'+
-      '</div></div>';
+      '</div>';
   }
 
   // ── Team overview ──
-  // Membership comes from the reporting hierarchy (users.manager_id) — direct
-  // reports who are BD/BD Lead — not the older team_assignments table. Reparenting
-  // is admin-only (Admin → user → Reporting Hierarchy), so there's no self-service
-  // "assign" action here anymore; this page is a read-only performance view.
-  var myBDs=getTeam(u).filter(function(x){return userHasAnyRole(x,'bd','bd_lead');});
+  // Membership is the FULL reporting subtree (users.manager_id, direct +
+  // transitive) filtered to BD/BD Lead — so a lead sees everyone under them, not
+  // just their first-level reports. Reparenting is admin-only (Admin → user →
+  // Reporting Hierarchy); this is a read-only performance view.
+  var myBDs=reportingSubtree(u.id).filter(function(x){return userHasAnyRole(x,'bd','bd_lead');});
   var bdStats=myBDs.map(function(bd){
     var bdJobs=allJobs.filter(function(j){return j.assigned_to_bd===bd.id;});
     var convJ=bdJobs.filter(function(j){return j.stage==='Connected'||j.stage==='In Discussion';});
@@ -571,7 +592,7 @@ function renderBDLeadInsights(){
       '<td style="padding:10px 8px;text-align:center;font-size:13px;font-weight:600;color:var(--green)">'+r.convRate+'%</td>'+
     '</tr>';
   }).join('');
-  return '<div class="page">'+
+  return ''+
     '<div class="ph"><div class="flex jb aic">'+
       '<div><div class="ptitle">Team Insights</div><div class="psub">'+myBDs.length+' BD Manager'+(myBDs.length!==1?'s':'')+' \u00b7 '+teamTotal+' leads \u00b7 '+teamSent+' emails sent</div></div>'+
     '</div></div>'+
@@ -594,6 +615,6 @@ function renderBDLeadInsights(){
           '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Conv %</th>'+
         '</tr></thead><tbody>'+lbRows+'</tbody></table></div>':
         '<div style="padding:40px;text-align:center;color:var(--text3);font-size:13px">No BD Managers report to you yet.<br><br>An admin sets reporting lines on the Admin → user page.</div>')+
-    '</div></div>';
+    '</div>';
 }
 

@@ -105,10 +105,13 @@
     return '<div class="card" style="padding:16px"><div style="font-weight:600;font-size:14px;margin-bottom:12px">Top clients by submissions</div>'+body+'</div>';
   }
 
-  window.renderReports = function(){
+  // renderReportsBody() returns the inner content (no .page wrapper) so it can be
+  // embedded as the "Reports" tab inside the My Team hub. renderReports() keeps
+  // the standalone page for users who reach Reports as its own nav item.
+  window.renderReportsBody = function(){
     var r = STATE.reports;
-    if (r.loading || !r.data) return '<div class="page"><div style="font-size:18px;font-weight:700;margin-bottom:6px">Reports</div>'+
-      '<div style="text-align:center;padding:50px;color:var(--text3)">'+(r.loading?'Loading reports…':'No data yet.')+'</div></div>';
+    if (r.loading || !r.data) return '<div style="font-size:18px;font-weight:700;margin-bottom:6px">Reports</div>'+
+      '<div style="text-align:center;padding:50px;color:var(--text3)">'+(r.loading?'Loading reports…':'No data yet.')+'</div>';
     var d = r.data, t = d.totals || {};
     var ttf = d.avg_time_to_fill != null ? d.avg_time_to_fill + ' days' : '—';
     var header = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
@@ -124,10 +127,10 @@
       tile('Avg time-to-fill', ttf)+
       tile('Revenue', money(t.revenue))+
     '</div>';
-    return '<div class="page">'+header+tiles+
+    return header+tiles+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'+funnelCard(d.funnel,d.stages)+trendCard(d.trend)+'</div>'+
       '<div style="margin-bottom:14px">'+recruiterCard(d.by_recruiter||[])+'</div>'+
-      clientsCard(d.top_clients||[])+
-    '</div>';
+      clientsCard(d.top_clients||[]);
   };
+  window.renderReports = function(){ return '<div class="page">'+renderReportsBody()+'</div>'; };
 })();

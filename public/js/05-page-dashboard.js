@@ -473,11 +473,14 @@ function renderManagerDashboard(u){
   var hour=new Date().getHours();
   var greet=hour<12?"Good morning":hour<17?"Good afternoon":"Good evening";
 
-  // Team roster — direct reports, each with how many sit under them. Clean,
-  // honest structure (no fabricated per-person lead numbers); the full nested
-  // tree and the team's real work live on the My Team page.
-  var teamRows=team.slice().sort(function(a,b){return (a.name||'').localeCompare(b.name||'');})
-    .map(function(t){return renderOrgSubtree(t.id,{click:'none',flat:true});}).join('');
+  // Team roster — the full reporting subtree (direct + transitive), rendered as
+  // the nested org tree so a lead sees everyone under them, not just first-level
+  // reports. Scrolls if it's tall. The team's real work numbers live below and on
+  // the My Team page.
+  var teamRows='<div style="max-height:320px;overflow:auto">'+
+    team.slice().sort(function(a,b){return (a.name||'').localeCompare(b.name||'');})
+      .map(function(t){return renderOrgSubtree(t.id,{click:'none'});}).join('')+
+    '</div>';
   var teamCard=team.length?
     '<div class="card cp mb4">'+
       '<div class="flex jb aic mb3">'+

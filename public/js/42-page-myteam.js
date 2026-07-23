@@ -25,10 +25,30 @@
   // same data-driven gate: shown to anyone with at least one direct report.)
   var _prevGoPage = window.goPage;
   window.goPage = function(p){
-    if (p==='myteam'){ STATE.page='myteam'; STATE.modal=null; render(); if(window.recDashboardLoad) recDashboardLoad(); return; }
+    if (p==='myteam'){ STATE.page='myteam'; STATE.modal=null; render(); if(window.recDashboardLoad) recDashboardLoad(); ensureReports(); return; }
+    // Team Insights and Reports are now tabs inside My Team. For anyone who leads
+    // a team, redirect their legacy routes into the hub so every old "Full
+    // reports →" / "Team Insights" link keeps working. Users WITHOUT a team keep
+    // the standalone pages (they have no My Team hub).
+    if (p==='reports' && leadsATeam(STATE.user)){ STATE.page='myteam'; STATE.myteamTab='reports'; STATE.modal=null; render(); if(window.recDashboardLoad) recDashboardLoad(); ensureReports(); return; }
+    if (p==='bdleadinsights' && leadsATeam(STATE.user)){ STATE.page='myteam'; STATE.myteamTab='insights'; STATE.modal=null; render(); if(window.recDashboardLoad) recDashboardLoad(); return; }
     return _prevGoPage.apply(this, arguments);
   };
   function paint(){ if(STATE.page!=='myteam')return; var c=document.getElementById('content'); if(c) c.innerHTML=renderMyTeam(); }
+
+  // Tab switch within the hub. The Reports tab lazy-loads /reports/recruiting.
+  window.myteamTab = function(t){ STATE.myteamTab=t; if(t==='reports') ensureReports(); paint(); };
+
+  // Fetch the recruiting report once for the Reports tab (mirrors 39's loader
+  // but repaints THIS page). STATE.reports is created by 39-page-reports.js.
+  function ensureReports(){
+    if(!window.renderReportsBody) return;
+    STATE.reports = STATE.reports || { loading:false, data:null };
+    if(STATE.reports.data || STATE.reports.loading) return;
+    STATE.reports.loading = true;
+    apiGet('/reports/recruiting').then(function(d){ STATE.reports.data=d||null; STATE.reports.loading=false; if(STATE.page==='myteam') paint(); })
+      .catch(function(){ STATE.reports.loading=false; if(STATE.page==='myteam') paint(); });
+  }
 
   function snapshotCard(){
     var d=STATE._recDash||{};
@@ -52,7 +72,7 @@
     return '<div class="card cp mb4">'+
       '<div class="flex jb aic mb3"><div><div class="fw6">Your team’s work</div>'+
         '<div class="f12 text3">Live recruiting numbers across everyone in your reporting line</div></div>'+
-        '<button class="btn btn-outline btn-sm" onclick="goPage(\'reports\')">Full reports →</button></div>'+
+        '<button class="btn btn-outline btn-sm" onclick="myteamTab(\'reports\')">Full reports →</button></div>'+
       (loading?'<div style="text-align:center;color:var(--text3);font-size:13px;padding:8px 0">Loading…</div>':
         '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
           tile('Subs this week',d.submissions_week,'var(--accent)')+
@@ -65,24 +85,47 @@
     '</div>';
   }
 
+  // Tab bar for the hub. Reports is a tab only when the reports module is loaded.
+  function tabBar(active){
+    var tabs=[['overview','Overview'],['insights','Team Insights']];
+    if(window.renderReportsBody) tabs.push(['reports','Reports']);
+    return '<div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--border);flex-wrap:wrap">'+
+      tabs.map(function(t){
+        var on=active===t[0];
+        return '<button onclick="myteamTab(\''+t[0]+'\')" style="background:none;border:0;border-bottom:2px solid '+(on?'var(--accent)':'transparent')+';color:'+(on?'var(--text)':'var(--text3)')+';font-weight:'+(on?700:500)+';font-size:13.5px;padding:8px 12px;cursor:pointer;margin-bottom:-1px">'+t[1]+'</button>';
+      }).join('')+
+    '</div>';
+  }
+
+  function overviewBody(u){
+    var tree=renderOrgSubtree(u.id,{click:'none'});
+    return snapshotCard()+
+      '<div class="card cp">'+
+        '<div class="fw6" style="margin-bottom:2px">Reporting structure</div>'+
+        '<div class="f12 text3 mb3">Everyone under you on the org chart. An admin sets reporting lines.</div>'+
+        tree+
+      '</div>';
+  }
+
   window.renderMyTeam = function(){
     var u=STATE.user;
     if(!leadsATeam(u)) return '<div class="page"><div style="font-size:18px;font-weight:700;margin-bottom:6px">My Team</div>'+
       '<div style="text-align:center;padding:50px;color:var(--text3)">No one reports to you yet.</div></div>';
     var directCount=directReportsOf(u.id).length;
     var totalCount=reportingSubtree(u.id).length;
-    var tree=renderOrgSubtree(u.id,{click:'none'});
+    var tab=STATE.myteamTab||'overview';
+    if(tab==='reports'&&!window.renderReportsBody) tab='overview';
+    var body;
+    if(tab==='insights') body=(window.renderTeamInsightsBody?renderTeamInsightsBody():'');
+    else if(tab==='reports') body=(window.renderReportsBody?renderReportsBody():'');
+    else body=overviewBody(u);
     return '<div class="page">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
         '<div><div style="font-size:18px;font-weight:700">My Team</div>'+
           '<div style="font-size:12.5px;color:var(--text3)">'+directCount+' direct report'+(directCount===1?'':'s')+' · '+totalCount+' in your reporting line</div></div>'+
       '</div>'+
-      snapshotCard()+
-      '<div class="card cp">'+
-        '<div class="fw6" style="margin-bottom:2px">Reporting structure</div>'+
-        '<div class="f12 text3 mb3">Everyone under you on the org chart. An admin sets reporting lines.</div>'+
-        tree+
-      '</div>'+
+      tabBar(tab)+
+      body+
     '</div>';
   };
 })();
