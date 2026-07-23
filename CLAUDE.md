@@ -120,15 +120,24 @@ Ordered by "cheapest to do now vs. most painful to retrofit":
      **Still open:** actual per-role *permission* differences (today the new
      roles are hierarchy/reporting-only, no new capabilities); a full
      configurable-permissions system remains future work.
-   - **Session 5 (in progress): team structure + visibility fix** — see
-     `docs/CONTEXT_WINDOW.md` "Session 5" for the full plan. The hierarchy existed
-     but nothing in the UI used it consistently: the Dashboard "Your Team" widget
-     had a live bug (keyed off a dead `bdm` field, so it silently showed the whole
-     org to everyone but recruiters), `GET /users`/`GET /team-assignments` had no
-     org scoping, and `/recruiting-dashboard` wasn't chain-scoped like
-     `/reports/recruiting` already was. Fixing all of that so "team" means one
-     consistent thing (direct + transitive reports under `manager_id`), before any
-     chat/meetings/docs layer gets built on top of teams.
+   - **Session 5 DONE: team structure + visibility fix** (PRs #117, #118 +
+     migration 029) — see `docs/CONTEXT_WINDOW.md` "Session 5" for the full
+     writeup. The hierarchy existed but nothing in the UI used it consistently:
+     the Dashboard "Your Team" widget had a live bug (keyed off a dead `bdm`
+     field, so it silently showed the whole org to everyone but recruiters),
+     `GET /users`/`GET /team-assignments` had no org scoping, and
+     `/recruiting-dashboard` wasn't chain-scoped like `/reports/recruiting`
+     already was. Fixed all of that, plus: a real manager/team dashboard, a new
+     "My Team" page (data-driven — anyone with ≥1 report), an Admin "Org chart"
+     view (List/Org-chart toggle), the individual RA dashboard rebuilt on real
+     `jobs` data (was reading dead demo seed data), and the older
+     `team_assignments` table fully retired in favor of `manager_id` (Team
+     Insights, Admin views) with a one-time backfill migration applied live.
+     "Team" now means one consistent thing everywhere: direct + transitive
+     reports under `manager_id`. **Still open, deliberately deferred:** retiring
+     the orphaned "Manager Users" page + its separate `email_accounts`
+     subsystem — confirmed unreachable via nav, but shares live code with the
+     reachable Admin page, so it needs an audit-and-split, not a delete.
 3. **App-tracked candidate email** (not just `mailto:`): route candidate emails through
    the sending subsystem we already have → open/reply tracking = a real selling point,
    no new infra.
