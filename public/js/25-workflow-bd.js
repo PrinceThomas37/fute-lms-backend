@@ -78,36 +78,12 @@
   var _origRender=window.render;
   window.render=function(){
     _origRender.apply(this,arguments);
-    injectBDNav();
     if(STATE.page==='leads')injectLeadsTaskbar();
     if(BD_PAGES[STATE.page])paintBDPage();
   };
 
-  function injectBDNav(){
-    var u=STATE.user; if(!u)return;
-    var navWrap=document.querySelector('.sb-nav'); if(!navWrap)return;
-    if(navWrap.querySelector('[data-bdnav]'))return;
-    var items=[];
-    if(isBDM(u))items.push({id:"bd_joborders",lbl:"Jobs",ic:"leads"});
-    if(isRec(u)&&!isBDM(u))items.push({id:"bd_myjobs",lbl:"My Jobs",ic:"leads"});
-    if(!items.length)return;
-    // Anchor after Leads when present; recruiters have no Leads item, so fall
-    // back to Dashboard to keep My Jobs at the top of their menu.
-    var anchor=null,navEls=navWrap.querySelectorAll('.nav-item');
-    for(var k=0;k<navEls.length;k++){if((navEls[k].getAttribute('onclick')||'').indexOf("goPage('leads')")>-1){anchor=navEls[k];break;}}
-    if(!anchor)for(var k2=0;k2<navEls.length;k2++){if((navEls[k2].getAttribute('onclick')||'').indexOf("goPage('dashboard')")>-1){anchor=navEls[k2];break;}}
-    items.forEach(function(n){
-      var active=(STATE.page===n.id)?' active':'';
-      var d=document.createElement('div');d.className='nav-item'+active;d.setAttribute('data-bdnav','1');
-      d.innerHTML='<span class="nav-icon">'+icon(n.ic)+'</span>'+n.lbl;
-      d.onclick=function(){goPage(n.id);};
-      if(anchor&&anchor.parentNode){anchor.parentNode.insertBefore(d,anchor.nextSibling);anchor=d;}
-      else{navWrap.appendChild(d);}
-    });
-    var titleEl=document.querySelector('.tb-title');
-    var titles={bd_joborders:"Jobs",bd_myjobs:"My Jobs",bd_jodetail:"Job",bd_kanban:"Candidate Pipeline"};
-    if(titleEl&&titles[STATE.page])titleEl.textContent=titles[STATE.page];
-  }
+  // (BD nav items — Jobs / My Jobs — are now built by the sidebar in
+  // 04-shell-login.js; page titles come from its pageTitles map.)
 
   // ── Leads page task bar ────────────────────────────────────────────────────
   function injectLeadsTaskbar(){
@@ -183,7 +159,6 @@
       _origRender();
       if(p==='bd_joborders'||p==='bd_myjobs')loadJobOrders();
       else paintBDPage();
-      injectBDNav();
       return;
     }
     return _origGoPage.apply(this,arguments);

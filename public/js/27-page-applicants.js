@@ -73,25 +73,10 @@
   var _prevRender = window.render;
   window.render = function(){
     _prevRender.apply(this, arguments);
-    injectATSNav();
     if (STATE.page === 'applicants') paintATSPage();
   };
 
-  function injectATSNav(){
-    var u = STATE.user; if(!u || !canUse(u)) return;
-    var navWrap = document.querySelector('.sb-nav'); if(!navWrap) return;
-    if (navWrap.querySelector('[data-atsnav]')) return;
-    var d = document.createElement('div');
-    d.className = 'nav-item' + (STATE.page==='applicants' ? ' active' : '');
-    d.setAttribute('data-atsnav','1');
-    d.innerHTML = '<span class="nav-icon">'+icon('profile')+'</span>Candidates';
-    d.onclick = function(){ goPage('applicants'); };
-    // place after any BD nav item, else at the end
-    var bd = navWrap.querySelector('[data-bdnav]');
-    if (bd && bd.parentNode) bd.parentNode.insertBefore(d, bd.nextSibling);
-    else navWrap.appendChild(d);
-    if (STATE.page==='applicants'){ var t=document.querySelector('.tb-title'); if(t) t.textContent='Candidates'; }
-  }
+  // (The "Candidates" nav item is now built by the sidebar in 04-shell-login.js.)
 
   var _prevGoPage = window.goPage;
   window.goPage = function(p){

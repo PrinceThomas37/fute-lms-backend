@@ -58,10 +58,15 @@ try {
     STATE.page = 'reports';
     render();
     const html = window.renderReports();
-    const navPresent = !!document.querySelector('[data-rptnav]');
+    // Reports is now a sidebar item built by 04-shell-login.js (shown standalone
+    // to users without the My Team hub), not a DOM-injected [data-rptnav] node.
+    const navPresent = Array.prototype.some.call(
+      document.querySelectorAll('.sb-nav .nav-item'),
+      function(el){ return (el.getAttribute('onclick')||'').indexOf("goPage('reports')") > -1; }
+    );
     return { html, navPresent };
   });
-  step('Reports nav item injected', out.navPresent);
+  step('Reports nav item present in sidebar', out.navPresent);
   step('Headline tiles render (Placements, Avg time-to-fill, Revenue)', out.html.includes('Placements') && out.html.includes('Avg time-to-fill') && out.html.includes('27 days'));
   step('Revenue formatted as currency', out.html.includes('$12,000'));
   step('Pipeline funnel section', out.html.includes('Pipeline funnel') && out.html.includes('Submitted to Client'));

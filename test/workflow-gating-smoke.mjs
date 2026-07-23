@@ -162,16 +162,18 @@ try {
   step('Recent rejections card shows candidate + reason', recDashHtml.includes('Recent rejections') && recDashHtml.includes('Peter Parker') && recDashHtml.includes('Client wanted 5+ years AWS'));
   step('Rejections framed as context, not a scorecard', recDashHtml.includes('not a scorecard'));
 
-  // ── 5: BD manager per-recruiter revenue/placements card ──────────────────
+  // ── 5: BD manager dashboard is banner-first, with NO injected recruiter
+  // "column". The old per-recruiter revenue strip (fed by the legacy
+  // un-org-scoped /bd-analytics/recruiters) was removed; that breakdown now
+  // lives on the My Team → Reports tab. The dashboard must not inject it and
+  // must not call /bd-analytics/recruiters.
   await page.evaluate(() => {
     STATE.user.role = 'bd'; STATE.user.roles = ['bd'];
     document.querySelectorAll('[data-recdash],[data-bdnav],[data-atsnav],[data-srcnav],[data-jbreq]').forEach(e => e.remove());
+    window._analyticsCalled = false;
     window.apiGet = function(p){
-      if (p === '/recruiting-dashboard') return Promise.resolve({ role: 'manager', jobs: { total: 3, active: 3 }, by_stage: {}, submissions_week: 2, submissions_month: 5, upcoming_interviews: [], awaiting_approval: 0 });
-      if (p === '/bd-analytics/recruiters') return Promise.resolve([
-        { recruiter_id: 'u1', name: 'James Wilson', employee_id: 'FG-020', total: 12, submitted_to_bdm: 2, submitted_to_client: 3, interview: 2, offer: 1, placed: 2, rejected: 1, revenue: 9000, fill_rate: 17 },
-        { recruiter_id: 'u2', name: 'Ana Souza', employee_id: 'FG-021', total: 5, submitted_to_bdm: 1, submitted_to_client: 1, interview: 0, offer: 0, placed: 0, rejected: 0, revenue: 0, fill_rate: 0 }
-      ]);
+      if (p === '/recruiting-dashboard') return Promise.resolve({ role: 'manager', scope: 'own', jobs: { total: 3, active: 3 }, by_stage: { 'Submitted to Client': 2 }, submissions_week: 2, submissions_month: 5, upcoming_interviews: [], awaiting_approval: 0 });
+      if (p === '/bd-analytics/recruiters') { window._analyticsCalled = true; return Promise.resolve([]); }
       return Promise.reject(new Error('unstubbed ' + p));
     };
     STATE._recAn = null; STATE._recDash = null;
@@ -179,9 +181,10 @@ try {
   });
   await page.waitForTimeout(400);
   const bdDashHtml = await page.evaluate(() => document.getElementById('content').innerHTML);
-  step('BDM sees My recruiting team card', bdDashHtml.includes('My recruiting team'));
-  step('Recruiter revenue + placements shown', bdDashHtml.includes('James Wilson') && bdDashHtml.includes('9,000') && bdDashHtml.includes('placed'));
-  step('Total revenue rolled up', bdDashHtml.includes('Total revenue'));
+  const analyticsCalled = await page.evaluate(() => window._analyticsCalled);
+  step('BD dashboard is banner-first (greeting present)', /banner-name/.test(bdDashHtml) && /👋/.test(bdDashHtml));
+  step('No injected "My recruiting team" recruiter column', !bdDashHtml.includes('My recruiting team'));
+  step('Dashboard does not call legacy /bd-analytics/recruiters', analyticsCalled === false);
 
   // ── 6: resume preview on candidate profile ───────────────────────────────
   await page.evaluate(() => {

@@ -22,22 +22,11 @@
   var _prevRender = window.render;
   window.render = function(){
     _prevRender.apply(this, arguments);
-    injectNav();
     if (STATE.page === 'reports') paint();
   };
-  function injectNav(){
-    var u = STATE.user; if(!u || !canUse(u)) return;
-    var navWrap = document.querySelector('.sb-nav'); if(!navWrap) return;
-    var existing = navWrap.querySelector('[data-rptnav]');
-    if (existing){ existing.classList.toggle('active', STATE.page==='reports'); return; }
-    var d = document.createElement('div');
-    d.className = 'nav-item' + (STATE.page==='reports' ? ' active' : '');
-    d.setAttribute('data-rptnav','1');
-    d.innerHTML = '<span class="nav-icon">'+icon('reports')+'</span>Reports';
-    d.onclick = function(){ goPage('reports'); };
-    navWrap.appendChild(d);
-    if (STATE.page==='reports'){ var t=document.querySelector('.tb-title'); if(t) t.textContent='Reports'; }
-  }
+  // (The "Reports" nav item is now built by the sidebar in 04-shell-login.js —
+  // shown standalone only to users who don't have the "My Team" hub, which
+  // carries Reports as a tab. paint() sets the page title.)
   var _prevGoPage = window.goPage;
   window.goPage = function(p){
     if (p === 'reports'){ STATE.page='reports'; STATE.modal=null; render(); loadReport(); return; }

@@ -45,33 +45,40 @@ function renderApp(){
   var myLeads=getMyLeads(u);
   var todayCnt=myLeads.filter(function(l){return l.date===today}).length;
 
-  var navItems=[
-    {id:"dashboard",lbl:"Dashboard",ic:"dashboard"},
-    // Lead-gen is BD/RA territory — a pure recruiter's desk is jobs + candidates,
-    // so Leads stays out of their menu.
-    ...(isPureRecruiter(u)?[]:[{id:"leads",lbl:"Leads",ic:"leads",badge:todayCnt}]),
-    ...(!userHasRole(u,'ra')||userHasAnyRole(u,'bd','bd_lead','admin','ra_lead')?[{id:"email",lbl:"Email",ic:"email"}]:[]),
-    ...(userHasRole(u,'ra')&&!userHasAnyRole(u,'admin','bd','bd_lead','ra_lead')?[{id:"insights",lbl:"Insights",ic:"dashboard"}]:[{id:"reminders",lbl:"Reminders",ic:"star",badge:STATE.reminders.filter(function(r){return r.user_id===u.id&&r.status==="pending"}).length||null}]),
-    {id:"profile",lbl:"My Profile",ic:"profile"}
-  ];
-  // Admin only: Admin panel
-  if(userHasRole(u,'admin'))navItems.splice(4,0,{id:"admin",lbl:"Admin",ic:"admin"});
-  // Admin + leads: Deliverability dashboard
-  if(userHasAnyRole(u,'admin','bd_lead','ra_lead'))navItems.splice(navItems.length-1,0,{id:"deliverability",lbl:"Deliverability",ic:"dashboard"});
-  // Sequence now lives inside the Email page as a tab (see renderEmail) — no
-  // standalone nav item, so it reads as part of outreach, not a separate module.
-  // RA Lead + Admin: Assign Leads + Insights (RA team view)
-  if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
-  if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(navItems.length-1,0,{id:"insights",lbl:"Insights",ic:"dashboard"});
-  // Team Insights: data-driven, not role-based — anyone (not admin, who already
-  // sees everything) with at least one direct BD/BD Lead report on the
-  // reporting hierarchy, matching the flexible "any user can lead any team"
-  // model rather than hard-coding the bd_lead title.
-  var leadsBDTeam=!userHasRole(u,'admin')&&getTeam(u).some(function(x){return userHasAnyRole(x,'bd','bd_lead');});
-  if(leadsBDTeam)navItems.splice(navItems.length-1,0,{id:"bdleadinsights",lbl:"Team Insights",ic:"dashboard"});
-  if(userHasRole(u,'bd_lead')&&!userHasRole(u,'admin'))navItems.splice(navItems.length-1,0,{id:"bdinsights",lbl:"My Insights",ic:"dashboard"});
-  // BD Manager (not bd_lead/admin): own performance Insights
-  if(userHasRole(u,'bd')&&!userHasAnyRole(u,'bd_lead','admin'))navItems.splice(navItems.length-1,0,{id:"bdinsights",lbl:"My Insights",ic:"dashboard"});
+  // ── Sidebar menu (single source of truth) ────────────────────────────────
+  // Every nav item is built here, in one deterministic order. (Historically the
+  // BD Jobs / Candidates / Clients / Reports / My Team items were injected into
+  // the DOM by their own page modules, which made ordering depend on script load
+  // order and left "My Team" stranded at the bottom. They now live here.)
+  var isAdmin=userHasRole(u,'admin');
+  var bdm=userHasAnyRole(u,'admin','bd','bd_lead');          // BD desk: Jobs/Clients/Candidates
+  var pureRec=isPureRecruiter(u);
+  var recruiter=userHasRole(u,'recruiter');
+  var raOnly=userHasRole(u,'ra')&&!userHasAnyRole(u,'admin','bd','bd_lead','ra_lead');
+  // "Team lead" is data-driven: anyone with at least one direct report. They get
+  // the "My Team" hub (which folds in Team Insights + Reports as tabs), so the
+  // standalone Reports item is only for people who DON'T have My Team — a plain
+  // recruiter or a report-less BD still needs their own numbers somewhere.
+  var leadsAnyTeam=!!(window.directReportsOf&&directReportsOf(u.id).length);
+  var canReports=userHasAnyRole(u,'admin','bd','bd_lead','ra_lead','recruiter');
+  var remBadge=STATE.reminders.filter(function(r){return r.user_id===u.id&&r.status==="pending";}).length||null;
+
+  var navItems=[{id:"dashboard",lbl:"Dashboard",ic:"dashboard"}];
+  if(leadsAnyTeam)navItems.push({id:"myteam",lbl:"My Team",ic:"profile"});
+  if(!pureRec)navItems.push({id:"leads",lbl:"Leads",ic:"leads",badge:todayCnt});
+  if(userHasAnyRole(u,'ra_lead','admin'))navItems.push({id:"assign",lbl:"Assign Leads",ic:"leads"});
+  if(bdm)navItems.push({id:"bd_joborders",lbl:"Jobs",ic:"leads"});
+  if(recruiter&&!bdm){navItems.push({id:"bd_myjobs",lbl:"My Jobs",ic:"leads"});navItems.push({id:"job_board",lbl:"All Jobs",ic:"leads"});}
+  if(bdm)navItems.push({id:"clients",lbl:"Clients",ic:"leads"});
+  if(bdm||recruiter)navItems.push({id:"applicants",lbl:"Candidates",ic:"profile"});
+  if(isAdmin)navItems.push({id:"admin",lbl:"Admin",ic:"admin"});
+  if(!userHasRole(u,'ra')||userHasAnyRole(u,'bd','bd_lead','admin','ra_lead'))navItems.push({id:"email",lbl:"Email",ic:"email"});
+  navItems.push(raOnly?{id:"insights",lbl:"Insights",ic:"dashboard"}:{id:"reminders",lbl:"Reminders",ic:"star",badge:remBadge});
+  if(userHasAnyRole(u,'ra_lead','admin'))navItems.push({id:"insights",lbl:"Insights",ic:"dashboard"});
+  // BD / BD Lead (not admin): own lead-gen performance — "Lead Insights".
+  if(userHasAnyRole(u,'bd','bd_lead')&&!isAdmin)navItems.push({id:"bdinsights",lbl:"Lead Insights",ic:"dashboard"});
+  if(canReports&&!leadsAnyTeam)navItems.push({id:"reports",lbl:"Reports",ic:"reports"});
+  if(userHasAnyRole(u,'admin','bd_lead','ra_lead'))navItems.push({id:"deliverability",lbl:"Deliverability",ic:"dashboard"});
 
   var nav=navItems.map(function(n){
     var active=STATE.page===n.id?" active":"";
@@ -81,7 +88,7 @@ function renderApp(){
 
   var switchers=""; // removed — use team list to switch views
 
-  var pageTitles={dashboard:"Dashboard",leads:"Leads",assign:"Assign Leads",email:"Email",admin:"Admin",deliverability:"Deliverability & Replies",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",bdinsights:"My Insights",bdleadinsights:"Team Insights",profile:"My Profile",reminders:"Reminders"};
+  var pageTitles={dashboard:"Dashboard",myteam:"My Team",leads:"Leads",assign:"Assign Leads",bd_joborders:"Jobs",bd_myjobs:"My Jobs",bd_jodetail:"Job",bd_kanban:"Candidate Pipeline",job_board:"All Jobs",clients:"Clients",applicants:"Candidates",email:"Email",admin:"Admin",deliverability:"Deliverability & Replies",emailaccounts:"Email Accounts",managerusers:"Manager Users",insights:"Insights",bdinsights:"Lead Insights",bdleadinsights:"Team Insights",reports:"Reports",profile:"My Profile",reminders:"Reminders"};
   var viewingName=STATE.viewingUser&&STATE.viewingUser.id!==u.id?" · Viewing: "+STATE.viewingUser.name:"";
 
   return '<div id="sidebar">'+
@@ -101,7 +108,7 @@ function renderApp(){
             '<button onclick="guestSwitchRole(\'ra_lead\')" style="font-size:10.5px;padding:3px 8px;border-radius:5px;border:1px solid var(--border);background:'+(u.role==='ra_lead'?'var(--accent)':'var(--card)')+';color:'+(u.role==='ra_lead'?'#fff':'var(--text2)')+';cursor:pointer;font-weight:600">RA Lead</button>'+
           '</div>'+
         '</div>':'')  +
-      '<div class="user-row" onclick="goPage(\'profile\')">'+av(u,"32")+'<div style="flex:1;min-width:0"><div class="u-name">'+u.name+(u.isGuest?'<span style="font-size:9px;background:#F5C23B;color:#78350f;padding:1px 5px;border-radius:4px;font-weight:700;margin-left:5px">GUEST</span>':'')+'</div><div class="u-role">'+roleLabel(u.role)+'</div></div></div>'+
+      '<div class="user-row" onclick="goPage(\'profile\')" title="Open my profile">'+av(u,"32")+'<div style="flex:1;min-width:0"><div class="u-name">'+u.name+(u.isGuest?'<span style="font-size:9px;background:#F5C23B;color:#78350f;padding:1px 5px;border-radius:4px;font-weight:700;margin-left:5px">GUEST</span>':'')+'</div><div class="u-role">'+roleLabel(u.role)+'</div><div style="font-size:10.5px;color:var(--accent);font-weight:600;margin-top:1px">My profile ›</div></div></div>'+
       '<div class="signout" onclick="signOut()">Sign out</div>'+
     '</div>'+
   '</div>'+

@@ -540,11 +540,10 @@ function renderManagerDashboard(u){
 
     (loading?'<div class="card cp mb4" style="text-align:center;color:var(--text3);font-size:13px">Loading your team\'s desk…</div>':'')+
 
-    teamCard+
-
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">'+
       tile('Jobs',(d.jobs&&d.jobs.total)||0,'var(--accent)')+
       tile('Awaiting approval',d.awaiting_approval||0,'var(--amber)')+
+      tile('At Client',bs['Submitted to Client']||0,'var(--accent)')+
       tile('In Interview',interviews,'#2563eb')+
       tile('Offers',bs['Offer']||0,'#7c3aed')+
       tile('Placements',bs['Placement']||0,'var(--green)')+
@@ -557,6 +556,8 @@ function renderManagerDashboard(u){
       '</div>'+
       '<div class="flex gap2 flex-wrap">'+(stagePills||'<div class="text3 f13">No submissions in this scope yet.</div>')+'</div>'+
     '</div>'+
+
+    teamCard+
 
     '<div class="card cp mb4">'+
       '<div class="flex jb aic mb3">'+

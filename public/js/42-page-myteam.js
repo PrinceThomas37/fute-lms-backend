@@ -19,24 +19,10 @@
   var _prevRender = window.render;
   window.render = function(){
     _prevRender.apply(this, arguments);
-    injectNav();
     if (STATE.page==='myteam'){ paint(); var t=document.querySelector('.tb-title'); if(t) t.textContent='My Team'; }
   };
-  function injectNav(){
-    var u=STATE.user; if(!u) return;
-    var navWrap=document.querySelector('.sb-nav'); if(!navWrap) return;
-    var existing=navWrap.querySelector('[data-myteamnav]');
-    // Gate is data-driven and can change at runtime (an admin assigns a report),
-    // so add/remove the nav item to match the live state rather than once.
-    if (!leadsATeam(u)){ if(existing&&existing.parentNode) existing.parentNode.removeChild(existing); return; }
-    if (existing){ existing.classList.toggle('active', STATE.page==='myteam'); return; }
-    var d=document.createElement('div');
-    d.className='nav-item'+(STATE.page==='myteam'?' active':'');
-    d.setAttribute('data-myteamnav','1');
-    d.innerHTML='<span class="nav-icon">'+icon('profile')+'</span>My Team';
-    d.onclick=function(){ goPage('myteam'); };
-    navWrap.appendChild(d);
-  }
+  // (The "My Team" nav item is now built by the sidebar in 04-shell-login.js —
+  // same data-driven gate: shown to anyone with at least one direct report.)
   var _prevGoPage = window.goPage;
   window.goPage = function(p){
     if (p==='myteam'){ STATE.page='myteam'; STATE.modal=null; render(); if(window.recDashboardLoad) recDashboardLoad(); return; }

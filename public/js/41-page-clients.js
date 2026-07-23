@@ -17,21 +17,10 @@
   var _prevRender = window.render;
   window.render = function(){
     _prevRender.apply(this, arguments);
-    injectNav();
     if (STATE.page==='clients'){ paint(); var t=document.querySelector('.tb-title'); if(t) t.textContent='Clients'; }
   };
-  function injectNav(){
-    var u=STATE.user; if(!u||!isBDlike(u)) return;
-    var navWrap=document.querySelector('.sb-nav'); if(!navWrap) return;
-    if (navWrap.querySelector('[data-clientsnav]')) return;
-    var d=document.createElement('div');
-    d.className='nav-item'+(STATE.page==='clients'?' active':'');
-    d.setAttribute('data-clientsnav','1');
-    d.innerHTML='<span class="nav-icon">'+icon('leads')+'</span>Clients';
-    d.onclick=function(){ goPage('clients'); };
-    var atsnav=navWrap.querySelector('[data-atsnav]');
-    if (atsnav&&atsnav.parentNode) atsnav.parentNode.insertBefore(d, atsnav.nextSibling); else navWrap.appendChild(d);
-  }
+  // (The "Clients" nav item is now built by the sidebar in 04-shell-login.js,
+  // positioned above Candidates.)
   var _prevGoPage = window.goPage;
   window.goPage = function(p){
     if (p==='clients'){ STATE.page='clients'; STATE.modal=null; STATE.clients.selectedId=null; render(); loadClients(); return; }
