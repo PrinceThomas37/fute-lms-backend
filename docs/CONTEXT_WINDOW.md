@@ -7,8 +7,9 @@
 > That file also tracks per-feature status (multi-tenancy slices, email-tracking
 > slices, interview auto-meeting) — keep it current.
 
-**Updated**: 2026-07-22 · **Repo**: PrinceThomas37/fute-lms-backend · **Branch**: main
-**Dev branch this session**: `claude/context-window-resume-m04j2e`.
+**Updated**: 2026-07-23 · **Repo**: PrinceThomas37/fute-lms-backend · **Branch**: main
+**Dev branch, Session 5**: `claude/team-hierarchy-visibility-hmjohj` (restarted from
+`main` after each merge, per the merged-PR convention — see below).
 **Supabase project**: `teiqievahzhllojvgsku` · **Deploy**: Render
 (fute-lms-backend.onrender.com, auto-deploys from `main` — merging IS the release).
 
@@ -515,19 +516,16 @@ means the reporting hierarchy everywhere, not two competing sources:
     info from the deprecated source. Admin's flat-list "N members" chip now
     reads `directReportsOf()` too, so both Admin views agree with each other and
     with Team Insights.
-  - **New migration `029_backfill_manager_from_team_assignments.sql`**: fills
+  - **Migration `029_backfill_manager_from_team_assignments.sql`**: fills
     `users.manager_id` from `team_assignments` (`assignment_type='bd_to_bdlead'`)
     *only* where `manager_id` is currently `NULL` — never overwrites a value an
     admin already set via the hierarchy UI. Includes a commented-out SELECT to
-    surface conflicts (both sources set, disagreeing) for manual review; the
-    migration itself never touches those rows. **File only — NOT applied to the
-    live DB.** The owner was asked whether to run it now and the question was
-    declined without an answer either way; it's sitting in `migrations/`
-    unapplied. Until it runs, any BD Lead↔BD pairing that only ever existed as a
-    `team_assignments` row (never mirrored to `manager_id`) won't show up in
-    Team Insights / My Team / the Admin org chart. Apply via Supabase MCP
-    `apply_migration` (or the Supabase SQL editor) when the owner is ready —
-    it's additive-only and safe to run at any time.
+    surface conflicts (both sources set, disagreeing) for manual review.
+    **APPLIED to the live DB** (owner approved after being asked) via Supabase
+    MCP `apply_migration` — 1 pre-existing BD Lead↔BD pairing carried over into
+    `manager_id`, 0 conflicts found. This was a data-only change (no deploy
+    needed); it's already reflected in Team Insights / My Team / the Admin org
+    chart.
   - **Deliberately not touched:** the `email_accounts` subsystem + the orphaned
     "Manager Users" page (`12-manager-users.js` / `20-email-accounts.js`,
     `emailaccounts`/`managerusers` — confirmed zero reachable `goPage()` call
@@ -539,3 +537,25 @@ means the reporting hierarchy everywhere, not two competing sources:
 - **Tests:** `test/team-structure-smoke.mjs` extended with 3 more checks (own-
   jobs-only scoping, real stage pills, no dead-data leftovers) — 16/16. All 17
   suites green after this round too.
+
+### Session 5 — final status (all shipped and live)
+| What | PR | State |
+|---|---|---|
+| Phases 0–4 (hierarchy fixes, dashboard + admin revamp, My Team page) | [#117](https://github.com/PrinceThomas37/fute-lms-backend/pull/117) | Merged, deployed |
+| Individual (RA) dashboard fix + `team_assignments` → `manager_id` merge | [#118](https://github.com/PrinceThomas37/fute-lms-backend/pull/118) | Merged, deployed |
+| Migration 029 (backfill `manager_id` from old `bd_to_bdlead` rows) | — (data-only, no deploy) | Applied to live DB |
+
+**Everything from the original plan is done** except the two items explicitly
+scoped out both in the plan and again during this session (not oversights —
+deliberate, flagged both times):
+1. **Retiring the orphaned "Manager Users" page** (`12-manager-users.js` /
+   `20-email-accounts.js`) and its separate `email_accounts` subsystem. Confirmed
+   unreachable via any `goPage()` call site, but `12-manager-users.js` also holds
+   live code the *reachable* Admin user-detail page depends on (email-ID connect/
+   reconnect handlers) — so this is a real audit-and-split job, not a delete.
+   `ra_to_bd` team_assignments rows are only consumed by this same orphaned page.
+2. **Individual-contributor dashboard for anyone besides `ra`** — turned out not
+   to be needed. After the routing fix, every role except a plain `ra` with no
+   reports already lands on a real-data dashboard (recruiter, or the hierarchy-
+   scoped manager/team dashboard). Noted here in case that assumption ever
+   breaks (e.g. a new role is added that isn't manager-like and isn't `ra`).
