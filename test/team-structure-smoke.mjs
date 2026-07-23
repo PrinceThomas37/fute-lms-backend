@@ -88,6 +88,24 @@ try {
   step('My Team nav shows for a manager', my.navHas);
   step('My Team page renders the reporting structure', my.isMyTeam && my.html.includes('Reporting structure') && my.html.includes('Lee Lead'));
 
+  // 3b. My Team hub: three tabs (Overview / Team Insights / Reports), and the
+  // Overview offers a List | Org chart toggle that renders the horizontal chart.
+  const hub = await page.evaluate(() => {
+    goPage('myteam');
+    const tabs = Array.from(document.querySelectorAll('#content button')).map(b => b.textContent.trim());
+    const hasTabs = tabs.includes('Overview') && tabs.includes('Team Insights') && tabs.includes('Reports');
+    myteamChartView('chart');
+    const chartHtml = document.getElementById('content').innerHTML;
+    const nav = Array.from(document.querySelectorAll('.sb-nav .nav-item')).map(e => e.textContent.trim());
+    return { hasTabs, chartHtml, nav };
+  });
+  step('My Team hub has Overview / Team Insights / Reports tabs', hub.hasTabs);
+  step('Org chart view renders the transitive tree', hub.chartHtml.includes('Org chart') && hub.chartHtml.includes('Mia') && hub.chartHtml.includes('Sam'));
+  // 3c. Nav order: My Team sits right after Dashboard, and Team Insights / My
+  // Profile / Reports are no longer standalone items for a team lead.
+  step('Nav: My Team right after Dashboard', hub.nav[0] === 'Dashboard' && hub.nav[1] === 'My Team', hub.nav.join(' | '));
+  step('Nav: no standalone Team Insights / My Profile item', !hub.nav.includes('Team Insights') && !hub.nav.includes('My Profile'));
+
   // 4. My Team gate is data-driven: Ora (no reports) gets no nav item, no page
   const ora = await page.evaluate(() => {
     STATE.user = Object.assign({}, STATE.user, { id: 'ora', role: 'ra', roles: ['ra'], name: 'Ora Analyst' });

@@ -10,34 +10,49 @@
   function money(n){ n = Number(n)||0; return '$'+n.toLocaleString('en-US'); }
 
   if (!STATE.reports) STATE.reports = { loading:false, data:null };
+  STATE.reports.filters = STATE.reports.filters || { from:'', to:'', role:'', preset:'all' };
+  STATE.reports.sel = STATE.reports.sel || {};
+  STATE.reports.expanded = STATE.reports.expanded || {};
 
+  function reportsQS(){
+    var f = STATE.reports.filters||{}, p=[];
+    if(f.from)p.push('from='+encodeURIComponent(f.from));
+    if(f.to)p.push('to='+encodeURIComponent(f.to));
+    if(f.role)p.push('role='+encodeURIComponent(f.role));
+    return p.length?('?'+p.join('&')):'';
+  }
+  // Reports can be shown either standalone (page 'reports') or as a tab in the
+  // My Team hub — a full render() repaints whichever is on screen.
+  function repaintReports(){ if(STATE.page==='reports'||STATE.page==='myteam'){ if(window.render) render(); else paint(); } }
   function loadReport(){
-    STATE.reports.loading = true; paint();
-    apiGet('/reports/recruiting').then(function(d){ STATE.reports.data = d||null; STATE.reports.loading = false; paint(); })
-      .catch(function(e){ STATE.reports.loading = false; showToast('Failed to load reports: '+e.message,'error'); paint(); });
+    STATE.reports.loading = true; repaintReports();
+    apiGet('/reports/recruiting'+reportsQS()).then(function(d){ STATE.reports.data = d||null; STATE.reports.loading = false; repaintReports(); })
+      .catch(function(e){ STATE.reports.loading = false; showToast('Failed to load reports: '+e.message,'error'); repaintReports(); });
   }
   window.reportsReload = loadReport;
+
+  function ymd(d){ return d.toISOString().slice(0,10); }
+  window.reportsPreset = function(preset){
+    var f=STATE.reports.filters; f.preset=preset;
+    if(preset==='all'){ f.from=''; f.to=''; }
+    else { var days=preset==='7'?7:preset==='30'?30:90; var to=new Date(); var from=new Date(to.getTime()-days*86400000); f.from=ymd(from); f.to=ymd(to); }
+    loadReport();
+  };
+  window.reportsDate = function(which, val){ var f=STATE.reports.filters; f[which]=val; f.preset='custom'; loadReport(); };
+  window.reportsRole = function(role){ STATE.reports.filters.role=role; loadReport(); };
+  window.reportsToggleSel = function(id){ if(STATE.reports.sel[id]) delete STATE.reports.sel[id]; else STATE.reports.sel[id]=true; repaintReports(); };
+  window.reportsClearSel = function(){ STATE.reports.sel={}; repaintReports(); };
+  window.reportsToggleExpand = function(id){ if(STATE.reports.expanded[id]) delete STATE.reports.expanded[id]; else STATE.reports.expanded[id]=true; repaintReports(); };
 
   // ── nav + routing (wrap, like the job-board module) ──────────────────────────
   var _prevRender = window.render;
   window.render = function(){
     _prevRender.apply(this, arguments);
-    injectNav();
     if (STATE.page === 'reports') paint();
   };
-  function injectNav(){
-    var u = STATE.user; if(!u || !canUse(u)) return;
-    var navWrap = document.querySelector('.sb-nav'); if(!navWrap) return;
-    var existing = navWrap.querySelector('[data-rptnav]');
-    if (existing){ existing.classList.toggle('active', STATE.page==='reports'); return; }
-    var d = document.createElement('div');
-    d.className = 'nav-item' + (STATE.page==='reports' ? ' active' : '');
-    d.setAttribute('data-rptnav','1');
-    d.innerHTML = '<span class="nav-icon">'+icon('reports')+'</span>Reports';
-    d.onclick = function(){ goPage('reports'); };
-    navWrap.appendChild(d);
-    if (STATE.page==='reports'){ var t=document.querySelector('.tb-title'); if(t) t.textContent='Reports'; }
-  }
+  // (The "Reports" nav item is now built by the sidebar in 04-shell-login.js —
+  // shown standalone only to users who don't have the "My Team" hub, which
+  // carries Reports as a tab. paint() sets the page title.)
   var _prevGoPage = window.goPage;
   window.goPage = function(p){
     if (p === 'reports'){ STATE.page='reports'; STATE.modal=null; render(); loadReport(); return; }
@@ -116,10 +131,107 @@
     return '<div class="card" style="padding:16px"><div style="font-weight:600;font-size:14px;margin-bottom:12px">Top clients by submissions</div>'+body+'</div>';
   }
 
-  window.renderReports = function(){
+  function filterBar(d){
+    var f = STATE.reports.filters||{};
+    function pill(active,label,onclick){
+      return '<button onclick="'+onclick+'" style="border:1px solid '+(active?'var(--accent)':'var(--border)')+';background:'+(active?'var(--accent-l)':'var(--card)')+';color:'+(active?'var(--accent)':'var(--text2)')+';border-radius:7px;padding:5px 11px;font-size:12px;font-weight:600;cursor:pointer">'+label+'</button>';
+    }
+    var presetBtns=[['7','7d'],['30','30d'],['90','90d'],['all','All']].map(function(p){ return pill((f.preset||'all')===p[0],p[1],"reportsPreset('"+p[0]+"')"); }).join('');
+    var roleBtns=[['','All'],['bd','BDs'],['recruiter','Recruiters']].map(function(r){ return pill((f.role||'')===r[0],r[1],"reportsRole('"+r[0]+"')"); }).join('');
+    return '<div class="card" style="padding:12px 14px;margin-bottom:14px;display:flex;gap:18px;flex-wrap:wrap;align-items:center">'+
+      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">Period</span>'+presetBtns+
+        '<input type="date" value="'+esc(f.from||'')+'" onchange="reportsDate(\'from\',this.value)" style="border:1px solid var(--border);border-radius:7px;padding:4px 8px;font-size:12px;background:var(--card);color:var(--text)"/>'+
+        '<span style="color:var(--text3);font-size:12px">to</span>'+
+        '<input type="date" value="'+esc(f.to||'')+'" onchange="reportsDate(\'to\',this.value)" style="border:1px solid var(--border);border-radius:7px;padding:4px 8px;font-size:12px;background:var(--card);color:var(--text)"/>'+
+      '</div>'+
+      '<div style="display:flex;gap:6px;align-items:center"><span style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">Who</span>'+roleBtns+'</div>'+
+    '</div>';
+  }
+
+  function hotJobsCard(rows){
+    if(!rows||!rows.length) return '';
+    var max=Math.max(1,Math.max.apply(null,rows.map(function(r){return r.score;})));
+    var body=rows.map(function(j){
+      var w=Math.round((j.score/max)*100);
+      return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'+
+        '<div style="width:190px;flex-shrink:0"><div style="font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(j.job_title||'—')+'</div>'+
+          '<div style="font-size:11px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(j.job_code||'')+(j.client?' · '+esc(j.client):'')+'</div></div>'+
+        '<div style="flex:1;background:var(--bg);border-radius:6px;height:18px;overflow:hidden"><div style="width:'+w+'%;height:100%;background:linear-gradient(90deg,var(--accent),#2563eb);border-radius:6px"></div></div>'+
+        '<div style="width:130px;text-align:right;font-size:11.5px;color:var(--text2);flex-shrink:0"><b>'+j.submissions+'</b> subs · <b style="color:#2563eb">'+j.interviews+'</b> intv</div>'+
+      '</div>';
+    }).join('');
+    return '<div class="card" style="padding:16px;margin-bottom:14px"><div style="font-weight:600;font-size:14px;margin-bottom:2px">🔥 Hot jobs</div>'+
+      '<div style="font-size:12px;color:var(--text3);margin-bottom:12px">Active reqs with the most submissions + interviews this period</div>'+body+'</div>';
+  }
+
+  function miniFunnel(f, stages){
+    var colors=window.ATS_STAGE_COLORS||{};
+    var present=stages.filter(function(s){return (f[s]||0)>0;});
+    if(!present.length) return '<div style="padding:8px 44px;background:var(--bg);font-size:11.5px;color:var(--text3)">No submissions in this period.</div>';
+    var max=Math.max(1,Math.max.apply(null,present.map(function(s){return f[s]||0;})));
+    return '<div style="padding:8px 10px 10px 44px;background:var(--bg)">'+present.map(function(s){
+      var n=f[s]||0,w=Math.round(n/max*100);
+      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px"><div style="width:130px;font-size:11px;color:var(--text3);text-align:right">'+esc(s)+'</div>'+
+        '<div style="flex:1;background:var(--card);border-radius:4px;height:12px;overflow:hidden"><div style="width:'+w+'%;height:100%;background:'+(colors[s]||'var(--accent)')+'"></div></div>'+
+        '<div style="width:26px;font-size:11px;font-weight:700">'+n+'</div></div>';
+    }).join('')+'</div>';
+  }
+
+  function byUserCard(rows, funnels, stages){
+    if(!rows.length) return '';
+    var sel=STATE.reports.sel||{}, exp=STATE.reports.expanded||{};
+    var head=['','','Who','Role','Total','Submitted','Interviews','Placements','Fill %','Revenue']
+      .map(function(h){return '<th style="text-align:left;padding:8px 10px;font-size:11px;color:var(--text3);font-weight:700;white-space:nowrap">'+h+'</th>';}).join('');
+    var body=rows.map(function(r){
+      var open=exp[r.user_id];
+      var rowHtml='<tr style="border-top:1px solid var(--border)">'+
+        '<td style="padding:8px 6px 8px 10px"><input type="checkbox" '+(sel[r.user_id]?'checked':'')+' onclick="reportsToggleSel(\''+r.user_id+'\')"/></td>'+
+        '<td style="padding:8px 4px"><button onclick="reportsToggleExpand(\''+r.user_id+'\')" style="border:0;background:none;cursor:pointer;color:var(--text3);font-size:12px">'+(open?'▾':'▸')+'</button></td>'+
+        '<td style="padding:8px 10px;font-size:12.5px;font-weight:600">'+esc(r.recruiter)+'</td>'+
+        '<td style="padding:8px 10px;font-size:11.5px"><span style="padding:1px 7px;border-radius:7px;font-weight:600;background:'+(r.role_label==='BD'?'var(--accent-l)':'rgba(37,99,235,.12)')+';color:'+(r.role_label==='BD'?'var(--accent)':'#2563eb')+'">'+esc(r.role_label||'Recruiter')+'</span></td>'+
+        '<td style="padding:8px 10px;font-size:12.5px">'+r.total+'</td>'+
+        '<td style="padding:8px 10px;font-size:12.5px">'+r.submitted+'</td>'+
+        '<td style="padding:8px 10px;font-size:12.5px">'+r.interviews+'</td>'+
+        '<td style="padding:8px 10px;font-size:12.5px;font-weight:700;color:var(--green)">'+r.placements+'</td>'+
+        '<td style="padding:8px 10px;font-size:12.5px">'+r.fill_rate+'%</td>'+
+        '<td style="padding:8px 10px;font-size:12.5px">'+money(r.revenue)+'</td>'+
+      '</tr>';
+      if(open) rowHtml+='<tr><td colspan="10" style="padding:0">'+miniFunnel(funnels[r.user_id]||{}, stages)+'</td></tr>';
+      return rowHtml;
+    }).join('');
+    var selIds=Object.keys(sel).filter(function(id){return sel[id];});
+    var combined='';
+    if(selIds.length){
+      var chosen=rows.filter(function(r){return sel[r.user_id];});
+      var sum=chosen.reduce(function(a,r){return {total:a.total+r.total,submitted:a.submitted+r.submitted,interviews:a.interviews+r.interviews,placements:a.placements+r.placements,revenue:a.revenue+r.revenue};},{total:0,submitted:0,interviews:0,placements:0,revenue:0});
+      var avgFill=chosen.length?Math.round(chosen.reduce(function(a,r){return a+r.fill_rate;},0)/chosen.length):0;
+      combined='<tr style="border-top:2px solid var(--accent);background:var(--accent-l)">'+
+        '<td colspan="2" style="padding:9px 10px"></td>'+
+        '<td style="padding:9px 10px;font-size:12.5px;font-weight:700">Combined ('+chosen.length+')</td>'+
+        '<td style="padding:9px 10px"></td>'+
+        '<td style="padding:9px 10px;font-size:12.5px;font-weight:700">'+sum.total+'</td>'+
+        '<td style="padding:9px 10px;font-size:12.5px;font-weight:700">'+sum.submitted+'</td>'+
+        '<td style="padding:9px 10px;font-size:12.5px;font-weight:700">'+sum.interviews+'</td>'+
+        '<td style="padding:9px 10px;font-size:12.5px;font-weight:700;color:var(--green)">'+sum.placements+'</td>'+
+        '<td style="padding:9px 10px;font-size:12.5px;font-weight:700">'+avgFill+'% <span style="font-weight:400;color:var(--text3);font-size:10px">avg</span></td>'+
+        '<td style="padding:9px 10px;font-size:12.5px;font-weight:700">'+money(sum.revenue)+'</td>'+
+      '</tr>';
+    }
+    return '<div class="card" style="padding:0;overflow-x:auto;margin-bottom:14px">'+
+      '<div style="padding:14px 16px;font-weight:600;font-size:14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px">'+
+        '<span>Per-person productivity <span style="font-size:11px;font-weight:400;color:var(--text3)">tick people to combine · ▸ opens their funnel</span></span>'+
+        (selIds.length?'<button class="btn btn-sm btn-outline" onclick="reportsClearSel()">Clear ('+selIds.length+')</button>':'')+
+      '</div>'+
+      '<table style="width:100%;border-collapse:collapse;min-width:720px"><thead><tr style="background:var(--bg)">'+head+'</tr></thead><tbody>'+body+combined+'</tbody></table></div>';
+  }
+
+  // renderReportsBody() returns the inner content (no .page wrapper) so it can be
+  // embedded as the "Reports" tab inside the My Team hub. renderReports() keeps
+  // the standalone page for users who reach Reports as its own nav item.
+  window.renderReportsBody = function(){
     var r = STATE.reports;
-    if (r.loading || !r.data) return '<div class="page"><div style="font-size:18px;font-weight:700;margin-bottom:6px">Reports</div>'+
-      '<div style="text-align:center;padding:50px;color:var(--text3)">'+(r.loading?'Loading reports…':'No data yet.')+'</div></div>';
+    if (!r.data) return '<div style="font-size:18px;font-weight:700;margin-bottom:6px">Reports</div>'+
+      '<div style="text-align:center;padding:50px;color:var(--text3)">'+(r.loading?'Loading reports…':'No data yet.')+'</div>';
     var d = r.data, t = d.totals || {};
     var ttf = d.avg_time_to_fill != null ? d.avg_time_to_fill + ' days' : '—';
     var header = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
@@ -135,10 +247,17 @@
       tile('Avg time-to-fill', ttf)+
       tile('Revenue', money(t.revenue))+
     '</div>';
-    return '<div class="page">'+header+tiles+
+    // by_user is the new per-person breakdown (with role); fall back to the old
+    // by_recruiter shape if an older backend is answering.
+    var people = (d.by_user && d.by_user.length) ? d.by_user
+      : (d.by_recruiter||[]).map(function(x,i){ return Object.assign({ user_id:'r'+i, role_label:'Recruiter' }, x); });
+    return header+filterBar(d)+
+      (r.loading?'<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Updating…</div>':'')+
+      tiles+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'+funnelCard(d.funnel,d.stages)+trendCard(d.trend)+'</div>'+
-      '<div style="margin-bottom:14px">'+recruiterCard(d.by_recruiter||[])+'</div>'+
-      clientsCard(d.top_clients||[])+
-    '</div>';
+      hotJobsCard(d.hot_jobs||[])+
+      byUserCard(people, d.per_user_funnels||{}, d.stages||[])+
+      clientsCard(d.top_clients||[]);
   };
+  window.renderReports = function(){ return '<div class="page">'+renderReportsBody()+'</div>'; };
 })();

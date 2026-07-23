@@ -23,7 +23,6 @@
   var _prevRender = window.render;
   window.render = function(){
     _prevRender.apply(this, arguments);
-    injectNav();
     if (STATE.page === 'job_board') paint();
     if (STATE.page === 'dashboard') injectRequestsCard();
   };
@@ -38,23 +37,8 @@
     return _prevGoPage.apply(this, arguments);
   };
 
-  function injectNav(){
-    var u = STATE.user; if (!u || !isRec(u) || isBDM(u)) return;
-    var navWrap = document.querySelector('.sb-nav'); if (!navWrap) return;
-    var existing = navWrap.querySelector('[data-jbnav]');
-    if (existing) { existing.classList.toggle('active', STATE.page==='job_board'); }
-    else {
-      var d = document.createElement('div');
-      d.className = 'nav-item' + (STATE.page==='job_board' ? ' active' : '');
-      d.setAttribute('data-jbnav','1');
-      d.innerHTML = '<span class="nav-icon">'+icon('leads')+'</span>All Jobs';
-      d.onclick = function(){ goPage('job_board'); };
-      var anchor = navWrap.querySelector('[data-bdnav]');
-      if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(d, anchor.nextSibling);
-      else navWrap.appendChild(d);
-    }
-    if (STATE.page==='job_board'){ var t=document.querySelector('.tb-title'); if (t) t.textContent='All Jobs'; }
-  }
+  // (The recruiter "All Jobs" nav item is now built by the sidebar in
+  // 04-shell-login.js; the title is set by paint().)
 
   function load(){
     if (STATE.jb.loading) return;

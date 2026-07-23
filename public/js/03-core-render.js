@@ -199,6 +199,7 @@ function renderOrgSubtree(userId,opts,depth,seen){
   var click='',cursor='default',hover='';
   if(opts.click==='viewas'){click=' onclick="event.stopPropagation();viewAs(\''+userId+'\')"';cursor='pointer';}
   else if(opts.click==='admin'){click=' onclick="event.stopPropagation();STATE.adminSelectedUser=\''+userId+'\';loadUserEmails(\''+userId+'\');render()"';cursor='pointer';}
+  else if(opts.click==='activity'){click=' onclick="event.stopPropagation();openTeamActivity(\''+userId+'\')"';cursor='pointer';}
   if(cursor==='pointer')hover=' onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'transparent\'"';
   var meDot=(STATE.user&&STATE.user.id===userId)?'<span style="font-size:9px;font-weight:700;color:var(--accent);background:var(--accent-l);padding:1px 6px;border-radius:6px;margin-left:6px">YOU</span>':'';
   var subChip=reports.length?'<span style="font-size:10.5px;color:var(--green);background:var(--green-l);padding:2px 7px;border-radius:8px;white-space:nowrap">'+subCount+' in team</span>':'';
@@ -215,6 +216,55 @@ function renderOrgSubtree(userId,opts,depth,seen){
   var childHtml=reports.map(function(r){return renderOrgSubtree(r.id,opts,depth+1,seen);}).join('');
   var childWrap=reports.length?'<div style="margin-left:19px;padding-left:12px;border-left:2px solid var(--border)">'+childHtml+'</div>':'';
   return '<div>'+node+childWrap+'</div>';
+}
+
+// Per-user recruiting stats from the cached report (for org-chart hover cards).
+function orgStatFor(id){
+  var d=STATE.reports&&STATE.reports.data; if(!d||!d.by_user)return null;
+  for(var i=0;i<d.by_user.length;i++)if(d.by_user[i].user_id===id)return d.by_user[i];
+  return null;
+}
+// Horizontal org chart: each node sits above a row of its reports, with a
+// connector. Hovering a node reveals a stats card; clicking opens that person's
+// activity feed. Same depth cap + cycle guard as renderOrgSubtree.
+function renderOrgNodeH(userId,depth,seen){
+  seen=seen||{};
+  var user=(STATE.users||[]).find(function(x){return x.id===userId;});
+  if(!user||seen[userId]||depth>6)return'';
+  seen[userId]=true;
+  var reports=directReportsOf(userId).slice().sort(function(a,b){return (a.name||'').localeCompare(b.name||'');});
+  var me=(STATE.user&&STATE.user.id===userId);
+  var st=orgStatFor(userId);
+  var statLine=st?
+    '<div style="display:flex;gap:12px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">'+
+      '<div style="text-align:center"><div style="font-weight:700;font-size:14px">'+st.total+'</div><div style="font-size:9.5px;color:var(--text3)">subs</div></div>'+
+      '<div style="text-align:center"><div style="font-weight:700;font-size:14px;color:#2563eb">'+st.interviews+'</div><div style="font-size:9.5px;color:var(--text3)">intv</div></div>'+
+      '<div style="text-align:center"><div style="font-weight:700;font-size:14px;color:var(--green)">'+st.placements+'</div><div style="font-size:9.5px;color:var(--text3)">placed</div></div>'+
+    '</div>'
+    :'<div style="margin-top:6px;font-size:10.5px;color:var(--text3)">No recruiting activity</div>';
+  var popup='<div class="ochover" style="display:none;position:absolute;top:100%;left:50%;transform:translateX(-50%);z-index:60;margin-top:6px;width:200px;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:12px;text-align:left">'+
+    '<div style="display:flex;align-items:center;gap:9px">'+av(user,'32')+'<div style="min-width:0"><div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+htmlEsc(user.name||'')+'</div>'+
+      '<div style="font-size:11px;color:var(--text3)">'+htmlEsc(roleLabel(user.role))+(user.empId?' · '+htmlEsc(user.empId):'')+'</div></div></div>'+
+    statLine+
+    '<div style="margin-top:8px;font-size:11px;color:var(--accent);font-weight:600">Click to see activity ›</div>'+
+  '</div>';
+  var box='<div onclick="openTeamActivity(\''+userId+'\')" onmouseenter="var p=this.parentNode.querySelector(\'.ochover\');if(p)p.style.display=\'block\'" onmouseleave="var p=this.parentNode.querySelector(\'.ochover\');if(p)p.style.display=\'none\'" '+
+    'style="cursor:pointer;background:var(--card);border:1px solid '+(me?'var(--accent)':'var(--border)')+';border-radius:10px;padding:9px 12px;min-width:150px;max-width:190px;text-align:center;transition:box-shadow .1s" '+
+    'onmousedown="event.stopPropagation()">'+
+    '<div style="display:flex;align-items:center;gap:8px;justify-content:center">'+av(user,'28')+'<div style="min-width:0;text-align:left"><div style="font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px">'+htmlEsc((user.name||'').split(' ')[0])+(me?' <span style="font-size:8px;font-weight:700;color:var(--accent)">YOU</span>':'')+'</div>'+
+      '<div style="font-size:10px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px">'+htmlEsc(roleLabel(user.role))+'</div></div></div>'+
+  '</div>';
+  var nodeWrap='<div style="position:relative;display:inline-block">'+box+popup+'</div>';
+  if(!reports.length) return '<div style="display:flex;flex-direction:column;align-items:center">'+nodeWrap+'</div>';
+  var childCols=reports.map(function(r){return '<div style="display:flex;flex-direction:column;align-items:center;padding:0 8px">'+renderOrgNodeH(r.id,depth+1,seen)+'</div>';}).join('');
+  return '<div style="display:flex;flex-direction:column;align-items:center">'+
+    nodeWrap+
+    '<div style="width:2px;height:14px;background:var(--border)"></div>'+
+    '<div style="display:flex;align-items:flex-start;border-top:2px solid var(--border);padding-top:14px">'+childCols+'</div>'+
+  '</div>';
+}
+function renderOrgChartH(rootId){
+  return '<div style="overflow-x:auto;padding:10px 4px"><div style="display:inline-block;min-width:100%">'+renderOrgNodeH(rootId,0,{})+'</div></div>';
 }
 function filterLeads(leads){
   var f=STATE.leadsFilter;

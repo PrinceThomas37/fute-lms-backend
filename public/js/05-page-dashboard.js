@@ -473,11 +473,14 @@ function renderManagerDashboard(u){
   var hour=new Date().getHours();
   var greet=hour<12?"Good morning":hour<17?"Good afternoon":"Good evening";
 
-  // Team roster — direct reports, each with how many sit under them. Clean,
-  // honest structure (no fabricated per-person lead numbers); the full nested
-  // tree and the team's real work live on the My Team page.
-  var teamRows=team.slice().sort(function(a,b){return (a.name||'').localeCompare(b.name||'');})
-    .map(function(t){return renderOrgSubtree(t.id,{click:'none',flat:true});}).join('');
+  // Team roster — the full reporting subtree (direct + transitive), rendered as
+  // the nested org tree so a lead sees everyone under them, not just first-level
+  // reports. Scrolls if it's tall. The team's real work numbers live below and on
+  // the My Team page.
+  var teamRows='<div style="max-height:320px;overflow:auto">'+
+    team.slice().sort(function(a,b){return (a.name||'').localeCompare(b.name||'');})
+      .map(function(t){return renderOrgSubtree(t.id,{click:'none'});}).join('')+
+    '</div>';
   var teamCard=team.length?
     '<div class="card cp mb4">'+
       '<div class="flex jb aic mb3">'+
@@ -540,11 +543,10 @@ function renderManagerDashboard(u){
 
     (loading?'<div class="card cp mb4" style="text-align:center;color:var(--text3);font-size:13px">Loading your team\'s desk…</div>':'')+
 
-    teamCard+
-
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">'+
       tile('Jobs',(d.jobs&&d.jobs.total)||0,'var(--accent)')+
       tile('Awaiting approval',d.awaiting_approval||0,'var(--amber)')+
+      tile('At Client',bs['Submitted to Client']||0,'var(--accent)')+
       tile('In Interview',interviews,'#2563eb')+
       tile('Offers',bs['Offer']||0,'#7c3aed')+
       tile('Placements',bs['Placement']||0,'var(--green)')+
@@ -557,6 +559,8 @@ function renderManagerDashboard(u){
       '</div>'+
       '<div class="flex gap2 flex-wrap">'+(stagePills||'<div class="text3 f13">No submissions in this scope yet.</div>')+'</div>'+
     '</div>'+
+
+    teamCard+
 
     '<div class="card cp mb4">'+
       '<div class="flex jb aic mb3">'+

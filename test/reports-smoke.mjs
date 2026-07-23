@@ -50,23 +50,40 @@ try {
         { recruiter: 'James Wilson', total: 9, submitted: 7, interviews: 3, placements: 2, fill_rate: 22, revenue: 12000 },
         { recruiter: 'Priya Nair', total: 5, submitted: 3, interviews: 1, placements: 0, fill_rate: 0, revenue: 0 }
       ],
+      by_user: [
+        { user_id: 'u1', recruiter: 'James Wilson', role_label: 'Recruiter', total: 9, submitted: 7, interviews: 3, placements: 2, fill_rate: 22, revenue: 12000 },
+        { user_id: 'u2', recruiter: 'Priya Nair', role_label: 'Recruiter', total: 5, submitted: 3, interviews: 1, placements: 0, fill_rate: 0, revenue: 0 }
+      ],
+      per_user_funnels: { u1: { 'Sourced': 9, 'Submitted to Client': 5, 'Placement': 2 }, u2: { 'Sourced': 5 } },
+      hot_jobs: [
+        { job_order_id: 'j1', job_code: 'JO-101', job_title: 'Senior Java Developer', client: 'Acme Construction', status: 'Active', submissions: 6, interviews: 3, score: 9 },
+        { job_order_id: 'j2', job_code: 'JO-102', job_title: 'Data Engineer', client: 'Globex', status: 'Active', submissions: 3, interviews: 1, score: 4 }
+      ],
       trend: [{ week: '7w ago', count: 1 }, { week: '6w ago', count: 3 }, { week: '5w ago', count: 2 }, { week: '4w ago', count: 5 }, { week: '3w ago', count: 4 }, { week: '2w ago', count: 6 }, { week: '1w ago', count: 3 }, { week: 'This wk', count: 4 }],
       avg_time_to_fill: 27,
       top_clients: [{ client: 'Acme Construction', count: 8 }, { client: 'Globex', count: 5 }],
-      totals: { candidates_added: 20, submissions: 15, interviews: 5, placements: 2, open_jobs: 4, total_jobs: 6, revenue: 12000 }
+      totals: { candidates_added: 20, submissions: 15, interviews: 5, placements: 2, open_jobs: 4, total_jobs: 6, revenue: 12000 },
+      filters: { from: null, to: null, role: null, user_ids: null }
     };
     STATE.page = 'reports';
     render();
     const html = window.renderReports();
-    const navPresent = !!document.querySelector('[data-rptnav]');
+    // Reports is now a sidebar item built by 04-shell-login.js (shown standalone
+    // to users without the My Team hub), not a DOM-injected [data-rptnav] node.
+    const navPresent = Array.prototype.some.call(
+      document.querySelectorAll('.sb-nav .nav-item'),
+      function(el){ return (el.getAttribute('onclick')||'').indexOf("goPage('reports')") > -1; }
+    );
     return { html, navPresent };
   });
-  step('Reports nav item injected', out.navPresent);
+  step('Reports nav item present in sidebar', out.navPresent);
   step('Headline tiles render (Placements, Avg time-to-fill, Revenue)', out.html.includes('Placements') && out.html.includes('Avg time-to-fill') && out.html.includes('27 days'));
   step('Revenue formatted as currency', out.html.includes('$12,000'));
   step('Pipeline funnel section', out.html.includes('Pipeline funnel') && out.html.includes('Submitted to Client'));
   step('8-week submission trend', out.html.includes('last 8 weeks') && out.html.includes('This wk'));
-  step('Recruiter productivity table', out.html.includes('Recruiter productivity') && out.html.includes('James Wilson') && out.html.includes('Fill %'));
+  step('Per-person productivity table', out.html.includes('Per-person productivity') && out.html.includes('James Wilson') && out.html.includes('Fill %'));
+  step('Filter bar (period + who)', out.html.includes('Period') && out.html.includes('Recruiters') && out.html.includes('7d'));
+  step('Hot jobs card', out.html.includes('Hot jobs') && out.html.includes('Senior Java Developer'));
   step('Top clients section', out.html.includes('Top clients') && out.html.includes('Acme Construction'));
 
   step('No uncaught page errors', pageErrors.length === 0, pageErrors.join(' | '));
