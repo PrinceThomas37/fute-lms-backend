@@ -477,7 +477,6 @@ function renderBDInsights(){
 function renderBDLeadInsights(){
   var u=STATE.user;
   var selectedBD=STATE.bdLeadSelectedBD||null;
-  var assignments=STATE.teamAssignments||[];
   var allJobs=STATE.jobs;
   function jAt(j){return j.assigned_at?new Date(j.assigned_at).toISOString().slice(0,10):'';}
   var now=new Date(); var todayStr=todayIST();
@@ -532,8 +531,11 @@ function renderBDLeadInsights(){
   }
 
   // ── Team overview ──
-  var myBDIds=assignments.filter(function(a){return a.manager_id===u.id&&a.assignment_type==='bd_to_bdlead';}).map(function(a){return a.member_id;});
-  var myBDs=STATE.users.filter(function(x){return myBDIds.indexOf(x.id)>-1;});
+  // Membership comes from the reporting hierarchy (users.manager_id) — direct
+  // reports who are BD/BD Lead — not the older team_assignments table. Reparenting
+  // is admin-only (Admin → user → Reporting Hierarchy), so there's no self-service
+  // "assign" action here anymore; this page is a read-only performance view.
+  var myBDs=getTeam(u).filter(function(x){return userHasAnyRole(x,'bd','bd_lead');});
   var bdStats=myBDs.map(function(bd){
     var bdJobs=allJobs.filter(function(j){return j.assigned_to_bd===bd.id;});
     var convJ=bdJobs.filter(function(j){return j.stage==='Connected'||j.stage==='In Discussion';});
@@ -572,7 +574,6 @@ function renderBDLeadInsights(){
   return '<div class="page">'+
     '<div class="ph"><div class="flex jb aic">'+
       '<div><div class="ptitle">Team Insights</div><div class="psub">'+myBDs.length+' BD Manager'+(myBDs.length!==1?'s':'')+' \u00b7 '+teamTotal+' leads \u00b7 '+teamSent+' emails sent</div></div>'+
-      '<button onclick="openAssignBDToLead()" style="padding:8px 16px;background:var(--accent);color:#fff;border:0;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">+ Assign BD Manager</button>'+
     '</div></div>'+
     leaderBanner+
     '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">'+
@@ -592,29 +593,7 @@ function renderBDLeadInsights(){
           '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Positive</th>'+
           '<th style="padding:9px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em">Conv %</th>'+
         '</tr></thead><tbody>'+lbRows+'</tbody></table></div>':
-        '<div style="padding:40px;text-align:center;color:var(--text3);font-size:13px">No BD Managers on your team yet.<br><br>Click <strong>+ Assign BD Manager</strong> above.</div>')+
+        '<div style="padding:40px;text-align:center;color:var(--text3);font-size:13px">No BD Managers report to you yet.<br><br>An admin sets reporting lines on the Admin → user page.</div>')+
     '</div></div>';
 }
-
-window.openAssignBDToLead=function(){
-  var u=STATE.user;
-  var assignments=STATE.teamAssignments||[];
-  var alreadyIds=assignments.filter(function(a){return a.manager_id===u.id&&a.assignment_type==='bd_to_bdlead';}).map(function(a){return a.member_id;});
-  var available=STATE.users.filter(function(x){return (userHasRole(x,'bd')||userHasRole(x,'bd_lead'))&&alreadyIds.indexOf(x.id)===-1&&x.id!==u.id;});
-  var opts=available.map(function(x){return '<option value="'+x.id+'">'+htmlEsc(x.name)+' ('+htmlEsc(x.email)+')</option>';}).join('');
-  STATE.modal='<div class="modal modal-w400"><div class="mh"><div class="mt">Assign BD Manager to your team</div><button class="btn-icon" onclick="closeModal()">'+ico('x',14)+'</button></div>'+
-    '<div class="mb_">'+(available.length?'<div class="fgrp"><label class="flbl">Select BD Manager</label><select class="inp" id="assign-bd-select"><option value="">-- Choose --</option>'+opts+'</select></div>':'<div style="font-size:13px;color:var(--text3);padding:8px 0">All BD Managers already assigned or none exist.</div>')+'</div>'+
-    '<div class="mf"><button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+(available.length?'<button class="btn btn-primary" onclick="submitAssignBDToLead()">Assign</button>':'')+'</div></div>';
-  render();
-};
-
-window.submitAssignBDToLead=function(){
-  var sel=document.getElementById('assign-bd-select');
-  if(!sel||!sel.value){showToast('Select a BD Manager','warning');return;}
-  var u=STATE.user;
-  apiPost('/team-assignments',{manager_id:u.id,member_id:sel.value,assignment_type:'bd_to_bdlead'}).then(function(a){
-    STATE.teamAssignments=(STATE.teamAssignments||[]).concat([a]);
-    closeModal();showToast('BD Manager added to your team','success');render();
-  }).catch(function(e){showToast('Failed: '+e.message,'error');});
-};
 

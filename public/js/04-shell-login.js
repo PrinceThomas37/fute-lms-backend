@@ -63,11 +63,13 @@ function renderApp(){
   // RA Lead + Admin: Assign Leads + Insights (RA team view)
   if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(2,0,{id:"assign",lbl:"Assign Leads",ic:"leads"});
   if(userHasAnyRole(u,'ra_lead','admin'))navItems.splice(navItems.length-1,0,{id:"insights",lbl:"Insights",ic:"dashboard"});
-  // BD Lead (not admin): Team Insights + My Insights
-  if(userHasRole(u,'bd_lead')&&!userHasRole(u,'admin')){
-    navItems.splice(navItems.length-1,0,{id:"bdleadinsights",lbl:"Team Insights",ic:"dashboard"});
-    navItems.splice(navItems.length-1,0,{id:"bdinsights",lbl:"My Insights",ic:"dashboard"});
-  }
+  // Team Insights: data-driven, not role-based — anyone (not admin, who already
+  // sees everything) with at least one direct BD/BD Lead report on the
+  // reporting hierarchy, matching the flexible "any user can lead any team"
+  // model rather than hard-coding the bd_lead title.
+  var leadsBDTeam=!userHasRole(u,'admin')&&getTeam(u).some(function(x){return userHasAnyRole(x,'bd','bd_lead');});
+  if(leadsBDTeam)navItems.splice(navItems.length-1,0,{id:"bdleadinsights",lbl:"Team Insights",ic:"dashboard"});
+  if(userHasRole(u,'bd_lead')&&!userHasRole(u,'admin'))navItems.splice(navItems.length-1,0,{id:"bdinsights",lbl:"My Insights",ic:"dashboard"});
   // BD Manager (not bd_lead/admin): own performance Insights
   if(userHasRole(u,'bd')&&!userHasAnyRole(u,'bd_lead','admin'))navItems.splice(navItems.length-1,0,{id:"bdinsights",lbl:"My Insights",ic:"dashboard"});
 
