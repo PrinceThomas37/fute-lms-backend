@@ -120,6 +120,16 @@ Ordered by "cheapest to do now vs. most painful to retrofit":
      **Still open:** actual per-role *permission* differences (today the new
      roles are hierarchy/reporting-only, no new capabilities); a full
      configurable-permissions system remains future work.
+   - **Team naming + drag-and-drop Team View** (migration `028`, `users.team_name`):
+     built as **PR #116 — open, not yet merged**, awaiting the owner's go-ahead.
+   - **"Team" is still inconsistent across the UI** (the owner's own diagnosis: no
+     visible structure, Dashboard "Your Team" shows the whole org). Root cause found
+     and a phased fix planned but **not started** — see `docs/CONTEXT_WINDOW.md`
+     ("Session 5" section) for the full writeup: three parallel team concepts in the
+     code today (a dead `bdm` demo-data field still driving the Dashboard bug,
+     the older `team_assignments` table, and `users.manager_id` — the one to
+     standardize on), plus scoping gaps in `GET /users`, `GET /team-assignments`,
+     and `/recruiting-dashboard`. Next session picks up there.
 3. **App-tracked candidate email** (not just `mailto:`): route candidate emails through
    the sending subsystem we already have → open/reply tracking = a real selling point,
    no new infra.

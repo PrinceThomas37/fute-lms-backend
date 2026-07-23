@@ -1,4 +1,4 @@
-# FUTE LMS Backend — Context Window (Session 4)
+# FUTE LMS Backend — Context Window (Session 5)
 
 > **Read `CLAUDE.md` at the repo root first** — it holds the durable, must-carry
 > context: who the owner is (a product owner who doesn't read code or use git — I
@@ -7,12 +7,95 @@
 > That file also tracks per-feature status (multi-tenancy slices, email-tracking
 > slices, interview auto-meeting) — keep it current.
 
-**Updated**: 2026-07-22 · **Repo**: PrinceThomas37/fute-lms-backend · **Branch**: main
-**Dev branch this session**: `claude/context-window-resume-m04j2e`.
+**Updated**: 2026-07-23 · **Repo**: PrinceThomas37/fute-lms-backend · **Branch**: main
+**Dev branch**: `claude/context-window-resume-m04j2e` (still open — see Session 5 below
+for its current PR status).
 **Supabase project**: `teiqievahzhllojvgsku` · **Deploy**: Render
 (fute-lms-backend.onrender.com, auto-deploys from `main` — merging IS the release).
 
-## Session 4 — this session
+## Session 5 — planning only, picks up next session
+
+**Nothing was implemented this session** — the owner asked to define "team" properly and
+fix the dashboard's lack of structure, then explicitly asked to stop and save context
+before continuing, so this is a research + plan handoff only. **Do not re-derive the
+research below from scratch — read it, then start straight at "First step of execution."**
+
+**Where PR #116 stands:** Session 4's last piece (drag-and-drop Team View + team names +
+assign-manager-at-creation) is sitting in **draft PR #116**
+(`claude/context-window-resume-m04j2e` → `main`), tested, screenshotted, **not yet
+merged** — the owner asked about it, then pivoted to this planning conversation before
+saying yes/no on the merge. Check PR #116's state at the start of next session; if still
+open, ask the owner whether to merge it before or alongside whatever comes out of this
+plan (Phase 0 below touches some of the same files, so merging #116 first is probably
+cleaner).
+
+**Full plan:** `/root/.claude/plans/okay-lets-define-team-dreamy-stearns.md` (this was
+written inside a Claude Code plan-mode session and lives outside the repo — if it's not
+readable next session, the summary below is a faithful condensation of it).
+
+### The ask
+The owner is planning a Slack/Teams-style layer on teams **later**: chat, document
+sharing, individual + team meeting scheduling. Explicitly not this plan. What they want
+**now**: a clean, single definition of "team" (the hierarchy already built this session,
+`users.manager_id`), fix the fact that the UI shows no structure today, and get team
+leads a scoped view of their own team's work on their own dashboard — because the
+chat/docs/meetings layer will hang off of "team" later, so it needs to mean one
+consistent thing now, not three.
+
+### What research found (confirmed by reading the code, not guessed)
+**Three parallel "team" concepts exist right now:**
+1. **A live bug**: the Dashboard's "Your Team" widget (`public/js/05-page-dashboard.js:52`,
+   `getTeam()` in `public/js/03-core-render.js:158-162`) keys off a legacy `bdm` field
+   that only ever existed in demo seed data (`01-seed-demo.js`) — real users always have
+   `bdm: null` (`normaliseUser()`, `22-api.js:37`), so in production `getTeam()` always
+   falls through to "every other user in the org." **This is almost certainly what the
+   owner is seeing as "clustered all, no structure, BD Lead sees everyone."**
+2. **`team_assignments` table** (older, role-pair-specific: `ra_to_bd`/`bd_to_bdlead`) —
+   still live, drives `renderBDLeadInsights()` (`16-insights.js:477-576`) and an old "Team
+   Assignment" admin card. `ra_to_bd` is confirmed orphaned (no nav path reaches its page
+   anymore); `bd_to_bdlead` is the one live consumer.
+3. **`users.manager_id`** (this session's build) — the intended system going forward:
+   flexible, any user under any user, drives the new Reporting Hierarchy card + Team View
+   + `/reports/recruiting`'s scoping via `reportingChainIds()` (`bd_recruiter_routes.js:79-92`).
+
+**Other confirmed gaps:** `GET /users` and `GET /team-assignments`
+(`routes/auth.js:53-60, 290-298`) have zero org-scoping (`withOrg` never wired in — same
+bug class fixed everywhere else this session, missed in this file); `GET /users` is also
+role-ungated and fetched for every user regardless of role; `/recruiting-dashboard`
+(`bd_recruiter_routes.js:1503-1619`, the main dashboard's cards) still uses the old binary
+recruiter-vs-BDM split instead of `reportingChainIds()` like `/reports/recruiting` already
+does; and `isBDM()` (`bd_recruiter_routes.js:48`) is missing the `associate_director`/
+`director` roles added this session, so those roles currently 403 on `/reports/recruiting`.
+
+### Recommended approach (full detail + file:line specifics in the plan file)
+Phased, each phase reuses `reportingChainIds()` — no new hierarchy mechanism:
+- **Phase 0** (foundation): widen `isBDM()`; org-scope `GET /users` + `GET /team-assignments`.
+- **Phase 1**: fix `getTeam()` to use `managerId` (direct reports) instead of dead `bdm`.
+- **Phase 2**: hierarchy-scope `/recruiting-dashboard` like `/reports/recruiting` already is.
+- **Phase 3**: a new "My Team" page for anyone with ≥1 direct report (data-driven gate, not
+  role-based) — roster subtree (extract `renderTeamTree()`'s node logic into a shared,
+  reusable helper) + a real work snapshot from the now-scoped dashboard/reports endpoint.
+  One write action only: let a manager rename their own team (`team_name` self-serve);
+  reparenting stays admin-only.
+- **Phase 4**: trim `manager_id`/`team_name`/the `manager` join out of `GET /users` for
+  rows outside the caller's own chain (the ~65 other `STATE.users` call sites read
+  different fields and are untouched).
+- **Phase 5**: `team_assignments` migration — **explicitly deferred**, not part of this
+  batch (data reconciliation + a `renderBDLeadInsights()` rewrite, not a blocker for 0-4).
+
+Suggested grouping: **PR A** = Phase 0+1 (very low risk, ship first). **PR B** = Phase 2
+(depends on A). **PR C** = Phase 3+4 (depends on A+B, the one real new surface area).
+Phase 5 stays backlog until asked for.
+
+### First step of execution (next session)
+1. Check PR #116's status (see above) and resolve it with the owner first.
+2. Confirm the plan still matches what the owner wants (things may have shifted between
+   sessions) — don't just execute silently if anything reads as stale.
+3. Start PR A (Phase 0 + Phase 1) per the grouping above.
+
+---
+
+## Session 4 (for history)
 
 **Part 1** picked up 3 items the owner chose off Session 3's "open next candidates"
 list — shipped as PR #114, merged and live. **Part 2** (below) is a 14-item punch
