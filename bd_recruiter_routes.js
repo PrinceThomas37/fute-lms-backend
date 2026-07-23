@@ -45,7 +45,7 @@ module.exports = function (app, deps) {
   // Stage a recruiter may NOT move INTO without BD Manager approval.
   const BDM_GATED_STAGE = 'Submitted to Client';
 
-  function isBDM(req) { return hasRole(req, 'admin', 'bd', 'bd_lead'); }
+  function isBDM(req) { return hasRole(req, 'admin', 'bd', 'bd_lead', 'associate_director', 'director'); }
   function isRecruiter(req) { return hasRole(req, 'recruiter'); }
 
   // human-readable id helper (LD- / JOB- / CN-) via the SQL function next_id()
@@ -76,20 +76,8 @@ module.exports = function (app, deps) {
   // transitive report. A user nobody reports to just gets [self]. Used to
   // scope reports: a BD sees their own numbers, a BD Lead sees their whole
   // team's, up the chain to Director — without hard-coding role pairs.
-  async function reportingChainIds(userId, orgId) {
-    let q = supabase.from('users').select('id,manager_id').is('deleted_at', null);
-    if (orgId) q = q.eq('org_id', orgId);
-    const { data } = await q;
-    const childrenOf = {};
-    (data || []).forEach(u => { if (u.manager_id) (childrenOf[u.manager_id] = childrenOf[u.manager_id] || []).push(u.id); });
-    const chain = new Set([userId]);
-    const queue = [userId];
-    while (queue.length) {
-      const next = childrenOf[queue.shift()] || [];
-      next.forEach(id => { if (!chain.has(id)) { chain.add(id); queue.push(id); } });
-    }
-    return [...chain];
-  }
+  // Shared with routes/auth.js via ./hierarchy so there's one implementation.
+  const { reportingChainIds } = require('./hierarchy')(supabase);
 
   const JOB_ORDER_SELECT =
     '*, company:companies(id,name,industry,location), ' +
@@ -1498,12 +1486,18 @@ ${String(j.job_description).slice(0, 12000)}`;
   // ROLE-AWARE RECRUITING DASHBOARD
   // ==========================================================================
 
-  // One payload, scoped by role: a recruiter sees THEIR jobs/submissions;
-  // BDM/admin see the whole desk. Powers the dashboard recruiting cards.
+  // One payload, scoped by hierarchy: a recruiter sees THEIR jobs/submissions;
+  // a non-admin manager (BD/BD Lead/AD/Director) sees themselves plus everyone
+  // under them on the reporting chain (users.manager_id); admin sees the whole
+  // desk. Mirrors /reports/recruiting so the dashboard cards and the Reports
+  // page agree. Job orders stay org-wide (shared desk inventory, not "owned"
+  // by one manager) — only submissions are chain-scoped, same as the report.
   app.get('/recruiting-dashboard', auth, async (req, res) => {
     try {
       const recruiterView = isRecruiter(req) && !isBDM(req);
+      const managerScoped = isBDM(req) && !hasRole(req, 'admin');
       const uid = req.user.id;
+      const chain = managerScoped ? await reportingChainIds(uid, orgIdFor(req)) : null;
 
       let jobIds = null;
       let assignedAtByJob = {};
@@ -1515,7 +1509,7 @@ ${String(j.job_description).slice(0, 12000)}`;
           if (!prev || (a.assigned_at && a.assigned_at > prev)) assignedAtByJob[a.job_order_id] = a.assigned_at;
         });
         jobIds = Object.keys(assignedAtByJob);
-        if (!jobIds.length) return res.json({ role: 'recruiter', jobs: { total: 0, active: 0 }, jobs_assigned: { week: 0, month: 0, quarter: 0, total: 0 }, top_jobs: [], by_stage: {}, submissions_week: 0, submissions_month: 0, upcoming_interviews: [], awaiting_approval: 0 });
+        if (!jobIds.length) return res.json({ role: 'recruiter', scope: 'own', team_size: null, jobs: { total: 0, active: 0 }, jobs_assigned: { week: 0, month: 0, quarter: 0, total: 0 }, top_jobs: [], by_stage: {}, submissions_week: 0, submissions_month: 0, upcoming_interviews: [], awaiting_approval: 0 });
       }
 
       let jq = withOrg(supabase.from('job_orders')
@@ -1528,6 +1522,7 @@ ${String(j.job_description).slice(0, 12000)}`;
         .select('id,stage,sub_stage,created_at,submitted_at,stage_updated_at,rejection_reason,interview_at,interview_location,job_order_id,recruiter_id,candidate:candidates(id,full_name)')
         .is('deleted_at', null), req);
       if (recruiterView) sq = sq.eq('recruiter_id', uid);
+      else if (managerScoped) sq = sq.in('recruiter_id', chain);
       const { data: subs } = await sq;
 
       const now = new Date();
@@ -1604,6 +1599,11 @@ ${String(j.job_description).slice(0, 12000)}`;
 
       res.json({
         role: recruiterView ? 'recruiter' : 'manager',
+        // scope tells the UI how the submission numbers below are bounded:
+        // 'own' = just this recruiter's, 'team' = this manager's reporting
+        // chain, 'org' = the whole desk (admin). team_size = chain headcount.
+        scope: recruiterView ? 'own' : (managerScoped ? 'team' : 'org'),
+        team_size: managerScoped ? chain.length : null,
         jobs: {
           total: (jobs || []).length,
           active: (jobs || []).filter(j => j.status === 'Active').length

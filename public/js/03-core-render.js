@@ -155,10 +155,66 @@ function getMyLeads(user){
     return true;
   });
 }
+// A user's team = their direct reports on the flexible reporting hierarchy
+// (users.manager_id, migration 026). This is the single source of truth for
+// "team" across the app — the old role-based `bdm` branches keyed off a field
+// that only ever existed in seed/demo data (normaliseUser() hardcodes bdm:null
+// for real users), so in production every non-recruiter silently fell through
+// to "show the whole org". Direct reports only here (the glanceable dashboard
+// card); the full transitive subtree lives on the My Team page.
 function getTeam(user){
-  if(user.role==="ra")return STATE.users.filter(function(u){return u.id===user.bdm});
-  if(user.role==="bd")return STATE.users.filter(function(u){return u.bdm===user.id});
-  return STATE.users.filter(function(u){return u.id!==user.id});
+  if(!user)return[];
+  return STATE.users.filter(function(u){return u.id!==user.id&&u.managerId===user.id;});
+}
+// Direct reports of a user id (one level down the manager_id tree).
+function directReportsOf(userId){
+  return (STATE.users||[]).filter(function(u){return u.managerId===userId;});
+}
+// Full subtree under a user id (every direct + transitive report, excluding the
+// root). Cycle-guarded. This is the client mirror of reportingChainIds() on the
+// backend — the single client-side definition of "everyone under me".
+function reportingSubtree(userId){
+  var out=[];var seen={};seen[userId]=true;var queue=[userId];
+  while(queue.length){
+    var pid=queue.shift();
+    directReportsOf(pid).forEach(function(u){
+      if(seen[u.id])return;seen[u.id]=true;out.push(u);queue.push(u.id);
+    });
+  }
+  return out;
+}
+// Recursive org-chart node. Renders a user and, nested + indented, their reports.
+// opts.click: 'viewas' → click a node to view that user's dashboard (admin/BD);
+//             'admin'  → click to open the admin user-detail page;
+//             null/other → not clickable.
+// opts.rootId is the top of the tree (kept out of cycle re-entry). Depth caps at
+// 6 to guard against any accidental loop in the data.
+function renderOrgSubtree(userId,opts,depth,seen){
+  opts=opts||{};depth=depth||0;seen=seen||{};
+  var user=(STATE.users||[]).find(function(x){return x.id===userId;});
+  if(!user||seen[userId]||depth>6)return'';
+  seen[userId]=true;
+  var reports=directReportsOf(userId).slice().sort(function(a,b){return (a.name||'').localeCompare(b.name||'');});
+  var subCount=reportingSubtree(userId).length;
+  var click='',cursor='default',hover='';
+  if(opts.click==='viewas'){click=' onclick="event.stopPropagation();viewAs(\''+userId+'\')"';cursor='pointer';}
+  else if(opts.click==='admin'){click=' onclick="event.stopPropagation();STATE.adminSelectedUser=\''+userId+'\';loadUserEmails(\''+userId+'\');render()"';cursor='pointer';}
+  if(cursor==='pointer')hover=' onmouseenter="this.style.background=\'var(--accent-l)\'" onmouseleave="this.style.background=\'transparent\'"';
+  var meDot=(STATE.user&&STATE.user.id===userId)?'<span style="font-size:9px;font-weight:700;color:var(--accent);background:var(--accent-l);padding:1px 6px;border-radius:6px;margin-left:6px">YOU</span>':'';
+  var subChip=reports.length?'<span style="font-size:10.5px;color:var(--green);background:var(--green-l);padding:2px 7px;border-radius:8px;white-space:nowrap">'+subCount+' in team</span>':'';
+  var node='<div'+click+hover+' style="display:flex;align-items:center;gap:11px;padding:9px 12px;border-radius:9px;cursor:'+cursor+';transition:background .1s">'+
+      av(user,'32')+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+htmlEsc(user.name||'')+meDot+'</div>'+
+        '<div style="font-size:11.5px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+htmlEsc(roleLabel(user.role))+(user.empId?' · '+htmlEsc(user.empId):'')+'</div>'+
+      '</div>'+
+      subChip+
+      (opts.click&&opts.click!=='none'?'<span style="color:var(--text3);font-size:14px">›</span>':'')+
+    '</div>';
+  if(opts.flat)return '<div>'+node+'</div>';
+  var childHtml=reports.map(function(r){return renderOrgSubtree(r.id,opts,depth+1,seen);}).join('');
+  var childWrap=reports.length?'<div style="margin-left:19px;padding-left:12px;border-left:2px solid var(--border)">'+childHtml+'</div>':'';
+  return '<div>'+node+childWrap+'</div>';
 }
 function filterLeads(leads){
   var f=STATE.leadsFilter;
