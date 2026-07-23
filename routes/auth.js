@@ -48,7 +48,7 @@ router.post('/auth/change-password', auth, async (req, res) => {
 // ══════════════════════════════════════════════════════════════
 // USERS
 // ══════════════════════════════════════════════════════════════
-const USER_COLS = 'id,name,email,role,roles,employee_id,designation,platform,is_active,created_at,manager_id';
+const USER_COLS = 'id,name,email,role,roles,employee_id,designation,platform,is_active,created_at,manager_id,team_name';
 
 router.get('/users', auth, async (req, res) => {
   try {
@@ -98,7 +98,7 @@ router.get('/users/me', auth, async (req, res) => {
 router.post('/users', auth, async (req, res) => {
   try {
     if (!hasRole(req, 'admin')) return res.status(403).json({ error: 'Admin only' });
-    const { name, email, password, roles, role, employee_id, designation, platform } = req.body;
+    const { name, email, password, roles, role, employee_id, designation, platform, manager_id } = req.body;
     if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
     const userRoles = roles || (role ? [role] : ['ra']);
     const hash = await bcrypt.hash(password || 'Fute@2024', 10);
@@ -108,8 +108,9 @@ router.post('/users', auth, async (req, res) => {
       name, email: email.toLowerCase().trim(), password_hash: hash,
       role: userRoles[0] || 'ra', roles: userRoles,
       employee_id, designation, platform: platform || 'Gmail',
+      manager_id: manager_id || null,
       ...(orgId ? { org_id: orgId } : {})
-    }).select(USER_COLS).single();
+    }).select(USER_COLS + ',manager:users!manager_id(id,name)').single();
     if (error) throw error;
     res.status(201).json({ ...data, roles: data.roles || userRoles });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -119,7 +120,7 @@ router.put('/users/:id', auth, async (req, res) => {
   try {
     const { id } = req.params;
     if (!hasRole(req, 'admin') && req.user.id !== id) return res.status(403).json({ error: 'Forbidden' });
-    const { name, email, roles, role, employee_id, designation, platform } = req.body;
+    const { name, email, roles, role, employee_id, designation, platform, team_name } = req.body;
     const updates = { updated_at: new Date() };
     if (name) updates.name = name;
     if (email) updates.email = email.toLowerCase().trim();
@@ -128,7 +129,9 @@ router.put('/users/:id', auth, async (req, res) => {
     if (employee_id) updates.employee_id = employee_id;
     if (designation !== undefined) updates.designation = designation;
     if (platform) updates.platform = platform;
-    const { data, error } = await supabase.from('users').update(updates).eq('id', id).select(USER_COLS).single();
+    if (team_name !== undefined && hasRole(req, 'admin')) updates.team_name = team_name || null;
+    const { data, error } = await supabase.from('users').update(updates).eq('id', id)
+      .select(USER_COLS + ',manager:users!manager_id(id,name)').single();
     if (error) throw error;
     res.json({ ...data, roles: data.roles || (data.role ? [data.role] : []) });
   } catch (err) { res.status(500).json({ error: err.message }); }
